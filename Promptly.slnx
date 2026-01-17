@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="Promptly.Cli/Promptly.Cli.csproj" />
+  <Project Path="Promptly.Infrastructure/Promptly.Infrastructure.csproj" />
+  <Project Path="Promptly.Sdk.DotNet/Promptly.Sdk.DotNet.csproj" />
+  <Project Path="Promptly.Server/Promptly.Server.csproj" />
+  <Project Path="Promptly.Worker/Promptly.Worker.pyproj" Type="888888a0-9f3d-457c-b088-3a5042f75d52" Id="bd6dc0bc-cfb3-4139-8970-2822424cefe3">
+    <Build Project="false" />
+  </Project>
+</Solution>

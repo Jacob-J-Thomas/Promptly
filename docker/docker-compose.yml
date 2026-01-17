@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: promptly-postgres
+    environment:
+      POSTGRES_DB: promptly
+      POSTGRES_USER: promptly
+      POSTGRES_PASSWORD: promptly_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - promptly-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promptly"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  promptly-server:
+    build:
+      context: ..
+      dockerfile: Promptly.Server/Dockerfile
+    container_name: promptly-server
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=5000
+      - ConnectionStrings__Default=Host=postgres;Database=promptly;Username=promptly;Password=promptly_dev_password
+      - JWT__Issuer=Promptly
+      - JWT__Audience=Promptly
+      - JWT__Key=YourSuperSecretJWTKeyThatShouldBeAtLeast32CharactersLongForProduction
+      - JWT__ExpiryMinutes=60
+      - DATA_PROTECTION_PATH=/app/dataprotection-keys
+      - PROMPTLY_EVAL_BASE_URL=http://promptly-eval:8000
+    ports:
+      - "5000:5000"
+    volumes:
+      - dataprotection-keys:/app/dataprotection-keys
+    depends_on:
+      postgres:
+        condition: service_healthy
+      promptly-eval:
+        condition: service_started
+    networks:
+      - promptly-network
+    restart: unless-stopped
+
+  promptly-eval:
+    build:
+      context: ..
+      dockerfile: Promptly.Worker/Dockerfile
+    container_name: promptly-eval
+    environment:
+      - PROMPTLY_LLM_PROVIDER=${PROMPTLY_LLM_PROVIDER:-azureopenai}
+      - PROMPTLY_LLM_API_KEY=${PROMPTLY_LLM_API_KEY:-}
+      - PROMPTLY_LLM_AZURE_ENDPOINT=${PROMPTLY_LLM_AZURE_ENDPOINT:-}
+      - PROMPTLY_LLM_API_VERSION=${PROMPTLY_LLM_API_VERSION:-2024-08-01-preview}
+      - PROMPTLY_LLM_MODEL_DEFAULT=${PROMPTLY_LLM_MODEL_DEFAULT:-gpt-4o}
+    ports:
+      - "8000:8000"
+    networks:
+      - promptly-network
+    restart: unless-stopped
+
+  promptly-web:
+    build:
+      context: ../Promptly.Web/src/web
+      dockerfile: Dockerfile.dev
+    container_name: promptly-web
+    environment:
+      - VITE_API_BASE_URL=http://localhost:5000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../Promptly.Web/src/web:/app
+      - /app/node_modules
+    networks:
+      - promptly-network
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+networks:
+  promptly-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  dataprotection-keys:

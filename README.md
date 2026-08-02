@@ -4,6 +4,37 @@
 
 Promptly is a comprehensive testing platform for LLM applications. It captures LLM interactions through HTTP endpoints, evaluates responses against expectations using both deterministic rules and LLM judges, and provides detailed test results with full trace visibility.
 
+## Project Status
+
+Promptly is an experimental prototype, not a polished product or actively maintained service. It is public because the project captures two useful lines of work:
+
+1. designing a black-box evaluation harness for LLM-powered applications; and
+2. testing an AI-assisted delivery model where tickets, requirements, acceptance criteria, review notes, and targeted QA became the primary interface between a human product owner and an LLM coding agent.
+
+Read the repository as a product/engineering experiment. The implementation explores a real full-stack shape, but the most important learning was how much structure an LLM agent needs before it can reliably implement a non-trivial app from ticket-level direction.
+
+## Development Approach
+
+Most implementation work was driven through an LLM coding agent. My role was closer to product manager, architect, and reviewer than line-by-line implementer:
+
+- break the application into tickets and incremental slices;
+- write requirements and acceptance criteria for each slice;
+- review generated code and UI behavior against the intended workflow;
+- redirect the agent when architecture, data model, or UX decisions drifted;
+- use browser checks, API checks, and database inspection to validate behavior;
+- track where AI-assisted development accelerated delivery and where it created integration, coherence, or quality-control risk.
+
+The experiment also used a multi-agent review loop rather than a single prompt-to-code pass:
+
+- a Codex implementer agent worked GitHub issues into application changes;
+- a senior agent reviewer inspected the resulting code and architecture;
+- a Playwright MCP QA agent exercised code deployed to the real website and reported product/behavior defects;
+- a project-manager agent translated QA feedback into organized GitHub issues and sent the next batch back to the implementer.
+
+That loop was designed to run on a recurring schedule, pause for my approval before merging, and route either approval or corrective feedback back into the next implementation cycle.
+
+That process is part of what Promptly is meant to demonstrate. The repository is useful both as an LLM evaluation prototype and as evidence for how ticket-driven AI-assisted software delivery behaves in practice.
+
 ## Features
 
 - **Multi-Environment Testing**: Test across development, staging, and production environments

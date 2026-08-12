@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Container,
   Typography,
@@ -43,6 +43,7 @@ import { suitesApi, type TestSuite } from '../api/suites';
 import { testsApi, type TestCase } from '../api/tests';
 import { runsApi } from '../api/runs';
 import { Layout } from '../components/Layout';
+import { getApiErrorMessage } from '../api/errors';
 
 export const SuiteDetail: React.FC = () => {
   const { suiteId } = useParams<{ suiteId: string }>();
@@ -60,28 +61,32 @@ export const SuiteDetail: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedTest, setSelectedTest] = useState<TestCase | null>(null);
 
-  useEffect(() => {
-    if (suiteId) {
-      loadSuiteData();
+  const loadSuiteData = useCallback(async () => {
+    if (!suiteId) {
+      setError('Suite ID is required');
+      setLoading(false);
+      return;
     }
-  }, [suiteId]);
 
-  const loadSuiteData = async () => {
     try {
       setLoading(true);
       const [suiteData, testsData] = await Promise.all([
-        suitesApi.getById(suiteId!),
-        testsApi.getBySuite(suiteId!)
+        suitesApi.getById(suiteId),
+        testsApi.getBySuite(suiteId)
       ]);
       setSuite(suiteData);
       setTests(testsData);
       setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load suite data');
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'Failed to load suite data'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [suiteId]);
+
+  useEffect(() => {
+    void loadSuiteData();
+  }, [loadSuiteData]);
 
   const handleRunSuite = () => {
     setRunDialogOpen(true);
@@ -98,10 +103,7 @@ export const SuiteDetail: React.FC = () => {
   };
 
   const handleEditTest = () => {
-    if (selectedTest) {
-      // TODO: Navigate to test edit page
-      console.log('Edit test:', selectedTest.id);
-    }
+    // Test editing is tracked separately; keep the unavailable action non-destructive.
     handleCloseMenu();
   };
 
@@ -110,8 +112,8 @@ export const SuiteDetail: React.FC = () => {
       try {
         await testsApi.delete(selectedTest.id);
         await loadSuiteData();
-      } catch (err: any) {
-        setError(err.response?.data?.message || 'Failed to delete test');
+      } catch (deleteError: unknown) {
+        setError(getApiErrorMessage(deleteError, 'Failed to delete test'));
       }
     }
     handleCloseMenu();
@@ -127,8 +129,8 @@ export const SuiteDetail: React.FC = () => {
       a.download = `${suite?.name || 'tests'}.yaml`;
       a.click();
       window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to export tests');
+    } catch (exportError: unknown) {
+      setError(getApiErrorMessage(exportError, 'Failed to export tests'));
     }
   };
 
@@ -187,13 +189,13 @@ export const SuiteDetail: React.FC = () => {
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <Grid container spacing={3}>
-                <Grid item xs={12} sm={4}>
+                <Grid size={{ xs: 12, sm: 4 }}>
                   <Typography variant="subtitle2" color="text.secondary">
                     Total Tests
                   </Typography>
                   <Typography variant="h5">{tests.length}</Typography>
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid size={{ xs: 12, sm: 4 }}>
                   <Typography variant="subtitle2" color="text.secondary">
                     Created
                   </Typography>
@@ -201,7 +203,7 @@ export const SuiteDetail: React.FC = () => {
                     {suite?.createdAt ? new Date(suite.createdAt).toLocaleDateString() : '-'}
                   </Typography>
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid size={{ xs: 12, sm: 4 }}>
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <Button
                       size="small"
@@ -310,9 +312,9 @@ export const SuiteDetail: React.FC = () => {
             open={Boolean(anchorEl)}
             onClose={handleCloseMenu}
           >
-            <MenuItem onClick={handleEditTest}>
+            <MenuItem onClick={handleEditTest} disabled>
               <Edit fontSize="small" sx={{ mr: 1 }} />
-              Edit
+              Edit (coming soon)
             </MenuItem>
             <MenuItem onClick={handleDeleteTest}>
               <Delete fontSize="small" sx={{ mr: 1 }} />
@@ -355,13 +357,9 @@ interface RunConfigDialogProps {
 }
 
 const RunConfigDialog: React.FC<RunConfigDialogProps> = ({ open, onClose, suiteId, onRunStarted }) => {
-  const [environments, setEnvironments] = useState<any[]>([]);
-  const [endpoints, setEndpoints] = useState<any[]>([]);
-  const [mappings, setMappings] = useState<any[]>([]);
-
-  const [selectedEnv, setSelectedEnv] = useState('');
-  const [selectedEndpoint, setSelectedEndpoint] = useState('');
-  const [selectedMapping, setSelectedMapping] = useState('');
+  const selectedEnv = '';
+  const selectedEndpoint = '';
+  const selectedMapping = '';
   const [gitCommit, setGitCommit] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -434,10 +432,20 @@ const CreateTestDialog: React.FC<CreateTestDialogProps> = ({ open, onClose, suit
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleClose = () => {
+    setExternalId('');
+    setName('');
+    setDescription('');
+    setError('');
+    onClose();
+  };
 
   const handleCreate = async () => {
     try {
       setLoading(true);
+      setError('');
       await testsApi.create(suiteId, {
         externalId,
         name,
@@ -446,22 +454,20 @@ const CreateTestDialog: React.FC<CreateTestDialogProps> = ({ open, onClose, suit
         expectationsJson: JSON.stringify([]),
       });
       onTestCreated();
-      onClose();
-      setExternalId('');
-      setName('');
-      setDescription('');
-    } catch (err) {
-      console.error('Failed to create test:', err);
+      handleClose();
+    } catch (createError: unknown) {
+      setError(getApiErrorMessage(createError, 'Failed to create test'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle>Create Test Case</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {error && <Alert severity="error">{error}</Alert>}
           <TextField
             label="External ID"
             value={externalId}
@@ -487,7 +493,7 @@ const CreateTestDialog: React.FC<CreateTestDialogProps> = ({ open, onClose, suit
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleClose}>Cancel</Button>
         <Button
           variant="contained"
           onClick={handleCreate}
@@ -533,8 +539,8 @@ const ImportTestsDialog: React.FC<ImportTestsDialogProps> = ({ open, onClose, su
         setFile(null);
         setResult('');
       }, 1500);
-    } catch (err: any) {
-      setResult(err.response?.data?.message || 'Failed to import tests');
+    } catch (importError: unknown) {
+      setResult(getApiErrorMessage(importError, 'Failed to import tests'));
     } finally {
       setLoading(false);
     }

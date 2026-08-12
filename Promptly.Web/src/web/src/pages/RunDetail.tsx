@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Container,
   Typography,
@@ -31,6 +31,63 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { runsApi, type TestRun, type TestRunResult } from '../api/runs';
 import { Layout } from '../components/Layout';
+import { getApiErrorMessage } from '../api/errors';
+
+interface RunSummary {
+  passRate: number;
+  passed: number;
+  failed: number;
+  errors: number;
+  avgLatencyMs: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
+const isFiniteNumber = (value: unknown): value is number => (
+  typeof value === 'number' && Number.isFinite(value)
+);
+
+const parseSummary = (summaryJson?: string): RunSummary | null => {
+  if (!summaryJson) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(summaryJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const summary = parsed as Record<string, unknown>;
+    if (!isFiniteNumber(summary.passRate)
+      || !isFiniteNumber(summary.passed)
+      || !isFiniteNumber(summary.failed)
+      || !isFiniteNumber(summary.errors)
+      || !isFiniteNumber(summary.avgLatencyMs)
+      || !isFiniteNumber(summary.totalTokens)
+      || !isFiniteNumber(summary.totalCost)) {
+      return null;
+    }
+
+    return {
+      passRate: summary.passRate,
+      passed: summary.passed,
+      failed: summary.failed,
+      errors: summary.errors,
+      avgLatencyMs: summary.avgLatencyMs,
+      totalTokens: summary.totalTokens,
+      totalCost: summary.totalCost,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const formatJsonForDisplay = (value: string): string => {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+};
 
 export const RunDetail: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
@@ -42,27 +99,19 @@ export const RunDetail: React.FC = () => {
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  useEffect(() => {
-    if (runId) {
-      loadRunData();
+  const loadRunData = useCallback(async () => {
+    if (!runId) {
+      setError('Run ID is required');
+      setLoading(false);
+      setAutoRefresh(false);
+      return;
     }
-  }, [runId]);
 
-  useEffect(() => {
-    if (autoRefresh && run && (run.status === 'Queued' || run.status === 'Running')) {
-      const interval = setInterval(() => {
-        loadRunData();
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [autoRefresh, run]);
-
-  const loadRunData = async () => {
     try {
       setLoading(true);
       const [runData, resultsData] = await Promise.all([
-        runsApi.getById(runId!),
-        runsApi.getResults(runId!),
+        runsApi.getById(runId),
+        runsApi.getResults(runId),
       ]);
       setRun(runData);
       setResults(resultsData);
@@ -72,13 +121,26 @@ export const RunDetail: React.FC = () => {
       if (runData.status === 'Completed' || runData.status === 'Failed') {
         setAutoRefresh(false);
       }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load run data');
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'Failed to load run data'));
       setAutoRefresh(false);
     } finally {
       setLoading(false);
     }
-  };
+  }, [runId]);
+
+  useEffect(() => {
+    void loadRunData();
+  }, [loadRunData]);
+
+  useEffect(() => {
+    if (autoRefresh && run && (run.status === 'Queued' || run.status === 'Running')) {
+      const interval = setInterval(() => {
+        void loadRunData();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [autoRefresh, loadRunData, run]);
 
   const toggleExpand = (resultId: string) => {
     const newExpanded = new Set(expandedResults);
@@ -99,7 +161,7 @@ export const RunDetail: React.FC = () => {
       case 'Error':
         return <Warning color="warning" />;
       default:
-        return null;
+        return undefined;
     }
   };
 
@@ -115,15 +177,6 @@ export const RunDetail: React.FC = () => {
         return 'warning';
       default:
         return 'default';
-    }
-  };
-
-  const parseSummary = (summaryJson?: string) => {
-    if (!summaryJson) return null;
-    try {
-      return JSON.parse(summaryJson);
-    } catch {
-      return null;
     }
   };
 
@@ -144,7 +197,7 @@ export const RunDetail: React.FC = () => {
       <Layout>
         <Container maxWidth="lg">
           <Alert severity="error" sx={{ mt: 4 }}>
-            Test run not found
+            {error || 'Test run not found'}
           </Alert>
         </Container>
       </Layout>
@@ -215,10 +268,10 @@ export const RunDetail: React.FC = () => {
                     <Typography>{new Date(run.completedAt).toLocaleString()}</Typography>
                   </Box>
                 )}
-                {run.triggeredBy && (
+                {run.createdByUserId && (
                   <Box>
                     <Typography color="text.secondary" variant="body2">Triggered By</Typography>
-                    <Typography>{run.triggeredBy}</Typography>
+                    <Typography>{run.createdByUserId}</Typography>
                   </Box>
                 )}
               </Box>
@@ -323,7 +376,7 @@ export const RunDetail: React.FC = () => {
                           </TableCell>
                           <TableCell align="center">
                             <Typography variant="body2">
-                              {result.passedExpectations} / {result.passedExpectations + result.failedExpectations}
+                              {result.passedExpectations} / {result.passedExpectations + result.failedExpectations + result.errorExpectations}
                             </Typography>
                           </TableCell>
                           <TableCell align="right">
@@ -339,14 +392,9 @@ export const RunDetail: React.FC = () => {
                           <TableCell colSpan={5} sx={{ py: 0, border: 0 }}>
                             <Collapse in={expandedResults.has(result.id)} timeout="auto" unmountOnExit>
                               <Box sx={{ p: 2, bgcolor: 'background.default' }}>
-                                {result.failureReason && (
+                                {result.failureReasons.length > 0 && (
                                   <Alert severity="error" sx={{ mb: 2 }}>
-                                    {result.failureReason}
-                                  </Alert>
-                                )}
-                                {result.errorMessage && (
-                                  <Alert severity="warning" sx={{ mb: 2 }}>
-                                    {result.errorMessage}
+                                    {result.failureReasons.join('\n')}
                                   </Alert>
                                 )}
                                 {result.traceJson && (
@@ -354,7 +402,7 @@ export const RunDetail: React.FC = () => {
                                     <Typography variant="subtitle2" gutterBottom>Trace</Typography>
                                     <Paper variant="outlined" sx={{ p: 2, maxHeight: 300, overflow: 'auto' }}>
                                       <pre style={{ margin: 0, fontSize: '12px' }}>
-                                        {JSON.stringify(JSON.parse(result.traceJson), null, 2)}
+                                        {formatJsonForDisplay(result.traceJson)}
                                       </pre>
                                     </Paper>
                                   </Box>

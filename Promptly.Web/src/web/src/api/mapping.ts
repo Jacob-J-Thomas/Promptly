@@ -13,7 +13,7 @@ interface MappingSpec {
 interface ProposeMappingRequest {
   sampleResponseJson: string;
   sampleRequestJson?: string;
-  hints?: string;
+  hints?: Record<string, unknown>;
 }
 
 interface ProposeMappingResponse {
@@ -28,8 +28,33 @@ interface ValidateMappingRequest {
 
 interface ValidateMappingResponse {
   success: boolean;
-  previewTrace?: any;
+  previewTrace?: CanonicalTrace | null;
   errorMessage?: string;
+}
+
+interface CanonicalTrace {
+  messages: Array<{
+    role: string;
+    content: string;
+  }>;
+  toolCalls: Array<{
+    name: string;
+    argumentsJson: string;
+  }>;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    cost?: number;
+    latencyMs?: number;
+  } | null;
+  retrievedDocs: Array<{
+    id?: string | null;
+    title?: string | null;
+    content: string;
+    metadata?: Record<string, unknown> | null;
+  }>;
+  rawResponse?: string | null;
 }
 
 interface CreateMappingSpecRequest {
@@ -83,4 +108,4 @@ const mappingApi = {
 };
 
 export { mappingApi };
-export type { MappingSpec, ProposeMappingRequest, ProposeMappingResponse, ValidateMappingRequest, ValidateMappingResponse, CreateMappingSpecRequest, UpdateMappingSpecRequest };
+export type { CanonicalTrace, MappingSpec, ProposeMappingRequest, ProposeMappingResponse, ValidateMappingRequest, ValidateMappingResponse, CreateMappingSpecRequest, UpdateMappingSpecRequest };

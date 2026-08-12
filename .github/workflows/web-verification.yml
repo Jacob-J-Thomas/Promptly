@@ -1,0 +1,77 @@
+name: Web verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-verification:
+    name: Web verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: Promptly.Web/src/web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: Promptly.Web/src/web/.node-version
+          cache: npm
+          cache-dependency-path: Promptly.Web/src/web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint without warnings
+        run: npm run lint -- --max-warnings=0
+
+      - name: Clean web test artifacts
+        shell: pwsh
+        run: Remove-Item ../../../artifacts/test-results/web -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Run web unit tests and coverage gate
+        run: npm run test:coverage
+
+      - name: Build release bundle
+        run: npm run build
+
+      - name: Require test and coverage artifacts
+        shell: pwsh
+        run: |
+          $requiredArtifacts = @(
+            "../../../artifacts/test-results/web/junit.xml",
+            "../../../artifacts/test-results/web/coverage/cobertura-coverage.xml",
+            "../../../artifacts/test-results/web/coverage/coverage-final.json"
+          )
+          foreach ($artifact in $requiredArtifacts) {
+            if (-not (Test-Path -Path $artifact -PathType Leaf) -or (Get-Item $artifact).Length -eq 0) {
+              throw "Required verification artifact is missing or empty: $artifact"
+            }
+          }
+
+      - name: Upload test and coverage artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-test-results
+          path: artifacts/test-results/web
+          if-no-files-found: error
+          retention-days: 14

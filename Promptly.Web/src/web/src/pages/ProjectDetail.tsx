@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Container,
   Typography,
@@ -9,7 +9,6 @@ import {
   Card,
   CardContent,
   List,
-  ListItem,
   ListItemText,
   ListItemButton,
   CircularProgress,
@@ -22,6 +21,7 @@ import { projectsApi, type Project } from '../api/projects';
 import { environmentsApi, type Environment } from '../api/environments';
 import { suitesApi, type TestSuite } from '../api/suites';
 import { Layout } from '../components/Layout';
+import { getApiErrorMessage } from '../api/errors';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -47,30 +47,34 @@ export const ProjectDetail: React.FC = () => {
   const [error, setError] = useState('');
   const [tabValue, setTabValue] = useState(0);
 
-  useEffect(() => {
-    if (projectId) {
-      loadProjectData();
+  const loadProjectData = useCallback(async () => {
+    if (!projectId) {
+      setError('Project ID is required');
+      setLoading(false);
+      return;
     }
-  }, [projectId]);
 
-  const loadProjectData = async () => {
     try {
       setLoading(true);
       const [projectData, envsData, suitesData] = await Promise.all([
-        projectsApi.getById(projectId!),
-        environmentsApi.getByProject(projectId!),
-        suitesApi.getByProject(projectId!),
+        projectsApi.getById(projectId),
+        environmentsApi.getByProject(projectId),
+        suitesApi.getByProject(projectId),
       ]);
       setProject(projectData);
       setEnvironments(envsData);
       setSuites(suitesData);
       setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load project data');
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'Failed to load project data'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadProjectData();
+  }, [loadProjectData]);
 
   if (loading) {
     return (
@@ -89,7 +93,7 @@ export const ProjectDetail: React.FC = () => {
       <Layout>
         <Container maxWidth="lg">
           <Alert severity="error" sx={{ mt: 4 }}>
-            Project not found
+            {error || 'Project not found'}
           </Alert>
         </Container>
       </Layout>
@@ -128,7 +132,7 @@ export const ProjectDetail: React.FC = () => {
           )}
 
           <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-            <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)}>
+            <Tabs value={tabValue} onChange={(_event, newValue: number) => setTabValue(newValue)}>
               <Tab icon={<CloudQueue />} label="Environments" iconPosition="start" />
               <Tab icon={<Assignment />} label="Test Suites" iconPosition="start" />
             </Tabs>

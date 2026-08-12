@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Container,
   Typography,
@@ -16,12 +16,14 @@ import {
   Chip,
   CircularProgress,
   Alert,
+  type ChipProps,
 } from '@mui/material';
 import { ArrowBack, Visibility } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { runsApi, type TestRun } from '../api/runs';
 import { suitesApi, type TestSuite } from '../api/suites';
 import { Layout } from '../components/Layout';
+import { getApiErrorMessage } from '../api/errors';
 
 export const RunsList: React.FC = () => {
   const { suiteId } = useParams<{ suiteId: string }>();
@@ -32,30 +34,34 @@ export const RunsList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (suiteId) {
-      loadData();
+  const loadData = useCallback(async () => {
+    if (!suiteId) {
+      setError('Suite ID is required');
+      setLoading(false);
+      return;
     }
-  }, [suiteId]);
 
-  const loadData = async () => {
     try {
       setLoading(true);
       const [suiteData, runsData] = await Promise.all([
-        suitesApi.getById(suiteId!),
-        runsApi.getBySuite(suiteId!),
+        suitesApi.getById(suiteId),
+        runsApi.getBySuite(suiteId),
       ]);
       setSuite(suiteData);
       setRuns(runsData);
       setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load run history');
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'Failed to load run history'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [suiteId]);
 
-  const getStatusColor = (status: string) => {
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const getStatusColor = (status: string): ChipProps['color'] => {
     switch (status.toLowerCase()) {
       case 'completed':
         return 'success';
@@ -151,7 +157,7 @@ export const RunsList: React.FC = () => {
                       <TableCell>
                         <Chip
                           label={run.status}
-                          color={getStatusColor(run.status) as any}
+                          color={getStatusColor(run.status)}
                           size="small"
                         />
                       </TableCell>

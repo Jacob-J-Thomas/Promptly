@@ -1,8 +1,5 @@
 import { apiClient } from './client';
 
-console.log('auth.ts: Module loading');
-console.log('auth.ts: apiClient imported:', apiClient);
-
 interface RegisterRequest {
   name: string;
   email: string;

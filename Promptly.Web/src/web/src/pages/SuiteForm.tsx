@@ -12,6 +12,7 @@ import {
 import { ArrowBack } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { suitesApi } from '../api/suites';
+import { getApiErrorMessage } from '../api/errors';
 import { Layout } from '../components/Layout';
 
 export const SuiteForm: React.FC = () => {
@@ -41,8 +42,8 @@ export const SuiteForm: React.FC = () => {
       });
 
       navigate(`/suites/${suite.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create test suite');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Failed to create test suite'));
     } finally {
       setLoading(false);
     }

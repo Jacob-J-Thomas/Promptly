@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from http import HTTPStatus
@@ -17,7 +18,7 @@ AZURE_MODELS_PATH = "/openai/models"
 CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 AZURE_CHAT_COMPLETIONS_PREFIX = "/openai/deployments/"
 AZURE_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
-DEFAULT_PORT = 0
+DEFAULT_PORT = 8080
 EVIDENCE_FILE_NAME = "provider-requests.jsonl"
 CORRELATION_PATTERN = re.compile(r'"integrationCorrelation"\s*:\s*"([A-Za-z0-9-]{1,128})"')
 
@@ -27,6 +28,7 @@ class ProviderHandler(BaseHTTPRequestHandler):
 
     _evidence_lock: ClassVar[Lock] = Lock()
     _request_sequence: ClassVar[int] = 0
+    record_evidence: ClassVar[bool] = False
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -154,6 +156,9 @@ class ProviderHandler(BaseHTTPRequestHandler):
         authorized: bool,
         **details: Any,
     ) -> None:
+        if not cls.record_evidence:
+            return
+
         with cls._evidence_lock:
             cls._request_sequence += 1
             record: dict[str, Any] = {
@@ -174,7 +179,12 @@ class ProviderHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = DEFAULT_PORT
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ephemeral-port", action="store_true")
+    parser.add_argument("--record-evidence", action="store_true")
+    arguments = parser.parse_args()
+    ProviderHandler.record_evidence = arguments.record_evidence
+    port = 0 if arguments.ephemeral_port else DEFAULT_PORT
     host = "127.0.0.1"
     server = ThreadingHTTPServer((host, port), ProviderHandler)
     print(

@@ -52,6 +52,8 @@ internal sealed class ProviderStubProcess : IAsyncDisposable
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(providerScriptPath);
+        startInfo.ArgumentList.Add("--ephemeral-port");
+        startInfo.ArgumentList.Add("--record-evidence");
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start the deterministic provider stub");

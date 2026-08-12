@@ -41,7 +41,7 @@ public sealed class AuthenticationAbuseConfigurationStartupTests
             "too-many-proxies" => Enumerable.Range(
                     0,
                     AuthenticationAbuseOptions.MaximumTrustedProxyNetworkCount + 1)
-                .ToDictionary(
+                .ToDictionary<int, string, string?>(
                     index => $"AuthenticationAbuse:TrustedProxyNetworks:{index}",
                     index => $"10.{index / 256}.{index % 256}.1/32"),
             _ => throw new ArgumentOutOfRangeException(nameof(configurationCase))

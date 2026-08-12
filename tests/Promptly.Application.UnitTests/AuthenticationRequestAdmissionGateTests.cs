@@ -17,7 +17,7 @@ public sealed class AuthenticationRequestAdmissionGateTests
         using var start = new ManualResetEventSlim();
         using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
-        var admittedLeases = new ConcurrentBag<IAuthenticationRequestAdmissionLease>();
+        using var admittedLeases = new ConcurrentAdmissionLeases();
         var attempts = Enumerable.Range(0, AttemptCount)
             .Select(index => Task.Run(() =>
             {
@@ -57,13 +57,6 @@ public sealed class AuthenticationRequestAdmissionGateTests
             catch (OperationCanceledException)
             {
                 // Cancellation prevents not-yet-started attempts from acquiring.
-            }
-            finally
-            {
-                foreach (var lease in admittedLeases)
-                {
-                    lease.Dispose();
-                }
             }
         }
     }
@@ -472,6 +465,21 @@ public sealed class AuthenticationRequestAdmissionGateTests
         {
             MaximumConcurrentAuthenticationRequests = maximumConcurrentRequests
         }));
+
+    private sealed class ConcurrentAdmissionLeases : IDisposable
+    {
+        private readonly ConcurrentBag<IAuthenticationRequestAdmissionLease> _leases = [];
+
+        public void Add(IAuthenticationRequestAdmissionLease lease) => _leases.Add(lease);
+
+        public void Dispose()
+        {
+            while (_leases.TryTake(out var lease))
+            {
+                lease.Dispose();
+            }
+        }
+    }
 
     private static void AssertMeasurement(
         MetricMeasurement measurement,

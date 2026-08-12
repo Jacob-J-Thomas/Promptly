@@ -11,10 +11,20 @@ import ssl
 from pathlib import Path
 
 
-evidence_path = Path(os.environ["RECORDER_EVIDENCE_PATH"])
+EVIDENCE_PATH = Path("/evidence/record.jsonl")
 marker = os.environ["RECORDER_MARKER"]
-bind_address = os.environ.get("RECORDER_BIND_ADDRESS", "0.0.0.0")
+bind_address = os.environ["RECORDER_BIND_ADDRESS"]
 bind_port = int(os.environ.get("RECORDER_BIND_PORT", "8080"))
+expected_bind_targets = {
+    "allowed": ("11.253.0.10", 8080),
+    "allowed-tls": ("11.253.0.11", 8443),
+    "private": ("10.253.0.10", 8080),
+    "metadata": ("100.100.100.200", 8080),
+    "rebind": ("10.252.0.11", 8080),
+    "reserved-v6": ("2001:2::10", 8080),
+}
+if expected_bind_targets.get(marker) != (bind_address, bind_port):
+    raise RuntimeError("recorder marker and static bind target do not match")
 tls_certificate_path = os.environ.get("RECORDER_TLS_CERTIFICATE_PATH")
 tls_key_path = os.environ.get("RECORDER_TLS_KEY_PATH")
 response_body = os.environ.get(
@@ -33,9 +43,6 @@ family = (
     if ipaddress.ip_address(bind_address).version == 6
     else socket.AF_INET
 )
-evidence_path.parent.mkdir(parents=True, exist_ok=True)
-evidence_path.touch()
-
 with socket.socket(family, socket.SOCK_STREAM) as server:
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((bind_address, bind_port))
@@ -54,6 +61,7 @@ with socket.socket(family, socket.SOCK_STREAM) as server:
         with connection:
             connection.settimeout(2)
             chunks: list[bytes] = []
+            read_termination = "connection_closed"
             try:
                 while sum(map(len, chunks)) < 65536:
                     chunk = connection.recv(4096)
@@ -61,9 +69,14 @@ with socket.socket(family, socket.SOCK_STREAM) as server:
                         break
                     chunks.append(chunk)
                     if b"\r\n\r\n" in b"".join(chunks):
+                        read_termination = "headers_complete"
                         break
+                else:
+                    read_termination = "size_limit"
             except TimeoutError:
-                pass
+                # A partial request remains useful denial evidence. Record why
+                # collection stopped instead of silently discarding the event.
+                read_termination = "timeout"
             received = b"".join(chunks)
             authorization_scheme: str | None = None
             for header_line in received.split(b"\r\n")[1:]:
@@ -78,12 +91,13 @@ with socket.socket(family, socket.SOCK_STREAM) as server:
                 "bytes": len(received),
                 "marker": marker,
                 "peer": peer[0],
+                "read_termination": read_termination,
                 "request_line": received.split(b"\r\n", 1)[0].decode(
                     "ascii", errors="replace"
                 ),
                 "tls": tls_context is not None,
             }
-            with evidence_path.open("a", encoding="utf-8") as evidence:
+            with EVIDENCE_PATH.open("a", encoding="utf-8") as evidence:
                 evidence.write(json.dumps(record, sort_keys=True) + "\n")
                 evidence.flush()
                 os.fsync(evidence.fileno())

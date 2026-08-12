@@ -12,7 +12,9 @@ from collections import defaultdict
 from pathlib import Path
 
 
+LISTEN_ADDRESS = "11.252.0.53"
 LISTEN_PORT = 5353
+EVIDENCE_PATH = Path("/evidence/dns.jsonl")
 ANSWERS = {
     "allowed.test": {1: ("11.253.0.10",)},
     # Smokescreen asks for both address families when `network: ip`. Return an
@@ -66,13 +68,12 @@ def response_for(
 
 
 def main() -> None:
-    evidence_path = Path(os.environ["DNS_EVIDENCE_PATH"])
-    evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    evidence_path.touch()
     counts: defaultdict[tuple[str, int], int] = defaultdict(int)
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
-        server.bind(("0.0.0.0", LISTEN_PORT))
+        # The proof assigns this address to the DNS container. Binding only that
+        # interface prevents the harness from becoming a wildcard DNS listener.
+        server.bind((LISTEN_ADDRESS, LISTEN_PORT))
         while True:
             packet, peer = server.recvfrom(4096)
             try:
@@ -92,7 +93,7 @@ def main() -> None:
                     "sequence": counts[count_key],
                     "peer": peer[0],
                 }
-                with evidence_path.open("a", encoding="utf-8") as evidence:
+                with EVIDENCE_PATH.open("a", encoding="utf-8") as evidence:
                     evidence.write(json.dumps(record, sort_keys=True) + "\n")
                     evidence.flush()
                     os.fsync(evidence.fileno())

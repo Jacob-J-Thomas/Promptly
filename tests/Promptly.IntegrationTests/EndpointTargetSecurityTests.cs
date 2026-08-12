@@ -48,7 +48,7 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
         var environmentId = await user.CreateEnvironmentAsync(projectId);
         foreach (var invalidBaseUrl in invalidBaseUrls)
         {
-            using var update = await user.SendAsync(new HttpRequestMessage(
+            using var updateRequest = new HttpRequestMessage(
                 HttpMethod.Put,
                 $"/api/environments/{environmentId}")
             {
@@ -61,7 +61,8 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
                         ["Authorization"] = "must-not-persist"
                     }
                 })
-            });
+            };
+            using var update = await user.SendAsync(updateRequest);
             Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
         }
 

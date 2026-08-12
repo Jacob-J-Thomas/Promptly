@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
@@ -79,11 +80,23 @@ public sealed class EndpointDestinationGuard : IEndpointDestinationGuard
                         "Endpoint destination DNS resolution exceeded its configured deadline.",
                         exception));
             }
-            catch (Exception exception)
+            catch (OperationCanceledException exception)
             {
                 throw new EndpointDestinationRejectedException(
                     EndpointDestinationRejectionReason.ResolutionFailed,
                     exception);
+            }
+            catch (SocketException exception)
+            {
+                throw ResolutionFailed(exception);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw ResolutionFailed(exception);
+            }
+            catch (ArgumentException exception)
+            {
+                throw ResolutionFailed(exception);
             }
         }
 
@@ -129,6 +142,9 @@ public sealed class EndpointDestinationGuard : IEndpointDestinationGuard
                 EndpointDestinationRejectionReason.NonPublicDestination);
         }
     }
+
+    private static EndpointDestinationRejectedException ResolutionFailed(Exception exception) =>
+        new(EndpointDestinationRejectionReason.ResolutionFailed, exception);
 
     private static IReadOnlyDictionary<(string Host, int Port), IReadOnlyList<IPNetwork>>
         BuildAllowedDestinations(IReadOnlyList<AllowedNonPublicDestinationRule>? rules)

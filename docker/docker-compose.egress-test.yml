@@ -37,11 +37,10 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/dns_rebinder.py"]
     environment:
-      DNS_EVIDENCE_PATH: /evidence/dns.jsonl
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./egress-proxy/tests/dns_rebinder.py:/test/dns_rebinder.py:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/dns.jsonl:/evidence/dns.jsonl
     networks:
       egress-test-dns:
         ipv4_address: 11.252.0.53
@@ -75,12 +74,12 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/recorder.py"]
     environment:
-      RECORDER_EVIDENCE_PATH: /evidence/allowed.jsonl
+      RECORDER_BIND_ADDRESS: 11.253.0.10
       RECORDER_MARKER: allowed
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/allowed.jsonl:/evidence/record.jsonl
     networks:
       egress-test-public:
         ipv4_address: 11.253.0.10
@@ -94,8 +93,8 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/recorder.py"]
     environment:
+      RECORDER_BIND_ADDRESS: 11.253.0.11
       RECORDER_BIND_PORT: "8443"
-      RECORDER_EVIDENCE_PATH: /evidence/allowed-tls.jsonl
       RECORDER_MARKER: allowed-tls
       RECORDER_RESPONSE_BODY: '{"object":"list","data":[]}'
       RECORDER_RESPONSE_CONTENT_TYPE: application/json
@@ -106,7 +105,7 @@ services:
       - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
       - ./egress-proxy/tests/tls/server.crt:/test/tls/server.crt:ro
       - ./egress-proxy/tests/tls/server.key:/test/tls/server.key:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/allowed-tls.jsonl:/evidence/record.jsonl
     networks:
       egress-test-public:
         ipv4_address: 11.253.0.11
@@ -122,12 +121,12 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/recorder.py"]
     environment:
-      RECORDER_EVIDENCE_PATH: /evidence/private.jsonl
+      RECORDER_BIND_ADDRESS: 10.253.0.10
       RECORDER_MARKER: private
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/private.jsonl:/evidence/record.jsonl
     networks:
       egress-test-private:
         ipv4_address: 10.253.0.10
@@ -141,12 +140,12 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/recorder.py"]
     environment:
-      RECORDER_EVIDENCE_PATH: /evidence/metadata.jsonl
+      RECORDER_BIND_ADDRESS: 100.100.100.200
       RECORDER_MARKER: metadata
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/metadata.jsonl:/evidence/record.jsonl
     networks:
       egress-test-metadata:
         ipv4_address: 100.100.100.200
@@ -160,12 +159,12 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/recorder.py"]
     environment:
-      RECORDER_EVIDENCE_PATH: /evidence/rebind.jsonl
+      RECORDER_BIND_ADDRESS: 10.252.0.11
       RECORDER_MARKER: rebind
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/rebind.jsonl:/evidence/record.jsonl
     networks:
       egress-test-rebind:
         ipv4_address: 10.252.0.11
@@ -179,13 +178,12 @@ services:
     image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
     command: ["python", "/test/recorder.py"]
     environment:
-      RECORDER_BIND_ADDRESS: "::"
-      RECORDER_EVIDENCE_PATH: /evidence/reserved-v6.jsonl
+      RECORDER_BIND_ADDRESS: "2001:2::10"
       RECORDER_MARKER: reserved-v6
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
-      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}:/evidence
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/reserved-v6.jsonl:/evidence/record.jsonl
     networks:
       egress-test-reserved-v6:
         ipv6_address: 2001:2::10

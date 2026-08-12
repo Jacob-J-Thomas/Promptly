@@ -758,6 +758,30 @@ public sealed class EndpointExecutorTargetSecurityTests
         Assert.Equal(1, handler.SendCount);
     }
 
+    [Fact]
+    public async Task Proxy_mode_preserves_successful_origin_response_with_smokescreen_named_header()
+    {
+        var handler = new RecordingHandler(HttpStatusCode.OK, addSmokescreenError: true);
+        using var client = new HttpClient(handler);
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance,
+            ProxyEgressOptions()).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Equal((int)HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("{}", result.ResponseJson);
+        Assert.Null(result.ErrorMessage);
+        Assert.Equal(1, handler.SendCount);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

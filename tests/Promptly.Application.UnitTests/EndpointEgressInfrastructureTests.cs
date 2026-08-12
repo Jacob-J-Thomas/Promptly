@@ -250,7 +250,7 @@ public sealed class EndpointDestinationConnectorTests
         var guard = new RecordingDestinationGuard((_, _) =>
             Task.FromResult(authorizations.Dequeue()));
         var socket = new RecordingSocketConnector((_, _, _) =>
-            ValueTask.FromResult<Stream>(new MemoryStream()));
+            ValueTask.FromResult(Stream.Null));
         var connector = CreateConnector(guard, socket);
         var logicalEndpoint = new DnsEndPoint("API.EXAMPLE.TEST.", 443);
 
@@ -283,7 +283,7 @@ public sealed class EndpointDestinationConnectorTests
             return attempt == 1
                 ? ValueTask.FromException<Stream>(
                     new SocketException((int)SocketError.ConnectionRefused))
-                : ValueTask.FromResult<Stream>(new MemoryStream());
+                : ValueTask.FromResult(Stream.Null);
         });
         var connector = CreateConnector(guard, socket);
 
@@ -604,7 +604,7 @@ public sealed class EndpointDestinationConnectorTests
         new((_, _) => Task.FromResult(authorized));
 
     private static RecordingSocketConnector SucceedingSocket() =>
-        new((_, _, _) => ValueTask.FromResult<Stream>(new MemoryStream()));
+        new((_, _, _) => ValueTask.FromResult(Stream.Null));
 
     private static AuthorizedEndpointDestination Authorized(
         string canonicalHost,

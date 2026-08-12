@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
@@ -513,9 +514,9 @@ public sealed class EndpointDestinationGuardTests
             new[] { IPAddress.Parse("8.8.8.8"), IPAddress.Parse("169.254.169.254") }
         };
 
-        foreach (var answers in answerSets)
+        foreach (var guard in answerSets.Select(answers =>
+                     CreateGuard(new RecordingResolver(answers))))
         {
-            var guard = CreateGuard(new RecordingResolver(answers));
             await Assert.ThrowsAsync<EndpointDestinationRejectedException>(() =>
                 guard.AuthorizeAsync(
                     new Uri("https://mixed.example/"),
@@ -545,9 +546,9 @@ public sealed class EndpointDestinationGuardTests
     [Fact]
     public async Task Null_and_empty_dns_results_are_denied()
     {
-        foreach (var addresses in new IReadOnlyList<IPAddress>?[] { null, [] })
+        foreach (var guard in new IReadOnlyList<IPAddress>?[] { null, [] }
+                     .Select(addresses => CreateGuard(new RecordingResolver(addresses))))
         {
-            var guard = CreateGuard(new RecordingResolver(addresses));
             var exception = await Assert.ThrowsAsync<EndpointDestinationRejectedException>(() =>
                 guard.AuthorizeAsync(
                     new Uri("https://empty.example/"),
@@ -557,10 +558,20 @@ public sealed class EndpointDestinationGuardTests
         }
     }
 
-    [Fact]
-    public async Task Resolver_failures_are_wrapped_with_a_safe_error_and_inner_exception()
+    [Theory]
+    [InlineData("socket")]
+    [InlineData("invalid-operation")]
+    [InlineData("argument")]
+    public async Task Resolver_failures_are_wrapped_with_a_safe_error_and_inner_exception(
+        string failureKind)
     {
-        var resolverFailure = new InvalidOperationException("secret resolver detail");
+        Exception resolverFailure = failureKind switch
+        {
+            "socket" => new SocketException((int)SocketError.HostNotFound),
+            "invalid-operation" => new InvalidOperationException("secret resolver detail"),
+            "argument" => new ArgumentException("secret resolver detail"),
+            _ => throw new InvalidOperationException("Unexpected test case")
+        };
         var guard = CreateGuard(new RecordingResolver(exception: resolverFailure));
 
         var exception = await Assert.ThrowsAsync<EndpointDestinationRejectedException>(() =>

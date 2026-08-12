@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sys
 
 
-if len(sys.argv) != 2:
-    raise SystemExit("usage: verify_topology.py OUTPUT_PATH")
+if len(sys.argv) != 1:
+    raise SystemExit("usage: verify_topology.py < compose.json > attestation.json")
 
 compose = json.load(sys.stdin)
 services = compose["services"]
@@ -73,8 +72,8 @@ for key in ("NO_PROXY", "no_proxy"):
     assert "promptly-eval" in eval_env[key] and "127.0.0.1" in eval_env[key]
 
 # Never serialize the source Compose object: it contains fully interpolated
-# environment values and may therefore contain operator credentials. Persist
-# only this fixed-schema, non-secret attestation of the checks above.
+# environment values and may therefore contain operator credentials. Emit only
+# this fixed-schema, non-secret attestation of the checks above.
 attestation = {
     "schema": 1,
     "checks": {
@@ -91,8 +90,7 @@ attestation = {
     },
     "published_ports": published_ports,
 }
-output_path = Path(sys.argv[1])
-output_path.write_text(
-    json.dumps(attestation, indent=2, sort_keys=True) + "\n",
-    encoding="utf-8",
-)
+# Emit only the fixed-schema, non-secret attestation. The caller owns the output
+# destination, so untrusted path input never reaches this process.
+json.dump(attestation, sys.stdout, indent=2, sort_keys=True)
+sys.stdout.write("\n")

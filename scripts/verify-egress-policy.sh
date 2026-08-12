@@ -64,9 +64,8 @@ trap cleanup EXIT INT TERM
 "${base[@]}" config --quiet
 "${test_stack[@]}" config --quiet
 "${base[@]}" config --format json \
-  | python3 \
-      "$repo_root/docker/egress-proxy/tests/verify_topology.py" \
-      "$artifact_dir/production-topology.json"
+  | python3 "$repo_root/docker/egress-proxy/tests/verify_topology.py" \
+      >"$artifact_dir/production-topology.json"
 
 python3 - \
   "$repo_root/docker/egress-proxy/tests/dns_rebinder.py" \

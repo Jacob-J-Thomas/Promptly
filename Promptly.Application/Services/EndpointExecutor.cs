@@ -171,7 +171,8 @@ public class EndpointExecutor : IEndpointExecutor
 
             if (_usesProxy
                 && (response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
-                    || response.Headers.Contains("X-Smokescreen-Error")))
+                    || (!response.IsSuccessStatusCode
+                        && response.Headers.Contains("X-Smokescreen-Error"))))
             {
                 _logger.LogWarning(
                     "Endpoint proxy denied destination for endpoint {EndpointId}",
@@ -303,9 +304,9 @@ public class EndpointExecutor : IEndpointExecutor
 
         if (exception is AggregateException aggregateException)
         {
-            foreach (var innerException in aggregateException.InnerExceptions)
+            foreach (var nestedRejection in aggregateException.InnerExceptions
+                         .Select(FindDestinationRejection))
             {
-                var nestedRejection = FindDestinationRejection(innerException);
                 if (nestedRejection != null)
                 {
                     return nestedRejection;

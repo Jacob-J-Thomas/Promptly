@@ -20,7 +20,7 @@ public interface IBoundedRegexMatcher
 
 public interface IRegexEvaluationBudget
 {
-    bool IsExpired { get; }
+    TimeSpan Remaining { get; }
 }
 
 public interface IRegexEvaluationBudgetFactory

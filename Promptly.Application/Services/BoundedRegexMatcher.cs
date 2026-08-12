@@ -106,15 +106,25 @@ public sealed class BoundedRegexMatcher : IBoundedRegexMatcher
 
         try
         {
-            var regex = CreateRegex(pattern, caseInsensitive);
+            _ = CreateRegex(pattern, caseInsensitive);
             var budget = _budgetFactory.Start(MatchTimeout);
             var matches = new List<string>();
+            Regex? regex = null;
+            var regexTimeout = TimeSpan.Zero;
             foreach (var candidate in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (budget.IsExpired)
+                var remaining = budget.Remaining;
+                var allowedMatchTimeout = GetAllowedMatchTimeout(remaining);
+                if (allowedMatchTimeout <= TimeSpan.Zero)
                 {
                     return CandidateFailure(BoundedRegexStatus.TimedOut, TimeoutMessage());
+                }
+
+                if (regex == null || regexTimeout > allowedMatchTimeout)
+                {
+                    regex = CreateRegex(pattern, caseInsensitive, allowedMatchTimeout);
+                    regexTimeout = allowedMatchTimeout;
                 }
 
                 if (regex.IsMatch(candidate))
@@ -122,7 +132,7 @@ public sealed class BoundedRegexMatcher : IBoundedRegexMatcher
                     matches.Add(candidate);
                 }
 
-                if (budget.IsExpired)
+                if (budget.Remaining <= TimeSpan.Zero)
                 {
                     return CandidateFailure(BoundedRegexStatus.TimedOut, TimeoutMessage());
                 }
@@ -167,7 +177,10 @@ public sealed class BoundedRegexMatcher : IBoundedRegexMatcher
         return null;
     }
 
-    private static Regex CreateRegex(string pattern, bool caseInsensitive)
+    private static Regex CreateRegex(
+        string pattern,
+        bool caseInsensitive,
+        TimeSpan? timeout = null)
     {
         var options = RegexOptions.CultureInvariant | RegexOptions.NonBacktracking;
         if (caseInsensitive)
@@ -175,7 +188,29 @@ public sealed class BoundedRegexMatcher : IBoundedRegexMatcher
             options |= RegexOptions.IgnoreCase;
         }
 
-        return new Regex(pattern, options, MatchTimeout);
+        return new Regex(pattern, options, timeout ?? MatchTimeout);
+    }
+
+    private static TimeSpan GetAllowedMatchTimeout(TimeSpan remaining)
+    {
+        const double schedulingMarginMilliseconds = 1;
+        const double timeoutBucketMilliseconds = 10;
+
+        var availableMilliseconds = remaining.TotalMilliseconds - schedulingMarginMilliseconds;
+        if (availableMilliseconds <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var bucketedMilliseconds =
+            Math.Floor(availableMilliseconds / timeoutBucketMilliseconds) * timeoutBucketMilliseconds;
+        if (bucketedMilliseconds < schedulingMarginMilliseconds)
+        {
+            bucketedMilliseconds = schedulingMarginMilliseconds;
+        }
+
+        return TimeSpan.FromMilliseconds(
+            Math.Min(bucketedMilliseconds, MatchTimeout.TotalMilliseconds));
     }
 
     private static BoundedRegexMatchResult Failure(
@@ -211,6 +246,13 @@ public sealed class BoundedRegexMatcher : IBoundedRegexMatcher
     {
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
-        public bool IsExpired => _stopwatch.Elapsed >= timeout;
+        public TimeSpan Remaining
+        {
+            get
+            {
+                var remaining = timeout - _stopwatch.Elapsed;
+                return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            }
+        }
     }
 }

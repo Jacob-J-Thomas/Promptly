@@ -7,7 +7,11 @@ public interface IEndpointExecutor
     /// <summary>
     /// Execute a test case against an endpoint
     /// </summary>
-    Task<ExecutionResult> ExecuteAsync(Endpoint endpoint, Domain.Entities.Environment environment, TestCase testCase);
+    Task<ExecutionResult> ExecuteAsync(
+        Endpoint endpoint,
+        Domain.Entities.Environment environment,
+        TestCase testCase,
+        CancellationToken cancellationToken = default);
 }
 
 public record ExecutionResult

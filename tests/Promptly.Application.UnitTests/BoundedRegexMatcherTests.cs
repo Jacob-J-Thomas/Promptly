@@ -177,7 +177,7 @@ public sealed class BoundedRegexMatcherTests
     }
 
     [Fact]
-    public void FindMatchingCandidates_compiles_once_and_returns_matching_values()
+    public void FindMatchingCandidates_returns_matching_values_for_many_candidates()
     {
         var candidates = Enumerable.Range(0, 7_000)
             .Select(index => $"u{index:0000}")
@@ -254,6 +254,18 @@ public sealed class BoundedRegexMatcherTests
         Assert.Equal(BoundedRegexStatus.TimedOut, result.Status);
     }
 
+    [Fact]
+    public void FindMatchingCandidates_limits_each_match_to_the_remaining_budget()
+    {
+        var matcher = new TestBoundedRegexMatcher(new TinyRemainingBudgetFactory());
+
+        var result = matcher.FindMatchingCandidates(
+            ".*z",
+            [new string('a', BoundedRegexMatcher.MaxInputLength)]);
+
+        Assert.Equal(BoundedRegexStatus.TimedOut, result.Status);
+    }
+
     private sealed class TestBoundedRegexMatcher
     {
         private readonly BoundedRegexMatcher _inner;
@@ -324,7 +336,7 @@ public sealed class BoundedRegexMatcherTests
 
     private sealed class ExpiredBudget : IRegexEvaluationBudget
     {
-        public bool IsExpired => true;
+        public TimeSpan Remaining => TimeSpan.Zero;
     }
 
     private sealed class ExpireAfterFirstCheckBudgetFactory : IRegexEvaluationBudgetFactory
@@ -336,6 +348,18 @@ public sealed class BoundedRegexMatcherTests
     {
         private int _checkCount;
 
-        public bool IsExpired => Interlocked.Increment(ref _checkCount) > 1;
+        public TimeSpan Remaining => Interlocked.Increment(ref _checkCount) > 1
+            ? TimeSpan.Zero
+            : BoundedRegexMatcher.MatchTimeout;
+    }
+
+    private sealed class TinyRemainingBudgetFactory : IRegexEvaluationBudgetFactory
+    {
+        public IRegexEvaluationBudget Start(TimeSpan timeout) => new TinyRemainingBudget();
+    }
+
+    private sealed class TinyRemainingBudget : IRegexEvaluationBudget
+    {
+        public TimeSpan Remaining => TimeSpan.FromTicks(1);
     }
 }

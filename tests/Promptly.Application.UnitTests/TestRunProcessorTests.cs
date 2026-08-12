@@ -109,6 +109,63 @@ public sealed class TestRunProcessorTests
         Assert.Contains("cancelled", update.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ProcessRunAsync_propagates_cancellation_into_endpoint_execution()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(suiteId, "[]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var endpointExecutor = new BlockingEndpointExecutor();
+        var processor = CreateProcessor(
+            dbContext,
+            runService,
+            new StubExpectationEvaluator(UnusedExpectationResult()),
+            endpointExecutor: endpointExecutor);
+        using var cancellation = new CancellationTokenSource();
+
+        var processing = processor.ProcessRunAsync(runId, cancellation.Token);
+        await endpointExecutor.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
+        Assert.Equal(cancellation.Token, endpointExecutor.ObservedCancellationToken);
+        Assert.Equal(TestRunStatus.Failed, Assert.Single(runService.StatusUpdates).Status);
+    }
+
+    [Theory]
+    [InlineData("llm_judge")]
+    [InlineData("groundedness")]
+    public async Task ProcessRunAsync_propagates_cancellation_into_python_evaluation(
+        string expectationType)
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var pythonEvalClient = new BlockingPythonEvalClient(expectationType);
+        var processor = CreateProcessor(
+            dbContext,
+            runService,
+            new StubExpectationEvaluator(UnusedExpectationResult()),
+            pythonEvalClient: pythonEvalClient);
+        using var cancellation = new CancellationTokenSource();
+
+        var processing = processor.ProcessRunAsync(runId, cancellation.Token);
+        await pythonEvalClient.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
+        Assert.Equal(cancellation.Token, pythonEvalClient.ObservedCancellationToken);
+        Assert.Equal(TestRunStatus.Failed, Assert.Single(runService.StatusUpdates).Status);
+    }
+
     private static PromptlyDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<PromptlyDbContext>()
@@ -120,16 +177,42 @@ public sealed class TestRunProcessorTests
     private static TestRunProcessor CreateProcessor(
         PromptlyDbContext dbContext,
         ITestRunService testRunService,
-        IExpectationEvaluator expectationEvaluator)
+        IExpectationEvaluator expectationEvaluator,
+        IEndpointExecutor? endpointExecutor = null,
+        IPythonEvalClient? pythonEvalClient = null)
     {
         return new TestRunProcessor(
             dbContext,
             testRunService,
-            new StubEndpointExecutor(),
+            endpointExecutor ?? new StubEndpointExecutor(),
             new StubMappingService(),
             expectationEvaluator,
-            new StubPythonEvalClient(),
+            pythonEvalClient ?? new StubPythonEvalClient(),
             NullLogger<TestRunProcessor>.Instance);
+    }
+
+    private static TestCase CreateTestCase(Guid suiteId, string expectationsJson)
+    {
+        return new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = suiteId,
+            ExternalId = "case-1",
+            Name = "Cancellation",
+            InputSpecJson = "{}",
+            ExpectationsJson = expectationsJson
+        };
+    }
+
+    private static ExpectationResult UnusedExpectationResult()
+    {
+        return new ExpectationResult
+        {
+            ExpectationType = "contains_text",
+            Passed = true,
+            Score = 1,
+            Reason = "unused"
+        };
     }
 
     private static TestRun CreateRun(Guid runId, Guid suiteId)
@@ -217,11 +300,32 @@ public sealed class TestRunProcessorTests
         public Task<ExecutionResult> ExecuteAsync(
             Endpoint endpoint,
             Environment environment,
-            TestCase testCase) => Task.FromResult(new ExecutionResult
+            TestCase testCase,
+            CancellationToken cancellationToken = default) => Task.FromResult(new ExecutionResult
             {
                 Success = true,
                 ResponseJson = "{}"
             });
+    }
+
+    private sealed class BlockingEndpointExecutor : IEndpointExecutor
+    {
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CancellationToken ObservedCancellationToken { get; private set; }
+
+        public async Task<ExecutionResult> ExecuteAsync(
+            Endpoint endpoint,
+            Environment environment,
+            TestCase testCase,
+            CancellationToken cancellationToken = default)
+        {
+            ObservedCancellationToken = cancellationToken;
+            Entered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new ExecutionResult();
+        }
     }
 
     private sealed class StubMappingService : IMappingService
@@ -287,13 +391,69 @@ public sealed class TestRunProcessorTests
             double minScore,
             CanonicalTrace trace,
             string? model = null,
-            string? provider = null) => throw new NotSupportedException();
+            string? provider = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<EvaluationResult> EvaluateGroundednessAsync(
             double minScore,
             CanonicalTrace trace,
             List<RetrievedDoc> docs,
             string? model = null,
-            string? provider = null) => throw new NotSupportedException();
+            string? provider = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class BlockingPythonEvalClient(string expectationType) : IPythonEvalClient
+    {
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CancellationToken ObservedCancellationToken { get; private set; }
+
+        public Task<MappingProposalResult> ProposeMappingAsync(
+            string sampleResponse,
+            string? sampleRequest = null,
+            Dictionary<string, object>? hints = null) => throw new NotSupportedException();
+
+        public Task<EvaluationResult> EvaluateLlmJudgeAsync(
+            string rubric,
+            double minScore,
+            CanonicalTrace trace,
+            string? model = null,
+            string? provider = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (expectationType != "llm_judge")
+            {
+                throw new InvalidOperationException("Unexpected LLM judge evaluation");
+            }
+
+            return WaitForCancellationAsync(cancellationToken);
+        }
+
+        public Task<EvaluationResult> EvaluateGroundednessAsync(
+            double minScore,
+            CanonicalTrace trace,
+            List<RetrievedDoc> docs,
+            string? model = null,
+            string? provider = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (expectationType != "groundedness")
+            {
+                throw new InvalidOperationException("Unexpected groundedness evaluation");
+            }
+
+            return WaitForCancellationAsync(cancellationToken);
+        }
+
+        private async Task<EvaluationResult> WaitForCancellationAsync(
+            CancellationToken cancellationToken)
+        {
+            ObservedCancellationToken = cancellationToken;
+            Entered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new EvaluationResult();
+        }
     }
 }

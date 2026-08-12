@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Promptly.Application/Promptly.Application.csproj" />
+    <ProjectReference Include="../../Promptly.Infrastructure/Promptly.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -89,8 +89,10 @@ public class PythonEvalClient : IPythonEvalClient
         double minScore,
         CanonicalTrace trace,
         string? model = null,
-        string? provider = null)
+        string? provider = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             var request = new
@@ -108,8 +110,8 @@ public class PythonEvalClient : IPythonEvalClient
             });
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/eval/llm-judge", content);
-            var responseJson = await response.Content.ReadAsStringAsync();
+            var response = await _httpClient.PostAsync("/eval/llm-judge", content, cancellationToken);
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -142,6 +144,10 @@ public class PythonEvalClient : IPythonEvalClient
                 Score = result.Score,
                 Reason = result.Reason
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -160,8 +166,10 @@ public class PythonEvalClient : IPythonEvalClient
         CanonicalTrace trace,
         List<RetrievedDoc> docs,
         string? model = null,
-        string? provider = null)
+        string? provider = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             var request = new
@@ -179,8 +187,8 @@ public class PythonEvalClient : IPythonEvalClient
             });
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/eval/groundedness", content);
-            var responseJson = await response.Content.ReadAsStringAsync();
+            var response = await _httpClient.PostAsync("/eval/groundedness", content, cancellationToken);
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -213,6 +221,10 @@ public class PythonEvalClient : IPythonEvalClient
                 Score = result.Score,
                 Reason = result.Reason
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

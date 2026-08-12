@@ -213,7 +213,11 @@ public class TestRunProcessor : ITestRunProcessor
         {
             cancellationToken.ThrowIfCancellationRequested();
             // Step 1: Execute HTTP request
-            var executionResult = await _endpointExecutor.ExecuteAsync(run.Endpoint!, run.Environment!, testCase);
+            var executionResult = await _endpointExecutor.ExecuteAsync(
+                run.Endpoint!,
+                run.Environment!,
+                testCase,
+                cancellationToken);
 
             if (!executionResult.Success || string.IsNullOrWhiteSpace(executionResult.ResponseJson))
             {
@@ -288,11 +292,11 @@ public class TestRunProcessor : ITestRunProcessor
                 // LLM-based expectations
                 else if (expType == "llm_judge")
                 {
-                    expResult = await EvaluateLlmJudgeAsync(exp, trace);
+                    expResult = await EvaluateLlmJudgeAsync(exp, trace, cancellationToken);
                 }
                 else if (expType == "groundedness")
                 {
-                    expResult = await EvaluateGroundednessAsync(exp, trace);
+                    expResult = await EvaluateGroundednessAsync(exp, trace, cancellationToken);
                 }
                 else
                 {
@@ -368,7 +372,10 @@ public class TestRunProcessor : ITestRunProcessor
         }
     }
 
-    private async Task<ExpectationResult> EvaluateLlmJudgeAsync(Dictionary<string, object> exp, Domain.ValueObjects.CanonicalTrace trace)
+    private async Task<ExpectationResult> EvaluateLlmJudgeAsync(
+        Dictionary<string, object> exp,
+        Domain.ValueObjects.CanonicalTrace trace,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -382,7 +389,8 @@ public class TestRunProcessor : ITestRunProcessor
                 minScore,
                 trace,
                 model,
-                provider);
+                provider,
+                cancellationToken);
 
             if (!result.Success)
             {
@@ -403,6 +411,10 @@ public class TestRunProcessor : ITestRunProcessor
                 Reason = result.Reason ?? "No reason provided"
             };
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to evaluate LLM judge expectation");
@@ -416,7 +428,10 @@ public class TestRunProcessor : ITestRunProcessor
         }
     }
 
-    private async Task<ExpectationResult> EvaluateGroundednessAsync(Dictionary<string, object> exp, Domain.ValueObjects.CanonicalTrace trace)
+    private async Task<ExpectationResult> EvaluateGroundednessAsync(
+        Dictionary<string, object> exp,
+        Domain.ValueObjects.CanonicalTrace trace,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -429,7 +444,8 @@ public class TestRunProcessor : ITestRunProcessor
                 trace,
                 trace.RetrievedDocs.ToList(),
                 model,
-                provider);
+                provider,
+                cancellationToken);
 
             if (!result.Success)
             {
@@ -449,6 +465,10 @@ public class TestRunProcessor : ITestRunProcessor
                 Score = result.Score,
                 Reason = result.Reason ?? "No reason provided"
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

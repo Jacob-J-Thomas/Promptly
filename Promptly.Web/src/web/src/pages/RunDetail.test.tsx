@@ -205,21 +205,20 @@ describe('RunDetail', () => {
     const queuedRun = { ...completedRun, status: 'Running', summaryJson: undefined };
     vi.mocked(runsApi.getById).mockResolvedValue(queuedRun);
     vi.mocked(runsApi.getResults).mockResolvedValue([]);
-    let poll: (() => void) | undefined;
-    vi.spyOn(globalThis, 'setInterval').mockImplementation(((handler: TimerHandler, timeout?: number) => {
-      if (typeof handler === 'function' && timeout === 5000) {
-        poll = () => handler();
-      }
-      return 1;
-    }) as typeof setInterval);
-    renderDetail();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const view = renderDetail();
 
     expect(await screen.findByText('Running')).toBeInTheDocument();
-    await waitFor(() => expect(poll).toBeDefined());
-    const pollCallback = poll;
-    expect(pollCallback).toBeDefined();
-    await act(async () => pollCallback?.());
+    await waitFor(() => expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 5000));
+    const pollCallback = setIntervalSpy.mock.calls.find(([, timeout]) => timeout === 5000)?.[0];
+    expect(pollCallback).toBeTypeOf('function');
+    await act(async () => {
+      if (typeof pollCallback === 'function') {
+        pollCallback();
+      }
+    });
     await waitFor(() => expect(runsApi.getById).toHaveBeenCalledTimes(2));
+    view.unmount();
   });
 
   it('renders the load error after an initial request failure', async () => {

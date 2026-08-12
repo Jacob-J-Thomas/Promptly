@@ -5,8 +5,21 @@ namespace Promptly.Application.Interfaces;
 public interface IPythonEvalClient
 {
     Task<MappingProposalResult> ProposeMappingAsync(string sampleResponse, string? sampleRequest = null, Dictionary<string, object>? hints = null);
-    Task<EvaluationResult> EvaluateLlmJudgeAsync(string rubric, double minScore, CanonicalTrace trace, string? model = null, string? provider = null);
-    Task<EvaluationResult> EvaluateGroundednessAsync(double minScore, CanonicalTrace trace, List<RetrievedDoc> docs, string? model = null, string? provider = null);
+    Task<EvaluationResult> EvaluateLlmJudgeAsync(
+        string rubric,
+        double minScore,
+        CanonicalTrace trace,
+        string? model = null,
+        string? provider = null,
+        CancellationToken cancellationToken = default);
+
+    Task<EvaluationResult> EvaluateGroundednessAsync(
+        double minScore,
+        CanonicalTrace trace,
+        List<RetrievedDoc> docs,
+        string? model = null,
+        string? provider = null,
+        CancellationToken cancellationToken = default);
 }
 
 public record MappingProposalResult

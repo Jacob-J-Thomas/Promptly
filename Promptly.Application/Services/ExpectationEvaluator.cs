@@ -1,5 +1,5 @@
+using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Promptly.Application.Interfaces;
 using Promptly.Domain.ValueObjects;
@@ -9,23 +9,39 @@ namespace Promptly.Application.Services;
 
 public class ExpectationEvaluator : IExpectationEvaluator
 {
-    private readonly ILogger<ExpectationEvaluator> _logger;
+    private const string UrlPattern = @"https?://[^\s]+";
 
-    public ExpectationEvaluator(ILogger<ExpectationEvaluator> logger)
+    private readonly ILogger<ExpectationEvaluator> _logger;
+    private readonly IBoundedRegexMatcher _regexMatcher;
+
+    public ExpectationEvaluator(
+        ILogger<ExpectationEvaluator> logger,
+        IBoundedRegexMatcher regexMatcher)
     {
         _logger = logger;
+        _regexMatcher = regexMatcher;
     }
 
-    public async Task<ExpectationResult> EvaluateAsync(object expectation, CanonicalTrace trace)
+    public Task<ExpectationResult> EvaluateAsync(
+        object expectation,
+        CanonicalTrace trace,
+        CancellationToken cancellationToken = default)
     {
-        return await Task.Run(() => Evaluate(expectation, trace));
+        ArgumentNullException.ThrowIfNull(trace);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(Evaluate(expectation, trace, cancellationToken));
     }
 
-    private ExpectationResult Evaluate(object expectation, CanonicalTrace trace)
+    private ExpectationResult Evaluate(
+        object expectation,
+        CanonicalTrace trace,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // Parse expectation as dictionary
+            cancellationToken.ThrowIfCancellationRequested();
+
             var expDict = expectation is JsonElement jsonElement
                 ? JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText())
                 : expectation as Dictionary<string, object>;
@@ -41,14 +57,14 @@ public class ExpectationEvaluator : IExpectationEvaluator
                 };
             }
 
-            var type = expDict["type"].ToString();
+            var type = expDict["type"]?.ToString();
 
             return type switch
             {
                 "contains_text" => EvaluateContainsText(expDict, trace),
                 "banned_text" => EvaluateBannedText(expDict, trace),
-                "regex_match" => EvaluateRegexMatch(expDict, trace),
-                "link_pattern" => EvaluateLinkPattern(expDict, trace),
+                "regex_match" => EvaluateRegexMatch(expDict, trace, cancellationToken),
+                "link_pattern" => EvaluateLinkPattern(expDict, trace, cancellationToken),
                 "tool_called" => EvaluateToolCalled(expDict, trace),
                 "tool_sequence" => EvaluateToolSequence(expDict, trace),
                 _ => new ExpectationResult
@@ -59,6 +75,10 @@ public class ExpectationEvaluator : IExpectationEvaluator
                     Reason = $"Unknown expectation type: {type}"
                 }
             };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -73,14 +93,13 @@ public class ExpectationEvaluator : IExpectationEvaluator
         }
     }
 
-    private ExpectationResult EvaluateContainsText(Dictionary<string, object> exp, CanonicalTrace trace)
+    private static ExpectationResult EvaluateContainsText(
+        Dictionary<string, object> exp,
+        CanonicalTrace trace)
     {
         var text = GetStringValue(exp, "text") ?? "";
         var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
-
-        var messages = trace.Messages.Where(m => m.Role == "assistant").ToList();
-        var combined = string.Join("\n", messages.Select(m => m.Content));
-
+        var combined = CombineAssistantMessages(trace);
         var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var found = combined.Contains(text, comparison);
 
@@ -95,14 +114,13 @@ public class ExpectationEvaluator : IExpectationEvaluator
         };
     }
 
-    private ExpectationResult EvaluateBannedText(Dictionary<string, object> exp, CanonicalTrace trace)
+    private static ExpectationResult EvaluateBannedText(
+        Dictionary<string, object> exp,
+        CanonicalTrace trace)
     {
         var text = GetStringValue(exp, "text") ?? "";
         var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
-
-        var messages = trace.Messages.Where(m => m.Role == "assistant").ToList();
-        var combined = string.Join("\n", messages.Select(m => m.Content));
-
+        var combined = CombineAssistantMessages(trace);
         var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var found = combined.Contains(text, comparison);
 
@@ -117,57 +135,81 @@ public class ExpectationEvaluator : IExpectationEvaluator
         };
     }
 
-    private ExpectationResult EvaluateRegexMatch(Dictionary<string, object> exp, CanonicalTrace trace)
+    private ExpectationResult EvaluateRegexMatch(
+        Dictionary<string, object> exp,
+        CanonicalTrace trace,
+        CancellationToken cancellationToken)
     {
-        var pattern = GetStringValue(exp, "pattern") ?? "";
-        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
-
-        var messages = trace.Messages.Where(m => m.Role == "assistant").ToList();
-        var combined = string.Join("\n", messages.Select(m => m.Content));
-
-        try
+        var pattern = GetStringValue(exp, "pattern");
+        if (pattern == null)
         {
-            var options = caseInsensitive ? RegexOptions.IgnoreCase : RegexOptions.None;
-            var regex = new Regex(pattern, options);
-            var match = regex.Match(combined);
+            return MissingRegexPattern("regex_match");
+        }
 
-            return new ExpectationResult
-            {
-                ExpectationType = "regex_match",
-                Passed = match.Success,
-                Score = match.Success ? 1.0 : 0.0,
-                Reason = match.Success
-                    ? $"Regex pattern '{pattern}' matched: '{match.Value}'"
-                    : $"Regex pattern '{pattern}' did not match",
-                Metrics = match.Success ? new Dictionary<string, object>
+        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
+        var matchResult = _regexMatcher.FindMatches(
+            pattern,
+            CombineAssistantMessagesForRegex(trace),
+            caseInsensitive,
+            cancellationToken);
+
+        if (!matchResult.Succeeded)
+        {
+            return RegexError("regex_match", matchResult);
+        }
+
+        var match = matchResult.Matches.FirstOrDefault();
+        return new ExpectationResult
+        {
+            ExpectationType = "regex_match",
+            Passed = match != null,
+            Score = match != null ? 1.0 : 0.0,
+            Reason = match != null
+                ? $"Regex pattern '{pattern}' matched: '{match.Value}'"
+                : $"Regex pattern '{pattern}' did not match",
+            Metrics = match == null
+                ? null
+                : new Dictionary<string, object>
                 {
                     { "matched_text", match.Value },
                     { "match_index", match.Index }
-                } : null
-            };
-        }
-        catch (Exception ex)
-        {
-            return new ExpectationResult
-            {
-                ExpectationType = "regex_match",
-                Passed = false,
-                Score = 0.0,
-                Reason = $"Invalid regex pattern: {ex.Message}"
-            };
-        }
+                }
+        };
     }
 
-    private ExpectationResult EvaluateLinkPattern(Dictionary<string, object> exp, CanonicalTrace trace)
+    private ExpectationResult EvaluateLinkPattern(
+        Dictionary<string, object> exp,
+        CanonicalTrace trace,
+        CancellationToken cancellationToken)
     {
-        var pattern = GetStringValue(exp, "pattern") ?? "";
+        var pattern = GetStringValue(exp, "pattern");
+        if (pattern == null)
+        {
+            return MissingRegexPattern("link_pattern");
+        }
 
-        var messages = trace.Messages.Where(m => m.Role == "assistant").ToList();
-        var combined = string.Join("\n", messages.Select(m => m.Content));
+        var urlResult = _regexMatcher.FindMatches(
+            UrlPattern,
+            CombineAssistantMessagesForRegex(trace),
+            caseInsensitive: true,
+            cancellationToken);
 
-        // Extract URLs using regex
-        var urlRegex = new Regex(@"https?://[^\s]+", RegexOptions.IgnoreCase);
-        var urls = urlRegex.Matches(combined).Select(m => m.Value).ToList();
+        if (!urlResult.Succeeded)
+        {
+            return RegexError("link_pattern", urlResult);
+        }
+
+        var urls = urlResult.Matches.Select(match => match.Value).ToList();
+        var patternResult = _regexMatcher.FindMatchingCandidates(
+            pattern,
+            urls,
+            caseInsensitive: true,
+            cancellationToken);
+
+        if (!patternResult.Succeeded)
+        {
+            return RegexError("link_pattern", patternResult.Status, patternResult.ErrorMessage);
+        }
 
         if (urls.Count == 0)
         {
@@ -180,58 +222,85 @@ public class ExpectationEvaluator : IExpectationEvaluator
             };
         }
 
-        // Check if any URL matches the pattern
-        try
-        {
-            var patternRegex = new Regex(pattern, RegexOptions.IgnoreCase);
-            var matchedUrls = urls.Where(url => patternRegex.IsMatch(url)).ToList();
-
-            if (matchedUrls.Count > 0)
-            {
-                return new ExpectationResult
-                {
-                    ExpectationType = "link_pattern",
-                    Passed = true,
-                    Score = 1.0,
-                    Reason = $"Found {matchedUrls.Count} URL(s) matching pattern '{pattern}'",
-                    Metrics = new Dictionary<string, object>
-                    {
-                        { "matched_urls", matchedUrls },
-                        { "total_urls", urls.Count }
-                    }
-                };
-            }
-            else
-            {
-                return new ExpectationResult
-                {
-                    ExpectationType = "link_pattern",
-                    Passed = false,
-                    Score = 0.0,
-                    Reason = $"Found {urls.Count} URL(s) but none matched pattern '{pattern}'",
-                    Metrics = new Dictionary<string, object>
-                    {
-                        { "found_urls", urls }
-                    }
-                };
-            }
-        }
-        catch (Exception ex)
+        var matchedUrls = patternResult.Matches;
+        if (matchedUrls.Count > 0)
         {
             return new ExpectationResult
             {
                 ExpectationType = "link_pattern",
-                Passed = false,
-                Score = 0.0,
-                Reason = $"Invalid pattern: {ex.Message}"
+                Passed = true,
+                Score = 1.0,
+                Reason = $"Found {matchedUrls.Count} URL(s) matching pattern '{pattern}'",
+                Metrics = new Dictionary<string, object>
+                {
+                    { "matched_urls", matchedUrls },
+                    { "total_urls", urls.Count }
+                }
             };
         }
+
+        return new ExpectationResult
+        {
+            ExpectationType = "link_pattern",
+            Passed = false,
+            Score = 0.0,
+            Reason = $"Found {urls.Count} URL(s) but none matched pattern '{pattern}'",
+            Metrics = new Dictionary<string, object>
+            {
+                { "found_urls", urls }
+            }
+        };
     }
 
-    private ExpectationResult EvaluateToolCalled(Dictionary<string, object> exp, CanonicalTrace trace)
+    private static ExpectationResult RegexError(
+        string expectationType,
+        BoundedRegexMatchResult matchResult)
+    {
+        return RegexError(expectationType, matchResult.Status, matchResult.ErrorMessage);
+    }
+
+    private static ExpectationResult RegexError(
+        string expectationType,
+        BoundedRegexStatus status,
+        string? errorMessage)
+    {
+        var errorCode = status switch
+        {
+            BoundedRegexStatus.InvalidPattern => "invalid_regex_pattern",
+            BoundedRegexStatus.UnsupportedPattern => "unsupported_regex_construct",
+            BoundedRegexStatus.PatternTooLong => "regex_pattern_too_long",
+            BoundedRegexStatus.InputTooLong => "regex_input_too_long",
+            BoundedRegexStatus.TimedOut => "regex_timeout",
+            _ => "regex_evaluation_error"
+        };
+
+        return new ExpectationResult
+        {
+            ExpectationType = expectationType,
+            Passed = false,
+            Score = 0.0,
+            ErrorCode = errorCode,
+            Reason = errorMessage ?? "Regex evaluation failed"
+        };
+    }
+
+    private static ExpectationResult MissingRegexPattern(string expectationType)
+    {
+        return new ExpectationResult
+        {
+            ExpectationType = expectationType,
+            Passed = false,
+            Score = 0.0,
+            ErrorCode = "invalid_regex_pattern",
+            Reason = "Regex pattern is required"
+        };
+    }
+
+    private static ExpectationResult EvaluateToolCalled(
+        Dictionary<string, object> exp,
+        CanonicalTrace trace)
     {
         var toolName = GetStringValue(exp, "tool_name") ?? "";
-
         var toolCalls = trace.ToolCalls;
         var found = toolCalls.Any(tc => tc.Name == toolName);
 
@@ -250,24 +319,19 @@ public class ExpectationEvaluator : IExpectationEvaluator
         };
     }
 
-    private ExpectationResult EvaluateToolSequence(Dictionary<string, object> exp, CanonicalTrace trace)
+    private static ExpectationResult EvaluateToolSequence(
+        Dictionary<string, object> exp,
+        CanonicalTrace trace)
     {
-        var expectedSequence = GetListValue(exp, "sequence") ?? new List<string>();
+        var expectedSequence = GetListValue(exp, "sequence") ?? [];
+        var actualSequence = trace.ToolCalls.Select(tc => tc.Name).ToList();
+        var matches = actualSequence.Count >= expectedSequence.Count;
 
-        var toolCalls = trace.ToolCalls;
-        var actualSequence = toolCalls.Select(tc => tc.Name).ToList();
-
-        // Check if actual sequence matches expected sequence
-        bool matches = true;
-        if (actualSequence.Count < expectedSequence.Count)
+        if (matches)
         {
-            matches = false;
-        }
-        else
-        {
-            for (int i = 0; i < expectedSequence.Count; i++)
+            for (var index = 0; index < expectedSequence.Count; index++)
             {
-                if (actualSequence[i] != expectedSequence[i])
+                if (actualSequence[index] != expectedSequence[index])
                 {
                     matches = false;
                     break;
@@ -291,55 +355,90 @@ public class ExpectationEvaluator : IExpectationEvaluator
         };
     }
 
-    // Helper methods to extract values from expectation dictionary
-    private string? GetStringValue(Dictionary<string, object> dict, string key)
+    private static string CombineAssistantMessages(CanonicalTrace trace)
     {
-        if (!dict.ContainsKey(key))
-            return null;
+        return string.Join(
+            "\n",
+            trace.Messages
+                .Where(message => message.Role == "assistant")
+                .Select(message => message.Content));
+    }
 
-        var value = dict[key];
-        if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.String)
-            return jsonElement.GetString();
+    private static string CombineAssistantMessagesForRegex(CanonicalTrace trace)
+    {
+        var builder = new StringBuilder(BoundedRegexMatcher.MaxInputLength + 1);
+        foreach (var message in trace.Messages.Where(message => message.Role == "assistant"))
+        {
+            if (builder.Length > 0)
+            {
+                builder.Append('\n');
+            }
+
+            var remaining = BoundedRegexMatcher.MaxInputLength + 1 - builder.Length;
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            if (message.Content.Length <= remaining)
+            {
+                builder.Append(message.Content);
+                continue;
+            }
+
+            builder.Append(message.Content.AsSpan(0, remaining));
+            break;
+        }
+
+        return builder.ToString();
+    }
+
+    private static string? GetStringValue(Dictionary<string, object> dict, string key)
+    {
+        if (!dict.TryGetValue(key, out var value))
+        {
+            return null;
+        }
+
+        if (value is JsonElement element)
+        {
+            return element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
+        }
 
         return value?.ToString();
     }
 
-    private bool? GetBoolValue(Dictionary<string, object> dict, string key)
+    private static bool? GetBoolValue(Dictionary<string, object> dict, string key)
     {
-        if (!dict.ContainsKey(key))
-            return null;
-
-        var value = dict[key];
-        if (value is JsonElement jsonElement)
+        if (!dict.TryGetValue(key, out var value))
         {
-            if (jsonElement.ValueKind == JsonValueKind.True)
-                return true;
-            if (jsonElement.ValueKind == JsonValueKind.False)
-                return false;
+            return null;
         }
 
-        if (value is bool boolValue)
-            return boolValue;
+        if (value is JsonElement element)
+        {
+            return element.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? element.GetBoolean()
+                : null;
+        }
 
-        return null;
+        return value is bool boolValue ? boolValue : null;
     }
 
-    private List<string>? GetListValue(Dictionary<string, object> dict, string key)
+    private static List<string>? GetListValue(Dictionary<string, object> dict, string key)
     {
-        if (!dict.ContainsKey(key))
-            return null;
-
-        var value = dict[key];
-        if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Array)
+        if (!dict.TryGetValue(key, out var value))
         {
-            return jsonElement.EnumerateArray()
-                .Select(e => e.GetString() ?? "")
+            return null;
+        }
+
+        if (value is JsonElement { ValueKind: JsonValueKind.Array } element)
+        {
+            return element.EnumerateArray()
+                .Select(item => item.GetString() ?? "")
                 .ToList();
         }
 
-        if (value is List<string> list)
-            return list;
-
-        return null;
+        return value as List<string>;
     }
 }

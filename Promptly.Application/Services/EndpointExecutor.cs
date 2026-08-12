@@ -26,8 +26,10 @@ public class EndpointExecutor : IEndpointExecutor
     public async Task<ExecutionResult> ExecuteAsync(
         Endpoint endpoint,
         Domain.Entities.Environment environment,
-        TestCase testCase)
+        TestCase testCase,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var stopwatch = Stopwatch.StartNew();
 
         try
@@ -101,10 +103,10 @@ public class EndpointExecutor : IEndpointExecutor
                 Content = content
             };
 
-            var response = await httpClient.SendAsync(request);
+            var response = await httpClient.SendAsync(request, cancellationToken);
             stopwatch.Stop();
 
-            var responseJson = await response.Content.ReadAsStringAsync();
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
             return new ExecutionResult
             {
@@ -114,6 +116,10 @@ public class EndpointExecutor : IEndpointExecutor
                 StatusCode = (int)response.StatusCode,
                 ErrorMessage = response.IsSuccessStatusCode ? null : $"HTTP {response.StatusCode}: {responseJson}"
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (TaskCanceledException ex)
         {

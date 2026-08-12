@@ -12,6 +12,8 @@ public class TestRunWorkerService : BackgroundService
     private readonly int _pollingIntervalSeconds;
     private readonly int _maxConcurrentRuns;
     private readonly SemaphoreSlim _semaphore;
+    private readonly object _processingTasksLock = new();
+    private readonly HashSet<Task> _processingTasks = [];
 
     public TestRunWorkerService(
         IServiceProvider serviceProvider,
@@ -41,7 +43,7 @@ public class TestRunWorkerService : BackgroundService
             {
                 await _semaphore.WaitAsync(stoppingToken);
 
-                _ = Task.Run(async () =>
+                var processingTask = Task.Run(async () =>
                 {
                     try
                     {
@@ -52,6 +54,7 @@ public class TestRunWorkerService : BackgroundService
                         _semaphore.Release();
                     }
                 }, stoppingToken);
+                TrackProcessingTask(processingTask);
 
                 // Wait before checking for next run
                 await Task.Delay(TimeSpan.FromSeconds(_pollingIntervalSeconds), stoppingToken);
@@ -91,9 +94,13 @@ public class TestRunWorkerService : BackgroundService
             _logger.LogInformation("Processing run {RunId}", run.Id);
 
             // Process the run
-            await testRunProcessor.ProcessRunAsync(run.Id);
+            await testRunProcessor.ProcessRunAsync(run.Id, stoppingToken);
 
             _logger.LogInformation("Completed processing run {RunId}", run.Id);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Run processing stopped due to cancellation");
         }
         catch (Exception ex)
         {
@@ -105,5 +112,39 @@ public class TestRunWorkerService : BackgroundService
     {
         _logger.LogInformation("TestRunWorkerService is stopping");
         await base.StopAsync(stoppingToken);
+
+        Task[] processingTasks;
+        lock (_processingTasksLock)
+        {
+            processingTasks = [.. _processingTasks];
+        }
+
+        if (processingTasks.Length > 0)
+        {
+            _logger.LogInformation(
+                "Waiting for {RunCount} in-flight run(s) to observe cancellation",
+                processingTasks.Length);
+            await Task.WhenAll(processingTasks).WaitAsync(stoppingToken);
+        }
+    }
+
+    private void TrackProcessingTask(Task processingTask)
+    {
+        lock (_processingTasksLock)
+        {
+            _processingTasks.Add(processingTask);
+        }
+
+        _ = processingTask.ContinueWith(
+            completedTask =>
+            {
+                lock (_processingTasksLock)
+                {
+                    _processingTasks.Remove(completedTask);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 }

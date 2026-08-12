@@ -1,0 +1,75 @@
+name: Application verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: application-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application-verification:
+    name: Application verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Promptly.slnx --locked-mode
+
+      - name: Build
+        run: dotnet build Promptly.slnx --configuration Release --no-restore
+
+      - name: Clean application test artifacts
+        shell: pwsh
+        run: Remove-Item artifacts/test-results/csharp -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Run application unit tests and coverage gate
+        run: >-
+          dotnet test tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj
+          --configuration Release
+          --no-build
+          --settings tests/Promptly.runsettings
+          --logger "trx;LogFileName=Promptly.Application.UnitTests.trx"
+          --results-directory artifacts/test-results/csharp
+
+      - name: Require test and coverage artifacts
+        shell: pwsh
+        run: |
+          $requiredArtifacts = @(
+            "artifacts/test-results/csharp/Promptly.Application.UnitTests.trx",
+            "artifacts/test-results/csharp/coverage/coverage.cobertura.xml",
+            "artifacts/test-results/csharp/coverage/coverage.json"
+          )
+          foreach ($artifact in $requiredArtifacts) {
+            if (-not (Test-Path -Path $artifact -PathType Leaf) -or (Get-Item $artifact).Length -eq 0) {
+              throw "Required verification artifact is missing or empty: $artifact"
+            }
+          }
+
+      - name: Upload test and coverage artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: application-test-results
+          path: artifacts/test-results/csharp
+          if-no-files-found: error
+          retention-days: 14

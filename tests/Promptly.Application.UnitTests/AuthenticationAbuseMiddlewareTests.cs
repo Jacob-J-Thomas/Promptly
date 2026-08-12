@@ -306,6 +306,8 @@ public sealed class AuthenticationAbuseMiddlewareTests
     {
         var context = ContextWithEndpoint(
             new AuthenticationAbuseOperationAttribute(AuthenticationOperation.Login));
+        var sizeFeature = new StubRequestSizeFeature(maxRequestBodySize: 16 * 1024);
+        context.Features.Set<IHttpMaxRequestBodySizeFeature>(sizeFeature);
         var body = new ThrowOnReadStream();
         context.Request.Body = body;
         var decision = AuthenticationThrottleDecision.RejectAfter(4);
@@ -322,6 +324,7 @@ public sealed class AuthenticationAbuseMiddlewareTests
         Assert.Equal(0, admissionGate.Calls);
         Assert.Equal(1, writer.WriteCalls);
         Assert.Equal(decision, writer.LastDecision);
+        Assert.Equal(AuthenticationInputLimits.RequestBodyMaxBytes, sizeFeature.MaxRequestBodySize);
     }
 
     [Theory]
@@ -331,6 +334,8 @@ public sealed class AuthenticationAbuseMiddlewareTests
         AuthenticationOperation operation)
     {
         var context = ContextWithEndpoint(new AuthenticationAbuseOperationAttribute(operation));
+        var sizeFeature = new StubRequestSizeFeature(maxRequestBodySize: 16 * 1024);
+        context.Features.Set<IHttpMaxRequestBodySizeFeature>(sizeFeature);
         var body = new ThrowOnReadStream();
         context.Request.Body = body;
         var admissionGate = new StubAdmissionGate { Reject = true };
@@ -347,6 +352,7 @@ public sealed class AuthenticationAbuseMiddlewareTests
         Assert.Equal(1, writer.WriteCalls);
         Assert.False(writer.LastDecision.IsAllowed);
         Assert.Equal(1, writer.LastDecision.RetryAfterSeconds);
+        Assert.Equal(AuthenticationInputLimits.RequestBodyMaxBytes, sizeFeature.MaxRequestBodySize);
     }
 
     [Fact]

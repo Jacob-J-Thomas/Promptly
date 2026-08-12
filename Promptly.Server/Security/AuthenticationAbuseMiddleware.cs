@@ -32,6 +32,16 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
             return;
         }
 
+        var requestSizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        var effectiveBodyLimit = Math.Min(
+            requestSizeFeature?.MaxRequestBodySize
+                ?? AuthenticationInputLimits.RequestBodyMaxBytes,
+            AuthenticationInputLimits.RequestBodyMaxBytes);
+        if (requestSizeFeature is { IsReadOnly: false })
+        {
+            requestSizeFeature.MaxRequestBodySize = effectiveBodyLimit;
+        }
+
         var decision = abuseGuard.TryAcquireClient(operation.Operation, httpContext);
         if (!decision.IsAllowed)
         {
@@ -52,16 +62,6 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
                     httpContext.RequestAborted)
                 .ConfigureAwait(false);
             return;
-        }
-
-        var requestSizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
-        var effectiveBodyLimit = Math.Min(
-            requestSizeFeature?.MaxRequestBodySize
-                ?? AuthenticationInputLimits.RequestBodyMaxBytes,
-            AuthenticationInputLimits.RequestBodyMaxBytes);
-        if (requestSizeFeature is { IsReadOnly: false })
-        {
-            requestSizeFeature.MaxRequestBodySize = effectiveBodyLimit;
         }
 
         if (httpContext.Request.ContentLength > effectiveBodyLimit)

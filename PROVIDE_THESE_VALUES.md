@@ -97,22 +97,21 @@ Once you've created `docker/.env` with your Azure OpenAI credentials:
 
 ```bash
 cd docker
-docker-compose up -d
+docker compose up -d
 ```
 
 Then verify:
 
 ```bash
-# Check Python worker sees your config
-curl http://localhost:8000/health
+# Check Python worker can authenticate to the configured provider
+docker compose exec promptly-eval python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
 
 # Expected output:
 {
-  "status": "healthy",
+  "status": "ready",
   "llm_provider": "azureopenai",
-  "llm_configured": true,
-  "azure_endpoint": "https://your-resource.openai.azure.com",
-  "azure_configured": true
+  "llm_configured": true
 }
 ```
 
@@ -123,7 +122,7 @@ curl http://localhost:8000/health
 **Minimum required to start testing:**
 1. Create `docker/.env`
 2. Add 3 Azure OpenAI values (key, endpoint, deployment name)
-3. Run `docker-compose up -d`
+3. Run `docker compose up -d`
 4. Open http://localhost:3000
 
 **That's it!** Everything else is pre-configured.
@@ -141,7 +140,7 @@ curl http://localhost:8000/health
 ## 🚀 I'm Ready to Test!
 
 Once you provide these values, I can:
-- ✅ Start the entire system with `docker-compose up`
+- ✅ Start the entire system with `docker compose up`
 - ✅ Test LLM judge evaluations
 - ✅ Test mapping proposal (AI-powered)
 - ✅ Test groundedness scoring

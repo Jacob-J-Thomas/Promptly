@@ -524,7 +524,7 @@ Data retention:
 # 15) Deliverables (Definition of Done)
 
 Repository includes:
-- Working docker-compose to run:
+- Working Docker Compose stack to run:
   - promptly-server (C#)
   - promptly-eval (Python)
   - postgres
@@ -540,7 +540,7 @@ Repository includes:
 - A demo toy endpoint in the repo to validate end-to-end behavior.
 
 Acceptance demo scenario:
-1) Start stack with docker-compose.
+1) Start the stack with Docker Compose.
 2) Use a sample “toy chat endpoint” in repo that returns:
    - messages array, tool calls, usage, retrieved docs (fake).
 3) Onboard endpoint via UI; mapping wizard proposes spec; user saves it.

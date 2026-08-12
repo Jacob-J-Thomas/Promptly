@@ -1,0 +1,95 @@
+[project]
+name = "promptly-worker"
+version = "0.1.0"
+description = "Promptly evaluation and mapping worker"
+readme = "README.md"
+requires-python = "==3.11.*"
+dependencies = [
+    "fastapi==0.141.1",
+    "httpx==0.27.2",
+    "jsonpath-ng==1.7.0",
+    "openai==1.54.3",
+    "pydantic==2.9.2",
+    "pyyaml==6.0.2",
+    "uvicorn[standard]==0.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "bandit==1.9.4",
+    "coverage[toml]==7.15.4",
+    # Starlette's TestClient dynamically selects the next-generation HTTP client.
+    "httpx2==2.10.0",
+    "mypy==2.3.0",
+    "pip-audit==2.10.1",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.2",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.12.3"
+
+[tool.pytest.ini_options]
+minversion = "9.1"
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["."]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+skip_empty = true
+precision = 2
+
+[tool.coverage.xml]
+output = "../artifacts/test-results/python/coverage/coverage.xml"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["../artifacts"]
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "C4",
+    "E",
+    "F",
+    "I",
+    "N",
+    "PERF",
+    "PIE",
+    "PL",
+    "PYI",
+    "RSE",
+    "RUF",
+    "SIM",
+    "UP",
+    "W",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["PLR2004"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["main.py", "llm.py", "routers", "tests"]
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+targets = ["main.py", "llm.py", "routers"]

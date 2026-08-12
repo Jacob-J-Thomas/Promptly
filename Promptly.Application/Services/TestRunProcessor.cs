@@ -399,7 +399,8 @@ public class TestRunProcessor : ITestRunProcessor
                     ExpectationType = "llm_judge",
                     Passed = false,
                     Score = 0.0,
-                    Reason = $"LLM judge evaluation failed: {result.ErrorMessage}"
+                    Reason = $"LLM judge evaluation failed: {result.ErrorMessage}",
+                    ErrorCode = result.ErrorCode ?? PythonWorkerErrorCodes.ClientError
                 };
             }
 
@@ -423,7 +424,8 @@ public class TestRunProcessor : ITestRunProcessor
                 ExpectationType = "llm_judge",
                 Passed = false,
                 Score = 0.0,
-                Reason = $"LLM judge error: {ex.Message}"
+                Reason = "LLM judge evaluation could not be completed",
+                ErrorCode = PythonWorkerErrorCodes.ClientError
             };
         }
     }
@@ -454,7 +456,8 @@ public class TestRunProcessor : ITestRunProcessor
                     ExpectationType = "groundedness",
                     Passed = false,
                     Score = 0.0,
-                    Reason = $"Groundedness evaluation failed: {result.ErrorMessage}"
+                    Reason = $"Groundedness evaluation failed: {result.ErrorMessage}",
+                    ErrorCode = result.ErrorCode ?? PythonWorkerErrorCodes.ClientError
                 };
             }
 
@@ -478,7 +481,8 @@ public class TestRunProcessor : ITestRunProcessor
                 ExpectationType = "groundedness",
                 Passed = false,
                 Score = 0.0,
-                Reason = $"Groundedness error: {ex.Message}"
+                Reason = "Groundedness evaluation could not be completed",
+                ErrorCode = PythonWorkerErrorCodes.ClientError
             };
         }
     }

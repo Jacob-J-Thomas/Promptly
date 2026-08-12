@@ -111,14 +111,14 @@ That process is part of what Promptly is meant to demonstrate. The repository is
 3. **Start all services**
    ```bash
    cd docker
-   docker-compose up -d
+   docker compose up -d
    ```
 
 4. **Access the application**
    - **Web UI**: http://localhost:3000
    - **API**: http://localhost:5000
    - **Swagger**: http://localhost:5000/swagger
-   - **Python Worker**: http://localhost:8000
+   - **Python Worker**: internal service at `http://promptly-eval:8000`
 
 5. **Initialize database**
 
@@ -315,9 +315,12 @@ dotnet run
 **Python Worker**:
 ```bash
 cd Promptly.Worker
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uv sync --frozen --all-groups
+uv run uvicorn main:app --reload --port 8000
 ```
+
+See [`Promptly.Worker/README.md`](Promptly.Worker/README.md) for the authoritative locked
+dependency and verification workflow.
 
 **React Frontend**:
 ```bash
@@ -356,24 +359,25 @@ Key endpoints:
 
 Ensure PostgreSQL is running:
 ```bash
-docker-compose ps postgres
+docker compose ps postgres
 ```
 
 Check logs:
 ```bash
-docker-compose logs postgres
+docker compose logs postgres
 ```
 
 ### Python Worker Errors
 
 Check LLM API key is set:
 ```bash
-docker-compose exec promptly-eval printenv PROMPTLY_LLM_API_KEY
+docker compose exec promptly-eval python -c \
+  "import os, sys; sys.exit(0 if os.environ.get('PROMPTLY_LLM_API_KEY') else 1)"
 ```
 
 View logs:
 ```bash
-docker-compose logs promptly-eval
+docker compose logs promptly-eval
 ```
 
 ### Frontend Connection Issues
@@ -384,7 +388,7 @@ Ensure VITE_API_BASE_URL points to the correct API URL. Check browser console fo
 
 Check worker logs:
 ```bash
-docker-compose logs promptly-server | grep TestRunWorkerService
+docker compose logs promptly-server | grep TestRunWorkerService
 ```
 
 Verify TestRunner configuration in appsettings.json.

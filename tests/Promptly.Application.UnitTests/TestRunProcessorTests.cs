@@ -166,6 +166,54 @@ public sealed class TestRunProcessorTests
         Assert.Equal(TestRunStatus.Failed, Assert.Single(runService.StatusUpdates).Status);
     }
 
+    [Theory]
+    [InlineData("llm_judge")]
+    [InlineData("groundedness")]
+    public async Task ProcessRunAsync_records_python_worker_failures_as_errors(
+        string expectationType)
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var processor = CreateProcessor(
+            dbContext,
+            runService,
+            new StubExpectationEvaluator(UnusedExpectationResult()),
+            pythonEvalClient: new FailingPythonEvalClient(
+                expectationType,
+                new EvaluationResult
+                {
+                    Success = false,
+                    ErrorMessage = "Provider unavailable",
+                    ErrorCode = PythonWorkerErrorCodes.Unavailable,
+                    WorkerStatusCode = 503
+                }));
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var storedResult = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Error, storedResult.Status);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(storedResult.MetricsJson));
+        Assert.Equal(0, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Equal(
+            PythonWorkerErrorCodes.Unavailable,
+            metrics.RootElement
+                .GetProperty("expectationResults")[0]
+                .GetProperty("ErrorCode")
+                .GetString());
+        Assert.Contains(
+            PythonWorkerErrorCodes.Unavailable,
+            storedResult.FailureReasonsJson,
+            StringComparison.Ordinal);
+    }
+
     private static PromptlyDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<PromptlyDbContext>()
@@ -384,7 +432,8 @@ public sealed class TestRunProcessorTests
         public Task<MappingProposalResult> ProposeMappingAsync(
             string sampleResponse,
             string? sampleRequest = null,
-            Dictionary<string, object>? hints = null) => throw new NotSupportedException();
+            Dictionary<string, object>? hints = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<EvaluationResult> EvaluateLlmJudgeAsync(
             string rubric,
@@ -413,7 +462,8 @@ public sealed class TestRunProcessorTests
         public Task<MappingProposalResult> ProposeMappingAsync(
             string sampleResponse,
             string? sampleRequest = null,
-            Dictionary<string, object>? hints = null) => throw new NotSupportedException();
+            Dictionary<string, object>? hints = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<EvaluationResult> EvaluateLlmJudgeAsync(
             string rubric,
@@ -454,6 +504,41 @@ public sealed class TestRunProcessorTests
             Entered.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return new EvaluationResult();
+        }
+    }
+
+    private sealed class FailingPythonEvalClient(
+        string expectationType,
+        EvaluationResult failure) : IPythonEvalClient
+    {
+        public Task<MappingProposalResult> ProposeMappingAsync(
+            string sampleResponse,
+            string? sampleRequest = null,
+            Dictionary<string, object>? hints = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<EvaluationResult> EvaluateLlmJudgeAsync(
+            string rubric,
+            double minScore,
+            CanonicalTrace trace,
+            string? model = null,
+            string? provider = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal("llm_judge", expectationType);
+            return Task.FromResult(failure);
+        }
+
+        public Task<EvaluationResult> EvaluateGroundednessAsync(
+            double minScore,
+            CanonicalTrace trace,
+            List<RetrievedDoc> docs,
+            string? model = null,
+            string? provider = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal("groundedness", expectationType);
+            return Task.FromResult(failure);
         }
     }
 }

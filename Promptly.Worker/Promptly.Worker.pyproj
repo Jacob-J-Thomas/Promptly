@@ -22,7 +22,20 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="llm.py" />
     <Compile Include="main.py" />
+    <Compile Include="routers\__init__.py" />
+    <Compile Include="routers\evaluation.py" />
+    <Compile Include="routers\mapping.py" />
+    <Compile Include="scripts\provider_stub.py" />
+    <Compile Include="scripts\verify.py" />
+    <Compile Include="tests\__init__.py" />
+    <Compile Include="tests\conftest.py" />
+    <Compile Include="tests\fakes.py" />
+    <Compile Include="tests\test_evaluation.py" />
+    <Compile Include="tests\test_llm.py" />
+    <Compile Include="tests\test_main.py" />
+    <Compile Include="tests\test_mapping.py" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

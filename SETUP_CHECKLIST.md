@@ -41,7 +41,7 @@ PROMPTLY_LLM_MODEL_DEFAULT=___________________  # ← YOUR DEPLOYMENT NAME HERE
 2. **Start services**:
    ```bash
    cd docker
-   docker-compose up -d
+   docker compose up -d
    ```
 3. **Wait 30 seconds** for services to initialize
 4. **Open browser**: http://localhost:3000
@@ -50,19 +50,18 @@ PROMPTLY_LLM_MODEL_DEFAULT=___________________  # ← YOUR DEPLOYMENT NAME HERE
 
 ## Verification Steps
 
-### Check Python Worker Health
+### Check Python Worker Readiness
 ```bash
-curl http://localhost:8000/health
+docker compose exec promptly-eval python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
 ```
 
 **Expected output:**
 ```json
 {
-  "status": "healthy",
+  "status": "ready",
   "llm_provider": "azureopenai",
-  "llm_configured": true,
-  "azure_endpoint": "https://your-resource.openai.azure.com",
-  "azure_configured": true
+  "llm_configured": true
 }
 ```
 

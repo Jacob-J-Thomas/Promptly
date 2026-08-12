@@ -14,10 +14,11 @@ public sealed class PythonEvalClientEdgeCaseTests
     public void Constructor_uses_the_documented_default_worker_address_and_timeout()
     {
         var httpClient = new HttpClient(new FixedHandler(() => JsonResponse(HttpStatusCode.OK, "{}")));
+        using var configuration = new ConfigurationManager();
 
         _ = new PythonEvalClient(
             httpClient,
-            new ConfigurationManager(),
+            configuration,
             NullLogger<PythonEvalClient>.Instance);
 
         Assert.Equal(new Uri("http://localhost:8000"), httpClient.BaseAddress);
@@ -141,7 +142,7 @@ public sealed class PythonEvalClientEdgeCaseTests
 
     private static PythonEvalClient CreateClient(HttpMessageHandler handler)
     {
-        var configuration = new ConfigurationManager
+        using var configuration = new ConfigurationManager
         {
             ["PROMPTLY_EVAL_BASE_URL"] = "https://worker.example.test"
         };

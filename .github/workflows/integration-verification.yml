@@ -96,6 +96,38 @@ jobs:
             throw "Integration TRX contains failures"
           }
 
+          $requiredAuthenticationTests = @(
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Identity_lockout_is_persisted_generic_and_recovers_after_expiry"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Login_client_limit_returns_stable_private_problem_and_preserves_cors"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Registration_client_limit_does_not_starve_another_client"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Concurrent_login_account_limits_are_exact_and_partition_isolated"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Registration_account_limit_uses_normalized_account_and_isolates_accounts"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Password_spray_blocks_login_but_not_an_isolated_client"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Forwarded_for_is_ignored_from_untrusted_peers_and_partitioned_for_trusted_proxy"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Concurrent_client_admission_is_exact_and_malformed_json_consumes_permits"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Overlong_authentication_fields_are_rejected_before_identity_work"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Oversized_authentication_bodies_return_413_before_identity_work"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseConfigurationStartupTests.Unsafe_configuration_fails_before_host_startup"; Count = 5 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseConfigurationStartupTests.Defaults_and_safe_proxy_override_start_a_healthy_host"; Count = 2 }
+          )
+          $executedNames = @(
+            $report.TestRun.Results.UnitTestResult |
+              ForEach-Object { [string]$_.testName }
+          )
+          foreach ($requiredTest in $requiredAuthenticationTests) {
+            $matches = @(
+              $executedNames | Where-Object {
+                $_ -eq $requiredTest.BaseName -or
+                  $_.StartsWith(
+                    "$($requiredTest.BaseName)(",
+                    [System.StringComparison]::Ordinal)
+              }
+            )
+            if ($matches.Count -ne $requiredTest.Count) {
+              throw "Required authentication integration test count mismatch for $($requiredTest.BaseName): expected $($requiredTest.Count), found $($matches.Count)"
+            }
+          }
+
           $requiredNonEmpty = @(
             "harness.log",
             "server.log",

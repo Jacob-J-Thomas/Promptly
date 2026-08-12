@@ -11,7 +11,11 @@ import {
 } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
-import { getApiErrorMessage } from '../api/errors';
+import { getAuthenticationErrorMessage } from '../api/errors';
+import {
+  AUTHENTICATION_EMAIL_MAX_LENGTH,
+  AUTHENTICATION_PASSWORD_MAX_LENGTH,
+} from '../authenticationInputLimits';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -36,7 +40,11 @@ export const Login: React.FC = () => {
       await login(email, password);
       navigate('/');
     } catch (error: unknown) {
-      setError(getApiErrorMessage(error, 'Login failed. Please check your credentials.'));
+      setError(getAuthenticationErrorMessage(
+        error,
+        'login',
+        'Login failed. Please check your credentials.',
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -70,6 +78,7 @@ export const Login: React.FC = () => {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              slotProps={{ htmlInput: { maxLength: AUTHENTICATION_EMAIL_MAX_LENGTH } }}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -82,6 +91,7 @@ export const Login: React.FC = () => {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              slotProps={{ htmlInput: { maxLength: AUTHENTICATION_PASSWORD_MAX_LENGTH } }}
               sx={{ mb: 3 }}
             />
             <Button

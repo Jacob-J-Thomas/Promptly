@@ -118,6 +118,97 @@ jobs:
       - name: Require complete measured C# cohort
         shell: pwsh
         run: |
+          $trxPath = "artifacts/test-results/csharp/Promptly.Application.UnitTests.trx"
+          if (!(Test-Path $trxPath) -or (Get-Item $trxPath).Length -eq 0) {
+            throw "Application unit-test TRX is missing or empty"
+          }
+
+          [xml]$report = Get-Content $trxPath -Raw
+          $counters = $report.TestRun.ResultSummary.Counters
+          if ([int]$counters.total -lt 900) {
+            throw "Expected at least 900 application unit tests, found $($counters.total)"
+          }
+
+          $expectedSkippedTests = @(
+            "Promptly.Application.UnitTests.PythonWorkerLiveContractTests.Health_ready_supports_OpenAI_and_AzureOpenAI_wire_contracts"
+            "Promptly.Application.UnitTests.PythonWorkerLiveContractTests.PythonEvalClient_round_trips_through_real_FastAPI_and_local_provider"
+          ) | Sort-Object
+          $unitResults = @($report.TestRun.Results.UnitTestResult)
+          $actualSkippedTests = @(
+            $unitResults |
+              Where-Object { [string]$_.outcome -ne "Passed" } |
+              ForEach-Object { [string]$_.testName }
+          ) | Sort-Object
+          $skipDifference = Compare-Object $expectedSkippedTests $actualSkippedTests
+          if ($skipDifference) {
+            throw "Unexpected application unit-test skip/failure cohort: $($skipDifference | Out-String)"
+          }
+
+          $expectedExecuted = [int]$counters.total - $expectedSkippedTests.Count
+          if ([int]$counters.executed -ne $expectedExecuted -or
+              [int]$counters.passed -ne $expectedExecuted -or
+              [int]$counters.failed -ne 0) {
+            throw "Application unit-test TRX contains unexpected skips or failures"
+          }
+
+          $requiredAuthenticationTests = @(
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.ClientGateIsAtomicUnderConcurrency"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.Ipv6SixtyFourPrefixSharesClientWindowAndDifferentPrefixIsIsolated"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.SameAccountContentionRejectsImmediatelyAndRecoversAfterDispose"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.CanceledImmediateAttemptThrowsWithoutReleasingHolder"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.SameStripeDifferentAccountsHaveZeroQueuedWaitersUnderConcurrency"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.HeldAccountStripeRejectsBarrierStartedContendersWithoutConsumingQuota"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.SprayTrackingCapacityFailureRejectsThresholdMutation"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.GlobalSprayEntryCapIsExactWithoutEmptyStateLeakAndRecoversOnExpiry"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.SprayThresholdClearsGlobalEntryBudgetAndOtherCohortsRemainAvailable"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.ExhaustingEachCapacityCohortDoesNotDenyOtherCohorts"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.CapacityRetryUsesEarliestFixedOrSprayExpiry"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.ActiveSprayBlockRejectsBeforeConsumingAccountPermitThenRecovers"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.Ipv6SixtyFourPrefixSharesSprayBlockAndDifferentPrefixIsIsolated"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseGuardTests.BoundedEvictionCursorReclaimsExpiredStateBehindSixtyFourLiveStatesOnNextProbe"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Admitted_login_success_completes_when_spray_block_activates_during_verification"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Login_records_a_completed_wrong_password_before_honoring_cancellation"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Register_rejects_overlong_fields_before_account_or_identity_work"; Count = 3 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Login_rejects_overlong_fields_before_account_or_credential_work"; Count = 2 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Authentication_models_accept_values_at_the_documented_limits"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Authentication_actions_publish_the_request_body_limit"; Count = 2 }
+            @{ BaseName = "Promptly.Application.UnitTests.IdentityCredentialVerifierTests.Completed_wrong_password_returns_for_accounting_even_when_verification_cancels"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.IdentityCredentialVerifierTests.Threshold_crossing_wrong_password_does_not_repeat_dummy_password_work"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.IdentityCredentialVerifierTests.Already_locked_user_runs_dummy_password_work_and_remains_generic"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseOptionsValidatorTests.Maximum_tracked_spray_entries_must_cover_spray_cardinality"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseOptionsValidatorTests.Broad_public_proxy_networks_require_exact_host_routes"; Count = 2 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseOptionsValidatorTests.Trusted_proxy_network_count_is_bounded"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationPartitionKeyProviderTests.Ipv6ClientPartitionsAggregateAtSixtyFourBits"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationThrottleResponseWriterTests.WriteAsyncProducesStablePrivateProblemContract"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.RejectionShortCircuitsAndForwardsRequestAbortToWriter"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.OversizedKnownLengthReturns413AfterClientAdmissionWithoutInvokingNext"; Count = 2 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.BodyAtExactLimitInvokesNext"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.OversizedUnknownLengthReturns413IndependentlyOfTransportFeature"; Count = 3 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.ValidUnknownLengthBodyIsBufferedForDownstreamAndOriginalStreamIsRestored"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.ThrottledUnknownLengthRequestIsRejectedWithoutReadingBody"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.Transport413WhileBufferingReturnsPrivateNoStore413"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.StricterWritableTransportBodyLimitIsPreserved"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.StricterTransportBodyLimitRejectsKnownAndUnknownLengths"; Count = 4 }
+          )
+          $passedNames = @(
+            $unitResults |
+              Where-Object { [string]$_.outcome -eq "Passed" } |
+              ForEach-Object { [string]$_.testName }
+          )
+          foreach ($requiredTest in $requiredAuthenticationTests) {
+            $matches = @(
+              $passedNames | Where-Object {
+                $_ -eq $requiredTest.BaseName -or
+                  $_.StartsWith(
+                    "$($requiredTest.BaseName)(",
+                    [System.StringComparison]::Ordinal)
+              }
+            )
+            if ($matches.Count -ne $requiredTest.Count) {
+              throw "Required authentication unit test count mismatch for $($requiredTest.BaseName): expected $($requiredTest.Count), found $($matches.Count)"
+            }
+          }
+
           [xml]$coverage = Get-Content artifacts/test-results/csharp/coverage/coverage.cobertura.xml -Raw
           $packages = @($coverage.coverage.packages.package)
           $expectedAssemblies = @(
@@ -199,6 +290,7 @@ jobs:
           }
 
           $expectedServerSources = @(
+            "Promptly.Server/Controllers/AuthController.cs"
             "Promptly.Server/Controllers/EndpointsController.cs"
             "Promptly.Server/Controllers/EnvironmentsController.cs"
             "Promptly.Server/Controllers/MappingController.cs"
@@ -206,7 +298,14 @@ jobs:
             "Promptly.Server/Controllers/RunsController.cs"
             "Promptly.Server/Controllers/TestSuitesController.cs"
             "Promptly.Server/Controllers/TestsController.cs"
+            "Promptly.Server/Models/AuthModels.cs"
+            "Promptly.Server/Security/AuthenticationAbuseGuard.cs"
+            "Promptly.Server/Security/AuthenticationAbuseMiddleware.cs"
+            "Promptly.Server/Security/AuthenticationAbuseOptions.cs"
+            "Promptly.Server/Security/AuthenticationPartitionKeyProvider.cs"
+            "Promptly.Server/Security/AuthenticationThrottleResponseWriter.cs"
             "Promptly.Server/Security/HttpContextTenantAccessScopeAccessor.cs"
+            "Promptly.Server/Security/IdentityCredentialVerifier.cs"
             "Promptly.Server/Security/TenantAccessScopeFactory.cs"
             "Promptly.Server/Security/TenantAuthenticationSchemeSelector.cs"
             "Promptly.Server/Services/TestRunWorkerService.cs"
@@ -294,6 +393,7 @@ jobs:
           }
 
           $requiredServerClasses = @(
+            "Promptly.Server.Controllers.AuthController"
             "Promptly.Server.Controllers.EndpointsController"
             "Promptly.Server.Controllers.EnvironmentsController"
             "Promptly.Server.Controllers.MappingController"
@@ -301,7 +401,22 @@ jobs:
             "Promptly.Server.Controllers.RunsController"
             "Promptly.Server.Controllers.TestSuitesController"
             "Promptly.Server.Controllers.TestsController"
+            "Promptly.Server.Models.AuthResponse"
+            "Promptly.Server.Models.LoginRequest"
+            "Promptly.Server.Models.RegisterRequest"
+            "Promptly.Server.Models.UserInfo"
+            "Promptly.Server.Security.AuthenticationAbuseGuard"
+            "Promptly.Server.Security.AuthenticationAbuseOperationAttribute"
+            "Promptly.Server.Security.AuthenticationAbuseMiddleware"
+            "Promptly.Server.Security.AuthenticationAbuseOptions"
+            "Promptly.Server.Security.AuthenticationAbuseOptionsValidator"
+            "Promptly.Server.Security.AuthenticationAccountAttempt"
+            "Promptly.Server.Security.AuthenticationPartitionKeyProvider"
+            "Promptly.Server.Security.AuthenticationThrottleDecision"
+            "Promptly.Server.Security.AuthenticationThrottleResponseWriter"
             "Promptly.Server.Security.HttpContextTenantAccessScopeAccessor"
+            "Promptly.Server.Security.IdentityCredentialVerifier"
+            "Promptly.Server.Security.InvalidCredentialPasswordVerifier"
             "Promptly.Server.Security.TenantAccessScopeFactory"
             "Promptly.Server.Security.TenantAuthenticationSchemeSelector"
             "Promptly.Server.Services.TestRunWorkerService"

@@ -12,6 +12,8 @@ PROMPTLY_LLM_API_KEY=___________________  # ← PASTE YOUR KEY HERE
 PROMPTLY_LLM_AZURE_ENDPOINT=___________________  # ← PASTE YOUR ENDPOINT HERE
 PROMPTLY_LLM_MODEL_DEFAULT=___________________  # ← YOUR DEPLOYMENT NAME HERE
 JWT__Key=___________________  # ← OUTPUT OF: openssl rand -base64 48
+# Leave at 1 until Promptly has a shared authentication limiter store.
+AuthenticationAbuse__ApiReplicaCount=1
 ```
 
 **Where to find these:**
@@ -87,6 +89,7 @@ Open: http://localhost:5000/swagger
 | **Deployment Name** | `docker/.env` | ⚠️ YOU PROVIDE |
 | **Database** | Docker container | ✅ AUTO-CONFIGURED |
 | **JWT signing key** | untracked `docker/.env` / secret manager | ⚠️ YOU GENERATE |
+| **API replica count** | `AuthenticationAbuse__ApiReplicaCount=1` | ✅ REQUIRED FOR CURRENT LIMITER |
 | **Test Endpoint** | Built-in or UI | ✅ BUILT-IN DEMO AVAILABLE |
 
 ---

@@ -150,6 +150,10 @@ Configuration via `appsettings.json` or environment variables:
 - **JWT:ExpiryMinutes**: Token expiry time (default: 60)
 - **JWT:RetiredKeyFingerprints**: Optional comma-separated SHA-256 fingerprints of retired
   signing keys; startup rejects reuse (see `CONFIGURATION.md` for rotation and incident response)
+- **AuthenticationAbuse:…**: Persisted account lockout plus bounded per-client,
+  per-account, registration, login, and password-spray controls. The current implementation
+  supports exactly one API replica and refuses unsafe multi-replica configuration; see
+  `CONFIGURATION.md` for thresholds and trusted-proxy handling.
 - **DATA_PROTECTION_PATH**: Path for Data Protection keys persistence
 - **PROMPTLY_EVAL_BASE_URL**: Python worker base URL
 - **TestRunner:PollingIntervalSeconds**: Background worker polling interval (default: 5)
@@ -367,6 +371,11 @@ Key endpoints:
 - **POST /api/suites/{id}/tests/import**: Import tests from YAML
 - **POST /api/runs**: Queue test run
 - **GET /api/runs/{id}/results**: Get run results
+
+Authentication throttles return `429 application/problem+json`, a bounded integer
+`Retry-After` header, and the stable code `authentication_rate_limited`. Clients should wait
+for that interval before retrying. Credential failures remain a generic `401` so missing,
+wrong-password, and locked accounts are not distinguished.
 
 ## Troubleshooting
 

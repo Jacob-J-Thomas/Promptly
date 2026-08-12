@@ -193,39 +193,42 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
     }
 
     [Fact]
-    public async Task LegacyIncoherentRunGraph_IsInvisibleToJwtAndProjectApiKeyQueries()
+    public async Task Database_RejectsNewIncoherentRunGraph()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await PromptlyApiClient.RegisterAsync(fixture.PrimaryHost.Factory);
-        var projectA = await CreateGraphAsync(owner, "legacy-run-project-a", cancellationToken);
-        var projectB = await CreateGraphAsync(owner, "legacy-run-project-b", cancellationToken);
-        var rawApiKey = $"promptly-integration-{Guid.NewGuid():N}";
-        await SeedProjectApiKeyAsync(projectA.ProjectId, rawApiKey, cancellationToken);
-        var legacy = await SeedIncoherentLegacyRunAsync(
-            owner.User.Id,
-            projectA,
-            projectB,
-            cancellationToken);
-        using var apiKeyClient = fixture.PrimaryHost.Factory.CreateClient(new()
-        {
-            AllowAutoRedirect = false
-        });
+        var projectA = await CreateGraphAsync(owner, "guarded-run-project-a", cancellationToken);
+        var projectB = await CreateGraphAsync(owner, "guarded-run-project-b", cancellationToken);
+        var runId = Guid.NewGuid();
 
-        await AssertLegacyRunIsInvisibleAsync(
-            owner.SendAsync,
-            projectA.SuiteId,
-            legacy,
-            cancellationToken);
-        await AssertLegacyRunIsInvisibleAsync(
-            request => SendWithApiKeyAsync(
-                apiKeyClient,
-                request,
-                rawApiKey,
-                bearerToken: null,
-                cancellationToken),
-            projectA.SuiteId,
-            legacy,
-            cancellationToken);
+        await using (var scope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<PromptlyDbContext>();
+            dbContext.TestRuns.Add(new TestRun
+            {
+                Id = runId,
+                ProjectId = projectA.ProjectId,
+                SuiteId = projectA.SuiteId,
+                EnvironmentId = projectB.EnvironmentId,
+                EndpointId = projectB.EndpointId,
+                MappingSpecId = projectB.MappingId,
+                Status = TestRunStatus.Queued,
+                CreatedByUserId = owner.User.Id,
+                GitCommitHash = "must-be-rejected",
+                ConfigSnapshotJson = "{\"mustNotPersist\":true}"
+            });
+
+            await Assert.ThrowsAsync<DbUpdateException>(
+                () => dbContext.SaveChangesAsync(cancellationToken));
+        }
+
+        await using (var verificationScope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope())
+        {
+            var dbContext = verificationScope.ServiceProvider.GetRequiredService<PromptlyDbContext>();
+            Assert.False(await dbContext.TestRuns.AsNoTracking().AnyAsync(
+                run => run.Id == runId,
+                cancellationToken));
+        }
     }
 
     [Fact]
@@ -1566,87 +1569,6 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
         Assert.Equal(graph.TestExternalId, result.GetProperty("testCaseExternalId").GetString());
     }
 
-    private async Task<LegacyRunIds> SeedIncoherentLegacyRunAsync(
-        string ownerUserId,
-        TenantGraph projectA,
-        TenantGraph projectB,
-        CancellationToken cancellationToken)
-    {
-        var runId = Guid.NewGuid();
-        var resultId = Guid.NewGuid();
-        await using var scope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<PromptlyDbContext>();
-        dbContext.TestRuns.Add(new TestRun
-        {
-            Id = runId,
-            SuiteId = projectA.SuiteId,
-            EnvironmentId = projectB.EnvironmentId,
-            EndpointId = projectB.EndpointId,
-            MappingSpecId = projectB.MappingId,
-            Status = TestRunStatus.Queued,
-            CreatedByUserId = ownerUserId,
-            GitCommitHash = "legacy-incoherent-run",
-            ConfigSnapshotJson = "{\"legacyIncoherent\":true}"
-        });
-        dbContext.TestRunResults.Add(new TestRunResult
-        {
-            Id = resultId,
-            RunId = runId,
-            TestCaseId = projectB.TestId,
-            Status = TestResultStatus.Fail,
-            TraceJson = "{\"legacyTrace\":\"must-not-be-visible\"}",
-            MetricsJson = "{\"legacyMetric\":1}",
-            FailureReasonsJson = "[\"legacy-incoherent\"]"
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return new LegacyRunIds(runId, resultId);
-    }
-
-    private static async Task AssertLegacyRunIsInvisibleAsync(
-        Func<HttpRequestMessage, Task<HttpResponseMessage>> sendAsync,
-        Guid suiteId,
-        LegacyRunIds legacy,
-        CancellationToken cancellationToken)
-    {
-        using (var runRequest = new HttpRequestMessage(
-                   HttpMethod.Get,
-                   $"/api/runs/{legacy.RunId}"))
-        using (var run = await sendAsync(runRequest))
-        {
-            Assert.Equal(HttpStatusCode.NotFound, run.StatusCode);
-        }
-
-        using (var listRequest = new HttpRequestMessage(
-                   HttpMethod.Get,
-                   $"/api/suites/{suiteId}/runs?status=Queued&limit=100"))
-        using (var list = await sendAsync(listRequest))
-        {
-            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
-            var body = await list.Content.ReadAsStringAsync(cancellationToken);
-            Assert.DoesNotContain(legacy.RunId.ToString(), body, StringComparison.OrdinalIgnoreCase);
-            using var document = JsonDocument.Parse(body);
-            Assert.DoesNotContain(
-                document.RootElement.EnumerateArray(),
-                run => run.GetProperty("id").GetGuid() == legacy.RunId);
-        }
-
-        using (var resultsRequest = new HttpRequestMessage(
-                   HttpMethod.Get,
-                   $"/api/runs/{legacy.RunId}/results"))
-        using (var results = await sendAsync(resultsRequest))
-        {
-            Assert.Equal(HttpStatusCode.NotFound, results.StatusCode);
-        }
-
-        using (var resultRequest = new HttpRequestMessage(
-                   HttpMethod.Get,
-                   $"/api/runs/{legacy.RunId}/results/{legacy.ResultId}"))
-        using (var result = await sendAsync(resultRequest))
-        {
-            Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
-        }
-    }
-
     private static async Task<HttpResponseMessage> SendApiKeyAsync(
         HttpClient client,
         string rawApiKey,
@@ -1948,8 +1870,6 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
         HttpStatusCode StatusCode,
         string Body,
         IReadOnlyCollection<string> LeakedValues);
-
-    private sealed record LegacyRunIds(Guid RunId, Guid ResultId);
 
     private sealed record TenantGraph(
         Guid ProjectId,

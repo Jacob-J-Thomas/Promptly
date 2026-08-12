@@ -103,6 +103,7 @@ public static class TenantOwnedQueries
         return testRuns.Where(testRun =>
             testRun.Suite!.Project!.OwnerUserId == ownerUserId
             && testRun.CreatedByUserId == ownerUserId
+            && testRun.ProjectId == testRun.Suite.ProjectId
             && testRun.Environment!.ProjectId == testRun.Suite.ProjectId
             && testRun.Endpoint!.EnvironmentId == testRun.EnvironmentId
             && testRun.MappingSpec!.EndpointId == testRun.EndpointId
@@ -121,6 +122,8 @@ public static class TenantOwnedQueries
         return testRunResults.Where(testRunResult =>
             testRunResult.TestRun!.Suite!.Project!.OwnerUserId == ownerUserId
             && testRunResult.TestRun.CreatedByUserId == ownerUserId
+            && testRunResult.TestRun.ProjectId
+                == testRunResult.TestRun.Suite.ProjectId
             && testRunResult.TestRun.Environment!.ProjectId
                 == testRunResult.TestRun.Suite.ProjectId
             && testRunResult.TestRun.Endpoint!.EnvironmentId

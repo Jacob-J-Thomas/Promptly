@@ -5,6 +5,7 @@ namespace Promptly.Domain.Entities;
 public class TestRun
 {
     public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
     public Guid SuiteId { get; set; }
     public Guid EnvironmentId { get; set; }
     public Guid EndpointId { get; set; }

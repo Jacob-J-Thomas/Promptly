@@ -215,6 +215,55 @@ public sealed class TestRunProcessorTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ProcessRunAsync_stops_before_test_cases_and_egress_for_invalid_graph()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(suiteId, "[]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runStore = new StubTestRunWorkerStore(WorkerRunLoadResult.InvalidGraph());
+        var endpointExecutor = new RecordingEndpointExecutor();
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            new StubExpectationEvaluator(UnusedExpectationResult()),
+            endpointExecutor: endpointExecutor);
+
+        await processor.ProcessRunAsync(
+            Guid.NewGuid(),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(endpointExecutor.WasCalled);
+        Assert.Empty(dbContext.TestRunResults);
+        Assert.Empty(runStore.StatusUpdates);
+    }
+
+    [Fact]
+    public async Task ProcessRunAsync_stops_before_test_cases_and_egress_for_unsafe_endpoint_target()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(suiteId, "[]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runStore = new StubTestRunWorkerStore(
+            WorkerRunLoadResult.UnsafeEndpointTarget());
+        var endpointExecutor = new RecordingEndpointExecutor();
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            new StubExpectationEvaluator(UnusedExpectationResult()),
+            endpointExecutor: endpointExecutor);
+
+        await processor.ProcessRunAsync(
+            Guid.NewGuid(),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(endpointExecutor.WasCalled);
+        Assert.Empty(dbContext.TestRunResults);
+        Assert.Empty(runStore.StatusUpdates);
+    }
+
     private static PromptlyDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<PromptlyDbContext>()
@@ -311,11 +360,25 @@ public sealed class TestRunProcessorTests
         return processor.ProcessRunAsync(runId, cancellationToken);
     }
 
-    private sealed class StubTestRunWorkerStore(TestRun run) : ITestRunWorkerStore
+    private sealed class StubTestRunWorkerStore : ITestRunWorkerStore
     {
+        private readonly WorkerRunLoadResult _loadResult;
+
+        public StubTestRunWorkerStore(TestRun run)
+            : this(WorkerRunLoadResult.Ready(run))
+        {
+        }
+
+        public StubTestRunWorkerStore(WorkerRunLoadResult loadResult)
+        {
+            _loadResult = loadResult;
+        }
+
         public List<(TestRunStatus Status, string? ErrorMessage)> StatusUpdates { get; } = [];
 
-        public Task<TestRun?> GetRunByIdAsync(Guid runId) => Task.FromResult<TestRun?>(run);
+        public Task<WorkerRunLoadResult> LoadRunForProcessingAsync(
+            Guid runId,
+            CancellationToken cancellationToken = default) => Task.FromResult(_loadResult);
 
         public Task UpdateRunStatusAsync(
             Guid runId,
@@ -327,7 +390,8 @@ public sealed class TestRunProcessorTests
             return Task.CompletedTask;
         }
 
-        public Task<TestRun?> ClaimNextQueuedRunAsync() => throw new NotSupportedException();
+        public Task<Guid?> ClaimNextQueuedRunAsync(
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class StubEndpointExecutor : IEndpointExecutor
@@ -360,6 +424,25 @@ public sealed class TestRunProcessorTests
             Entered.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return new ExecutionResult();
+        }
+    }
+
+    private sealed class RecordingEndpointExecutor : IEndpointExecutor
+    {
+        public bool WasCalled { get; private set; }
+
+        public Task<ExecutionResult> ExecuteAsync(
+            Endpoint endpoint,
+            Environment environment,
+            TestCase testCase,
+            CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return Task.FromResult(new ExecutionResult
+            {
+                Success = true,
+                ResponseJson = "{}"
+            });
         }
     }
 

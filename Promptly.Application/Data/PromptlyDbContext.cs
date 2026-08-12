@@ -41,6 +41,7 @@ public class PromptlyDbContext : IdentityDbContext<User>
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasAlternateKey(e => new { e.Id, e.OwnerUserId });
             entity.HasIndex(e => new { e.OwnerUserId, e.Name });
             entity.HasIndex(e => e.CreatedAt);
 
@@ -69,6 +70,7 @@ public class PromptlyDbContext : IdentityDbContext<User>
         modelBuilder.Entity<Domain.Entities.Environment>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasAlternateKey(e => new { e.Id, e.ProjectId });
             entity.HasIndex(e => new { e.ProjectId, e.Name });
             entity.HasIndex(e => e.CreatedAt);
 
@@ -85,6 +87,7 @@ public class PromptlyDbContext : IdentityDbContext<User>
         modelBuilder.Entity<Endpoint>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasAlternateKey(e => new { e.Id, e.EnvironmentId });
             entity.HasIndex(e => new { e.EnvironmentId, e.Name });
 
             entity.HasMany(e => e.MappingSpecs)
@@ -97,6 +100,7 @@ public class PromptlyDbContext : IdentityDbContext<User>
         modelBuilder.Entity<MappingSpec>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasAlternateKey(e => new { e.Id, e.EndpointId });
             entity.HasIndex(e => new { e.EndpointId, e.IsDefault });
             entity.HasIndex(e => e.CreatedAt);
 
@@ -109,6 +113,7 @@ public class PromptlyDbContext : IdentityDbContext<User>
         modelBuilder.Entity<TestSuite>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasAlternateKey(e => new { e.Id, e.ProjectId });
             entity.HasIndex(e => new { e.ProjectId, e.Name });
             entity.HasIndex(e => e.CreatedAt);
 
@@ -180,6 +185,41 @@ public class PromptlyDbContext : IdentityDbContext<User>
             entity.HasOne(e => e.CreatedBy)
                 .WithMany(u => u.CreatedTestRuns)
                 .HasForeignKey(e => e.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Keep the scalar relationships above for ordinary navigation and
+            // add navigationless composite relationships as write-time graph
+            // invariants. Together they prove that every run belongs to one
+            // owner-consistent project and that its nested resources form one
+            // coherent suite -> environment -> endpoint -> mapping chain.
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ProjectId, e.CreatedByUserId })
+                .HasPrincipalKey(e => new { e.Id, e.OwnerUserId })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<TestSuite>()
+                .WithMany()
+                .HasForeignKey(e => new { e.SuiteId, e.ProjectId })
+                .HasPrincipalKey(e => new { e.Id, e.ProjectId })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Domain.Entities.Environment>()
+                .WithMany()
+                .HasForeignKey(e => new { e.EnvironmentId, e.ProjectId })
+                .HasPrincipalKey(e => new { e.Id, e.ProjectId })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Endpoint>()
+                .WithMany()
+                .HasForeignKey(e => new { e.EndpointId, e.EnvironmentId })
+                .HasPrincipalKey(e => new { e.Id, e.EnvironmentId })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<MappingSpec>()
+                .WithMany()
+                .HasForeignKey(e => new { e.MappingSpecId, e.EndpointId })
+                .HasPrincipalKey(e => new { e.Id, e.EndpointId })
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(e => e.Results)

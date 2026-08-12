@@ -53,7 +53,7 @@ public class TestRunWorkerService : BackgroundService
                     {
                         _semaphore.Release();
                     }
-                }, stoppingToken);
+                });
                 TrackProcessingTask(processingTask);
 
                 // Wait before checking for next run
@@ -76,27 +76,32 @@ public class TestRunWorkerService : BackgroundService
 
     private async Task ProcessNextRunAsync(CancellationToken stoppingToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var testRunWorkerStore = scope.ServiceProvider.GetRequiredService<ITestRunWorkerStore>();
-        var testRunProcessor = scope.ServiceProvider.GetRequiredService<ITestRunProcessor>();
-
         try
         {
-            // Claim next queued run
-            var run = await testRunWorkerStore.ClaimNextQueuedRunAsync();
+            Guid? runId;
+            using (var claimScope = _serviceProvider.CreateScope())
+            {
+                var testRunWorkerStore = claimScope.ServiceProvider
+                    .GetRequiredService<ITestRunWorkerStore>();
+                runId = await testRunWorkerStore.ClaimNextQueuedRunAsync(stoppingToken);
+            }
 
-            if (run == null)
+            if (!runId.HasValue)
             {
                 // No queued runs, return silently
                 return;
             }
 
-            _logger.LogInformation("Processing run {RunId}", run.Id);
+            _logger.LogInformation("Processing run {RunId}", runId.Value);
 
-            // Process the run
-            await testRunProcessor.ProcessRunAsync(run.Id, stoppingToken);
+            using (var processingScope = _serviceProvider.CreateScope())
+            {
+                var testRunProcessor = processingScope.ServiceProvider
+                    .GetRequiredService<ITestRunProcessor>();
+                await testRunProcessor.ProcessRunAsync(runId.Value, stoppingToken);
+            }
 
-            _logger.LogInformation("Completed processing run {RunId}", run.Id);
+            _logger.LogInformation("Completed processing run {RunId}", runId.Value);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

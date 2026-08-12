@@ -218,7 +218,8 @@ public sealed class TenantServiceCoverageHardeningTests
             dbContext,
             NullLogger<TestRunWorkerStore>.Instance);
 
-        var claimed = await store.ClaimNextQueuedRunAsync();
+        var claimed = await store.ClaimNextQueuedRunAsync(
+            TestContext.Current.CancellationToken);
 
         Assert.Null(claimed);
     }
@@ -263,7 +264,7 @@ public sealed class TenantServiceCoverageHardeningTests
             NullLogger<TestRunWorkerStore>.Instance);
 
         var exception = await Assert.ThrowsAsync<SaveFailureException>(
-            () => store.ClaimNextQueuedRunAsync());
+            () => store.ClaimNextQueuedRunAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal("forced save failure", exception.Message);
     }
@@ -370,6 +371,7 @@ public sealed class TenantServiceCoverageHardeningTests
         DateTime createdAt) => new()
         {
             Id = Guid.NewGuid(),
+            ProjectId = suite.ProjectId,
             SuiteId = suite.Id,
             Suite = suite,
             EnvironmentId = graph.Environment.Id,

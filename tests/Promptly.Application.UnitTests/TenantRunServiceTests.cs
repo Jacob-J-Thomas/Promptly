@@ -143,8 +143,39 @@ public sealed class TenantRunServiceTests
 
         Assert.NotNull(queued);
         Assert.Equal(graph.OwnerId, queued.CreatedByUserId);
+        Assert.Equal(graph.AllowedProject.Id, queued.ProjectId);
         Assert.Equal(TestRunStatus.Queued, queued.Status);
         Assert.Contains(dbContext.TestRuns, run => run.Id == queued.Id);
+    }
+
+    [Theory]
+    [InlineData("https://attacker.example.test/collect")]
+    [InlineData("//attacker.example.test/collect")]
+    public async Task Queue_rejects_an_unsafe_persisted_endpoint_target_without_inserting(
+        string unsafeTarget)
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        graph.AllowedEndpoint.Path = unsafeTarget;
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var service = CreateService(dbContext);
+        var scope = new TenantAccessScope(graph.OwnerId, ProjectId: null);
+        var runCountBefore = await dbContext.TestRuns.CountAsync(
+            TestContext.Current.CancellationToken);
+
+        var queued = await service.QueueRunAsync(
+            graph.AllowedSuite.Id,
+            graph.AllowedEnvironment.Id,
+            graph.AllowedEndpoint.Id,
+            graph.AllowedMapping.Id,
+            gitCommitHash: null,
+            configSnapshotJson: null,
+            scope);
+
+        Assert.Null(queued);
+        Assert.Equal(
+            runCountBefore,
+            await dbContext.TestRuns.CountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -286,17 +317,21 @@ public sealed class TenantRunServiceTests
             dbContext,
             NullLogger<TestRunWorkerStore>.Instance);
 
-        var claimed = await store.ClaimNextQueuedRunAsync();
+        var claimedRunId = await store.ClaimNextQueuedRunAsync(
+            TestContext.Current.CancellationToken);
         await store.UpdateRunStatusAsync(
             older.Id,
             TestRunStatus.Completed,
             summaryJson: "{\"total\":0}");
-        var loaded = await store.GetRunByIdAsync(older.Id);
+        var loadResult = await store.LoadRunForProcessingAsync(
+            older.Id,
+            TestContext.Current.CancellationToken);
+        var loaded = Assert.IsType<TestRun>(loadResult.Run);
 
-        Assert.NotNull(claimed);
-        Assert.Equal(older.Id, claimed.Id);
-        Assert.NotNull(claimed.StartedAt);
-        Assert.NotNull(loaded);
+        Assert.Equal(older.Id, claimedRunId);
+        Assert.NotNull(older.StartedAt);
+        Assert.Equal(WorkerRunLoadStatus.Ready, loadResult.Status);
+        Assert.Equal(EntityState.Detached, dbContext.Entry(loaded).State);
         Assert.Equal(TestRunStatus.Completed, loaded.Status);
         Assert.Equal("{\"total\":0}", loaded.SummaryJson);
         Assert.NotNull(loaded.CompletedAt);
@@ -304,6 +339,194 @@ public sealed class TenantRunServiceTests
         Assert.NotNull(loaded.Environment);
         Assert.NotNull(loaded.Endpoint);
         Assert.NotNull(loaded.MappingSpec);
+    }
+
+    [Theory]
+    [InlineData("creator")]
+    [InlineData("run-project")]
+    [InlineData("suite-environment")]
+    [InlineData("environment-endpoint")]
+    [InlineData("endpoint-mapping")]
+    public async Task Worker_store_fails_invalid_poison_run_and_claims_next_valid_run(
+        string invalidEdge)
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var invalid = invalidEdge switch
+        {
+            "creator" => Run(
+                graph.AllowedSuite,
+                graph.AllowedEnvironment,
+                graph.AllowedEndpoint,
+                graph.AllowedMapping,
+                graph.OtherOwnerId),
+            "run-project" => Run(
+                graph.AllowedSuite,
+                graph.AllowedEnvironment,
+                graph.AllowedEndpoint,
+                graph.AllowedMapping,
+                graph.OwnerId),
+            "suite-environment" => Run(
+                graph.AllowedSuite,
+                graph.SiblingEnvironment,
+                graph.SiblingEndpoint,
+                graph.SiblingMapping,
+                graph.OwnerId),
+            "environment-endpoint" => Run(
+                graph.AllowedSuite,
+                graph.AllowedEnvironment,
+                graph.SiblingEndpoint,
+                graph.SiblingMapping,
+                graph.OwnerId),
+            "endpoint-mapping" => Run(
+                graph.AllowedSuite,
+                graph.AllowedEnvironment,
+                graph.AllowedEndpoint,
+                graph.SiblingMapping,
+                graph.OwnerId),
+            _ => throw new ArgumentOutOfRangeException(nameof(invalidEdge))
+        };
+        if (invalidEdge == "run-project")
+        {
+            invalid.ProjectId = graph.SiblingSuite.ProjectId;
+        }
+        invalid.Status = TestRunStatus.Queued;
+        invalid.CreatedAt = DateTime.UtcNow.AddMinutes(-2);
+        var valid = Run(
+            graph.AllowedSuite,
+            graph.AllowedEnvironment,
+            graph.AllowedEndpoint,
+            graph.AllowedMapping,
+            graph.OwnerId);
+        valid.Status = TestRunStatus.Queued;
+        valid.CreatedAt = DateTime.UtcNow.AddMinutes(-1);
+        dbContext.AddRange(invalid, valid);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new TestRunWorkerStore(
+            dbContext,
+            NullLogger<TestRunWorkerStore>.Instance);
+
+        var claimedRunId = await store.ClaimNextQueuedRunAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(valid.Id, claimedRunId);
+        Assert.Equal(TestRunStatus.Failed, invalid.Status);
+        Assert.Null(invalid.StartedAt);
+        Assert.NotNull(invalid.CompletedAt);
+        Assert.Contains("integrity validation", invalid.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(TestRunStatus.Running, valid.Status);
+        Assert.NotNull(valid.StartedAt);
+    }
+
+    [Fact]
+    public async Task Worker_store_process_load_terminally_fails_invalid_graph_and_distinguishes_missing()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var invalid = Run(
+            graph.AllowedSuite,
+            graph.AllowedEnvironment,
+            graph.AllowedEndpoint,
+            graph.SiblingMapping,
+            graph.OwnerId);
+        invalid.Status = TestRunStatus.Running;
+        dbContext.Add(invalid);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new TestRunWorkerStore(
+            dbContext,
+            NullLogger<TestRunWorkerStore>.Instance);
+
+        var invalidLoad = await store.LoadRunForProcessingAsync(
+            invalid.Id,
+            TestContext.Current.CancellationToken);
+        var missingLoad = await store.LoadRunForProcessingAsync(
+            Guid.NewGuid(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(WorkerRunLoadStatus.InvalidGraph, invalidLoad.Status);
+        Assert.Null(invalidLoad.Run);
+        Assert.Equal(TestRunStatus.Failed, invalid.Status);
+        Assert.NotNull(invalid.CompletedAt);
+        Assert.Contains("integrity validation", invalid.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(WorkerRunLoadStatus.NotFound, missingLoad.Status);
+        Assert.Null(missingLoad.Run);
+    }
+
+    [Fact]
+    public async Task Worker_store_fails_unsafe_target_poison_run_and_claims_next_valid_run()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        const string unsafeTarget = "https://attacker.example.test/collect";
+        graph.AllowedEndpoint.Path = unsafeTarget;
+        var unsafeRun = Run(
+            graph.AllowedSuite,
+            graph.AllowedEnvironment,
+            graph.AllowedEndpoint,
+            graph.AllowedMapping,
+            graph.OwnerId);
+        unsafeRun.Status = TestRunStatus.Queued;
+        unsafeRun.CreatedAt = DateTime.UtcNow.AddMinutes(-2);
+        var validRun = Run(
+            graph.SiblingSuite,
+            graph.SiblingEnvironment,
+            graph.SiblingEndpoint,
+            graph.SiblingMapping,
+            graph.OwnerId);
+        validRun.Status = TestRunStatus.Queued;
+        validRun.CreatedAt = DateTime.UtcNow.AddMinutes(-1);
+        dbContext.AddRange(unsafeRun, validRun);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new TestRunWorkerStore(
+            dbContext,
+            NullLogger<TestRunWorkerStore>.Instance);
+
+        var claimedRunId = await store.ClaimNextQueuedRunAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(validRun.Id, claimedRunId);
+        Assert.Equal(TestRunStatus.Failed, unsafeRun.Status);
+        Assert.Null(unsafeRun.StartedAt);
+        Assert.NotNull(unsafeRun.CompletedAt);
+        Assert.Equal(
+            "Run failed endpoint-target validation before execution",
+            unsafeRun.ErrorMessage);
+        Assert.DoesNotContain(unsafeTarget, unsafeRun.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(TestRunStatus.Running, validRun.Status);
+    }
+
+    [Fact]
+    public async Task Worker_store_process_load_terminally_fails_an_unsafe_target()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        const string unsafeTarget = "//attacker.example.test/collect";
+        graph.AllowedEndpoint.Path = unsafeTarget;
+        var unsafeRun = Run(
+            graph.AllowedSuite,
+            graph.AllowedEnvironment,
+            graph.AllowedEndpoint,
+            graph.AllowedMapping,
+            graph.OwnerId);
+        unsafeRun.Status = TestRunStatus.Running;
+        dbContext.Add(unsafeRun);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new TestRunWorkerStore(
+            dbContext,
+            NullLogger<TestRunWorkerStore>.Instance);
+
+        var loadResult = await store.LoadRunForProcessingAsync(
+            unsafeRun.Id,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(WorkerRunLoadStatus.UnsafeEndpointTarget, loadResult.Status);
+        Assert.Null(loadResult.Run);
+        Assert.Equal(TestRunStatus.Failed, unsafeRun.Status);
+        Assert.NotNull(unsafeRun.CompletedAt);
+        Assert.Equal(
+            "Run failed endpoint-target validation before execution",
+            unsafeRun.ErrorMessage);
+        Assert.DoesNotContain(unsafeTarget, unsafeRun.ErrorMessage, StringComparison.Ordinal);
     }
 
     private static PromptlyDbContext CreateDbContext()
@@ -423,6 +646,7 @@ public sealed class TenantRunServiceTests
 
         return new TenantRunGraph(
             ownerId,
+            otherOwnerId,
             allowedProject,
             allowedSuite,
             emptySuite,
@@ -505,6 +729,7 @@ public sealed class TenantRunServiceTests
         string creatorId) => new()
         {
             Id = Guid.NewGuid(),
+            ProjectId = suite.ProjectId,
             SuiteId = suite.Id,
             Suite = suite,
             EnvironmentId = environment.Id,
@@ -544,6 +769,7 @@ public sealed class TenantRunServiceTests
 
     private sealed record TenantRunGraph(
         string OwnerId,
+        string OtherOwnerId,
         Project AllowedProject,
         TestSuite AllowedSuite,
         TestSuite EmptySuite,

@@ -51,6 +51,8 @@ public class EndpointService : IEndpointService
         int timeoutSeconds,
         TenantAccessScope scope)
     {
+        EndpointTargetPolicy.EnsureRelativeTarget(path);
+
         if (!await IsOwnedEnvironmentAsync(environmentId, scope))
         {
             return null;
@@ -82,6 +84,8 @@ public class EndpointService : IEndpointService
         int timeoutSeconds,
         TenantAccessScope scope)
     {
+        EndpointTargetPolicy.EnsureRelativeTarget(path);
+
         var endpoint = await GetEndpointByIdAsync(endpointId, scope);
         if (endpoint == null)
         {

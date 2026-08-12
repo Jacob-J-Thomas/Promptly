@@ -321,6 +321,7 @@ def smoke_test_container() -> dict[str, Any]:
                 "python",
                 IMAGE_TAG,
                 "/provider_stub.py",
+                "--bind-all",
             ],
             capture=True,
         )

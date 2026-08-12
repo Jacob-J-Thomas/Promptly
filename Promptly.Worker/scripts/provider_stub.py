@@ -180,12 +180,13 @@ class ProviderHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--bind-all", action="store_true")
     parser.add_argument("--ephemeral-port", action="store_true")
     parser.add_argument("--record-evidence", action="store_true")
     arguments = parser.parse_args()
     ProviderHandler.record_evidence = arguments.record_evidence
     port = 0 if arguments.ephemeral_port else DEFAULT_PORT
-    host = "127.0.0.1"
+    host = "0.0.0.0" if arguments.bind_all else "127.0.0.1"
     server = ThreadingHTTPServer((host, port), ProviderHandler)
     print(
         json.dumps(

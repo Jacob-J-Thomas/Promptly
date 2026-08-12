@@ -57,7 +57,7 @@ jobs:
             --no-restore `
             | Out-File artifacts/test-results/csharp/dotnet-vulnerabilities.json -Encoding utf8
 
-      - name: Require complete dependency-scan cohort
+      - name: Require clean dependency-scan cohort
         shell: pwsh
         run: |
           $scan = Get-Content artifacts/test-results/csharp/dotnet-vulnerabilities.json -Raw | ConvertFrom-Json
@@ -80,38 +80,6 @@ jobs:
             throw "Unexpected .NET dependency-scan cohort: $($projectDifference | Out-String)"
           }
 
-          # Temporary exact baseline for the already tracked #21 debt. This is not a waiver:
-          # any new advisory or spread to another project/framework fails immediately, and the
-          # baseline expires unless #21 removes it.
-          $baselineExpiry = [DateTimeOffset]::Parse("2026-08-19T00:00:00Z")
-          $allowedFindings = @(
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-23rf-6693-g89p"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-37gx-xxp4-5rgx"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-6588-8gv4-xfgh"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-8q5v-6pqq-x66h"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-cvvh-rhrc-wg4q"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-g8r8-53c2-pm3f"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-mmjf-rqrv-855v"
-            "Promptly.Application/Promptly.Application.csproj|net10.0|System.Security.Cryptography.Xml|9.0.0|High|GHSA-w3x6-4m5h-cxqf"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|Microsoft.AspNetCore.DataProtection|10.0.0|Critical|GHSA-9mv3-2cwr-p262"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-23rf-6693-g89p"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-37gx-xxp4-5rgx"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-6588-8gv4-xfgh"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-8q5v-6pqq-x66h"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-cvvh-rhrc-wg4q"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-g8r8-53c2-pm3f"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-mmjf-rqrv-855v"
-            "Promptly.Infrastructure/Promptly.Infrastructure.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-w3x6-4m5h-cxqf"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|Microsoft.AspNetCore.DataProtection|10.0.0|Critical|GHSA-9mv3-2cwr-p262"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-23rf-6693-g89p"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-37gx-xxp4-5rgx"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-6588-8gv4-xfgh"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-8q5v-6pqq-x66h"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-cvvh-rhrc-wg4q"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-g8r8-53c2-pm3f"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-mmjf-rqrv-855v"
-            "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj|net10.0|System.Security.Cryptography.Xml|10.0.0|High|GHSA-w3x6-4m5h-cxqf"
-          )
           $actualFindings = @()
           foreach ($project in $scan.projects) {
             $projectPath = [IO.Path]::GetRelativePath((Get-Location).Path, $project.path)
@@ -129,22 +97,10 @@ jobs:
             }
           }
           $actualFindings = @($actualFindings | Sort-Object -Unique)
-          $unexpectedFindings = @($actualFindings | Where-Object { $_ -notin $allowedFindings })
-          if ($unexpectedFindings.Count -gt 0) {
-            throw "Untracked .NET vulnerability findings: $($unexpectedFindings -join ', ')"
+          if ($actualFindings.Count -gt 0) {
+            throw "Vulnerable .NET dependencies reported: $($actualFindings -join ', ')"
           }
-          if ($actualFindings.Count -eq 0) {
-            Write-Host "No vulnerable .NET dependencies reported"
-          }
-          else {
-            if ([DateTimeOffset]::UtcNow -ge $baselineExpiry) {
-              throw "Issue #21 vulnerability baseline expired at $baselineExpiry"
-            }
-            Write-Warning (
-              "Inventory contains {0} unique known findings tracked in #21; baseline expires {1:u}" `
-                -f $actualFindings.Count, $baselineExpiry
-            )
-          }
+          Write-Host "No vulnerable .NET dependencies reported"
 
       - name: Run application unit tests and coverage gate
         run: >-

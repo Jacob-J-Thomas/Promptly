@@ -462,7 +462,7 @@
       "promptly.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "JsonPath.Net": "[1.2.1, )",
+          "JsonPath.Net": "[2.0.0, )",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.0, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.0, )",
           "Promptly.Application": "[1.0.0, )",

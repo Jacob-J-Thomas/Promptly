@@ -118,9 +118,11 @@ internal sealed class MalformedWorkerStub : IAsyncDisposable
         }
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
         {
+            return;
         }
         catch (SocketException) when (_cancellation.IsCancellationRequested)
         {
+            return;
         }
     }
 
@@ -132,12 +134,15 @@ internal sealed class MalformedWorkerStub : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            return;
         }
         catch (IOException) when (cancellationToken.IsCancellationRequested)
         {
+            return;
         }
         catch (SocketException) when (cancellationToken.IsCancellationRequested)
         {
+            return;
         }
     }
 

@@ -34,26 +34,24 @@ internal sealed class ProviderStubProcess : IAsyncDisposable
         string artifactDirectory,
         CancellationToken cancellationToken)
     {
-        var evidencePath = Path.Combine(artifactDirectory, "provider-requests.jsonl");
+        var evidencePath = Path.Join(artifactDirectory, "provider-requests.jsonl");
         File.WriteAllText(evidencePath, string.Empty);
-        var python = Environment.GetEnvironmentVariable("PROMPTLY_INTEGRATION_PYTHON");
-        if (string.IsNullOrWhiteSpace(python))
-        {
-            python = OperatingSystem.IsWindows() ? "python" : "python3";
-        }
+        var python = OperatingSystem.IsWindows() ? "python" : "python3";
+        var providerScriptPath = Path.Join(
+            repositoryRoot,
+            "Promptly.Worker",
+            "scripts",
+            "provider_stub.py");
 
         var startInfo = new ProcessStartInfo
         {
             FileName = python,
-            WorkingDirectory = Path.Combine(repositoryRoot, "Promptly.Worker"),
+            WorkingDirectory = artifactDirectory,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
             UseShellExecute = false
         };
-        startInfo.ArgumentList.Add("scripts/provider_stub.py");
-        startInfo.Environment["PROMPTLY_PROVIDER_STUB_HOST"] = "127.0.0.1";
-        startInfo.Environment["PROMPTLY_PROVIDER_STUB_PORT"] = "0";
-        startInfo.Environment["PROMPTLY_PROVIDER_STUB_EVIDENCE_PATH"] = evidencePath;
+        startInfo.ArgumentList.Add(providerScriptPath);
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start the deterministic provider stub");
@@ -184,14 +182,14 @@ internal sealed class ProviderStubProcess : IAsyncDisposable
                 "write provider stdout artifact",
                 TimeSpan.FromSeconds(2),
                 cancellationToken => File.WriteAllTextAsync(
-                    Path.Combine(_artifactDirectory, "provider.stdout.log"),
+                    Path.Join(_artifactDirectory, "provider.stdout.log"),
                     _capturedStdout,
                     cancellationToken)),
             new CleanupStep(
                 "write provider stderr artifact",
                 TimeSpan.FromSeconds(2),
                 cancellationToken => File.WriteAllTextAsync(
-                    Path.Combine(_artifactDirectory, "provider.stderr.log"),
+                    Path.Join(_artifactDirectory, "provider.stderr.log"),
                     _capturedStderr,
                     cancellationToken)),
             new CleanupStep(
@@ -242,6 +240,7 @@ internal sealed class ProviderStubProcess : IAsyncDisposable
         var uri = new Uri($"http://127.0.0.1:{Port}/v1/models");
         var deadline = Stopwatch.StartNew();
 
+        Exception? lastConnectionError = null;
         while (deadline.Elapsed < TimeSpan.FromSeconds(15))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -259,17 +258,21 @@ internal sealed class ProviderStubProcess : IAsyncDisposable
                     return;
                 }
             }
-            catch (HttpRequestException)
+            catch (HttpRequestException exception)
             {
+                lastConnectionError = exception;
             }
-            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
+                lastConnectionError = exception;
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
         }
 
-        throw new TimeoutException("Provider stub did not become ready within 15 seconds");
+        throw new TimeoutException(
+            "Provider stub did not become ready within 15 seconds",
+            lastConnectionError);
     }
 
     private string GetExitCode() => _process.HasExited ? _process.ExitCode.ToString() : "running";

@@ -23,7 +23,6 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
       PROMPTLY_INTEGRATION_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/test-results/integration
-      PROMPTLY_INTEGRATION_PYTHON: python
       PROMPTLY_INTEGRATION_WORKER_IMAGE: promptly-worker-integration:${{ github.sha }}
 
     steps:

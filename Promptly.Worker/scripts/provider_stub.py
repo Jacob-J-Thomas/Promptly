@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,8 +17,8 @@ AZURE_MODELS_PATH = "/openai/models"
 CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 AZURE_CHAT_COMPLETIONS_PREFIX = "/openai/deployments/"
 AZURE_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
-DEFAULT_PORT = 8080
-EVIDENCE_PATH_VARIABLE = "PROMPTLY_PROVIDER_STUB_EVIDENCE_PATH"
+DEFAULT_PORT = 0
+EVIDENCE_FILE_NAME = "provider-requests.jsonl"
 CORRELATION_PATTERN = re.compile(r'"integrationCorrelation"\s*:\s*"([A-Za-z0-9-]{1,128})"')
 
 
@@ -155,10 +154,6 @@ class ProviderHandler(BaseHTTPRequestHandler):
         authorized: bool,
         **details: Any,
     ) -> None:
-        evidence_path = os.getenv(EVIDENCE_PATH_VARIABLE)
-        if not evidence_path:
-            return
-
         with cls._evidence_lock:
             cls._request_sequence += 1
             record: dict[str, Any] = {
@@ -169,8 +164,7 @@ class ProviderHandler(BaseHTTPRequestHandler):
                 "authorized": authorized,
                 **details,
             }
-            path_object = Path(evidence_path)
-            path_object.parent.mkdir(parents=True, exist_ok=True)
+            path_object = Path(EVIDENCE_FILE_NAME)
             with path_object.open("a", encoding="utf-8") as evidence:
                 evidence.write(json.dumps(record, sort_keys=True, separators=(",", ":")))
                 evidence.write("\n")
@@ -180,8 +174,8 @@ class ProviderHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PROMPTLY_PROVIDER_STUB_PORT", str(DEFAULT_PORT)))
-    host = os.environ.get("PROMPTLY_PROVIDER_STUB_HOST", "0.0.0.0")
+    port = DEFAULT_PORT
+    host = "127.0.0.1"
     server = ThreadingHTTPServer((host, port), ProviderHandler)
     print(
         json.dumps(

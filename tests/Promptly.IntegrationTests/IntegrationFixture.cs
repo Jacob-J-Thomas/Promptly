@@ -15,7 +15,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
 {
     private const string PostgreSqlImage =
         "postgres:18.4-alpine3.23@sha256:996d0920e4ff9df1fc19dacb904492f3c1ec0ec1cc338f0ad7123be7731c5f5e";
-    private readonly string _temporaryRoot = Path.Combine(
+    private readonly string _temporaryRoot = Path.Join(
         Path.GetTempPath(),
         "promptly-integration-tests",
         Guid.NewGuid().ToString("N"));
@@ -46,14 +46,15 @@ public sealed class IntegrationFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        var configuredArtifactDirectory =
-            Environment.GetEnvironmentVariable("PROMPTLY_INTEGRATION_ARTIFACT_DIR")
-            ?? Path.Combine("artifacts", "test-results", "integration");
-        ArtifactDirectory = Path.GetFullPath(configuredArtifactDirectory, RepositoryRoot);
+        ArtifactDirectory = Path.Join(
+            RepositoryRoot,
+            "artifacts",
+            "test-results",
+            "integration");
         Directory.CreateDirectory(ArtifactDirectory);
         Directory.CreateDirectory(_temporaryRoot);
         File.WriteAllText(
-            Path.Combine(ArtifactDirectory, "harness.log"),
+            Path.Join(ArtifactDirectory, "harness.log"),
             $"Promptly integration harness started {DateTimeOffset.UtcNow:O}{Environment.NewLine}");
         foreach (var name in new[]
                  {
@@ -65,7 +66,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
                      "provider.stderr.log"
                  })
         {
-            File.WriteAllText(Path.Combine(ArtifactDirectory, name), string.Empty);
+            File.WriteAllText(Path.Join(ArtifactDirectory, name), string.Empty);
         }
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -137,7 +138,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
             {
                 liveness.EnsureSuccessStatusCode();
                 await File.WriteAllTextAsync(
-                    Path.Combine(ArtifactDirectory, "worker-liveness.json"),
+                    Path.Join(ArtifactDirectory, "worker-liveness.json"),
                     await liveness.Content.ReadAsStringAsync(timeout.Token),
                     timeout.Token);
             }
@@ -210,15 +211,15 @@ public sealed class IntegrationFixture : IAsyncLifetime
         }
 
         var hostNumber = Interlocked.Increment(ref _hostNumber);
-        var hostRoot = Path.Combine(_temporaryRoot, $"host-{hostNumber}");
-        var dataProtectionPath = Path.Combine(hostRoot, "dataprotection-keys");
+        var hostRoot = Path.Join(_temporaryRoot, $"host-{hostNumber}");
+        var dataProtectionPath = Path.Join(hostRoot, "dataprotection-keys");
         Directory.CreateDirectory(dataProtectionPath);
         var logName = hostNumber == 1 ? "server.log" : $"server-{hostNumber}.log";
         var factory = new PromptlyWebApplicationFactory(
             _postgres.GetConnectionString(),
             workerBaseUrl,
             dataProtectionPath,
-            Path.Combine(ArtifactDirectory, logName));
+            Path.Join(ArtifactDirectory, logName));
         return await IntegrationTestHost.CreateAsync(factory);
     }
 
@@ -326,11 +327,11 @@ public sealed class IntegrationFixture : IAsyncLifetime
             timestampsEnabled: false,
             cancellationToken);
         await File.WriteAllTextAsync(
-            Path.Combine(ArtifactDirectory, $"{prefix}.stdout.log"),
+            Path.Join(ArtifactDirectory, $"{prefix}.stdout.log"),
             stdout,
             cancellationToken);
         await File.WriteAllTextAsync(
-            Path.Combine(ArtifactDirectory, $"{prefix}.stderr.log"),
+            Path.Join(ArtifactDirectory, $"{prefix}.stderr.log"),
             stderr,
             cancellationToken);
     }
@@ -338,7 +339,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
     private void AppendHarnessLog(string message)
     {
         File.AppendAllText(
-            Path.Combine(ArtifactDirectory, "harness.log"),
+            Path.Join(ArtifactDirectory, "harness.log"),
             $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
     }
 
@@ -347,7 +348,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "Promptly.slnx")))
+            if (File.Exists(Path.Join(directory.FullName, "Promptly.slnx")))
             {
                 return directory.FullName;
             }

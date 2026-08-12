@@ -60,14 +60,19 @@ internal sealed class PromptlyApiClient : IDisposable
         return await _client.SendAsync(request);
     }
 
-    public Task<HttpResponseMessage> GetAsync(string path) => SendAsync(new(HttpMethod.Get, path));
-
-    public Task<HttpResponseMessage> PostJsonAsync(string path, object body)
+    public async Task<HttpResponseMessage> GetAsync(string path)
     {
-        return SendAsync(new(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        return await SendAsync(request);
+    }
+
+    public async Task<HttpResponseMessage> PostJsonAsync(string path, object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = JsonContent.Create(body)
-        });
+        };
+        return await SendAsync(request);
     }
 
     public async Task<Guid> CreateProjectAsync(string? name = null)

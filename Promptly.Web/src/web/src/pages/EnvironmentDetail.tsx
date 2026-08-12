@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Container,
   Typography,
@@ -22,16 +22,14 @@ import {
   Visibility,
   VisibilityOff,
   Delete,
-  Edit,
   Api,
-  ExpandMore,
-  ExpandLess,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { environmentsApi, type Environment } from '../api/environments';
 import { endpointsApi, type Endpoint } from '../api/endpoints';
 import { Layout } from '../components/Layout';
 import { MappingWizard } from '../components/MappingWizard';
+import { getApiErrorMessage } from '../api/errors';
 
 export const EnvironmentDetail: React.FC = () => {
   const { environmentId } = useParams<{ environmentId: string }>();
@@ -43,30 +41,34 @@ export const EnvironmentDetail: React.FC = () => {
   const [showHeaders, setShowHeaders] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
 
-  useEffect(() => {
-    if (environmentId) {
-      loadEnvironmentData();
+  const loadEnvironmentData = useCallback(async () => {
+    if (!environmentId) {
+      setError('Environment ID is required');
+      setLoading(false);
+      return;
     }
-  }, [environmentId]);
 
-  const loadEnvironmentData = async () => {
     try {
       setLoading(true);
       const [envData, endpointsData] = await Promise.all([
-        environmentsApi.getById(environmentId!),
-        endpointsApi.getByEnvironment(environmentId!),
+        environmentsApi.getById(environmentId),
+        endpointsApi.getByEnvironment(environmentId),
       ]);
       setEnvironment(envData);
       setEndpoints(endpointsData);
       setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load environment data');
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'Failed to load environment data'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [environmentId]);
 
-  const handleWizardComplete = async (endpointId: string) => {
+  useEffect(() => {
+    void loadEnvironmentData();
+  }, [loadEnvironmentData]);
+
+  const handleWizardComplete = async () => {
     await loadEnvironmentData();
   };
 
@@ -78,8 +80,8 @@ export const EnvironmentDetail: React.FC = () => {
     try {
       await endpointsApi.delete(id);
       await loadEnvironmentData();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to delete endpoint');
+    } catch (deleteError: unknown) {
+      setError(getApiErrorMessage(deleteError, 'Failed to delete endpoint'));
     }
   };
 
@@ -100,16 +102,12 @@ export const EnvironmentDetail: React.FC = () => {
       <Layout>
         <Container maxWidth="lg">
           <Alert severity="error" sx={{ mt: 4 }}>
-            Environment not found
+            {error || 'Environment not found'}
           </Alert>
         </Container>
       </Layout>
     );
   }
-
-  const parsedHeaders = environment.headersEncrypted
-    ? JSON.parse(environment.headersEncrypted)
-    : {};
 
   return (
     <Layout>
@@ -152,7 +150,7 @@ export const EnvironmentDetail: React.FC = () => {
                 <Typography variant="body1">{environment.baseUrl}</Typography>
               </Box>
 
-              {environment.headersEncrypted && (
+              {environment.hasHeaders && (
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                     <Typography color="text.secondary" variant="body2">
@@ -167,23 +165,23 @@ export const EnvironmentDetail: React.FC = () => {
                     </IconButton>
                   </Box>
 
-                  <Collapse in={showHeaders}>
+                  <Collapse in={showHeaders} unmountOnExit>
                     <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
                       <pre style={{ margin: 0, fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                        {JSON.stringify(parsedHeaders, null, 2)}
+                        {JSON.stringify(environment.headers ?? {}, null, 2)}
                       </pre>
                     </Paper>
                   </Collapse>
 
                   {!showHeaders && (
                     <Typography variant="body2" color="text.secondary">
-                      Headers are encrypted (click eye icon to view)
+                      Headers are hidden (click eye icon to view)
                     </Typography>
                   )}
                 </Box>
               )}
 
-              {!environment.headersEncrypted && (
+              {!environment.hasHeaders && (
                 <Typography variant="body2" color="text.secondary">
                   No custom headers configured
                 </Typography>
@@ -241,12 +239,13 @@ export const EnvironmentDetail: React.FC = () => {
                         }
                       >
                         <ListItemText
+                          disableTypography
                           primary={
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               <Typography variant="body1" fontWeight="medium">
                                 {endpoint.name}
                               </Typography>
-                              <Chip label={endpoint.method} size="small" color="primary" variant="outlined" />
+                              <Chip label={endpoint.httpMethod} size="small" color="primary" variant="outlined" />
                             </Box>
                           }
                           secondary={

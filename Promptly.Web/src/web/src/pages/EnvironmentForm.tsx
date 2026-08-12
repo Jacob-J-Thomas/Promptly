@@ -17,6 +17,7 @@ import {
 import { ArrowBack, Delete, Add } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { environmentsApi } from '../api/environments';
+import { getApiErrorMessage } from '../api/errors';
 import { Layout } from '../components/Layout';
 
 export const EnvironmentForm: React.FC = () => {
@@ -64,8 +65,8 @@ export const EnvironmentForm: React.FC = () => {
       });
 
       navigate(`/projects/${projectId}`);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create environment');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Failed to create environment'));
     } finally {
       setLoading(false);
     }

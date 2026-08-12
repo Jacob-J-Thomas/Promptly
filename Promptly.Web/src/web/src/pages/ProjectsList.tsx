@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Container,
   Typography,
@@ -17,10 +17,11 @@ import {
   Alert,
   IconButton,
 } from '@mui/material';
-import { Add, FolderOpen, Delete, Edit } from '@mui/icons-material';
+import { Add, FolderOpen, Delete } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { projectsApi, type Project } from '../api/projects';
 import { Layout } from '../components/Layout';
+import { getApiErrorMessage } from '../api/errors';
 
 export const ProjectsList: React.FC = () => {
   const navigate = useNavigate();
@@ -32,22 +33,22 @@ export const ProjectsList: React.FC = () => {
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    loadProjects();
-  }, []);
-
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     try {
       setLoading(true);
       const data = await projectsApi.getAll();
       setProjects(data);
       setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load projects');
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'Failed to load projects'));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) {
@@ -66,8 +67,8 @@ export const ProjectsList: React.FC = () => {
       setNewProjectName('');
       setNewProjectDescription('');
       await loadProjects();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create project');
+    } catch (createError: unknown) {
+      setError(getApiErrorMessage(createError, 'Failed to create project'));
     } finally {
       setSubmitting(false);
     }
@@ -81,8 +82,8 @@ export const ProjectsList: React.FC = () => {
     try {
       await projectsApi.delete(id);
       await loadProjects();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to delete project');
+    } catch (deleteError: unknown) {
+      setError(getApiErrorMessage(deleteError, 'Failed to delete project'));
     }
   };
 
@@ -133,7 +134,7 @@ export const ProjectsList: React.FC = () => {
           ) : (
             <Grid container spacing={3}>
               {projects.map((project) => (
-                <Grid item xs={12} md={6} lg={4} key={project.id}>
+                <Grid size={{ xs: 12, md: 6, lg: 4 }} key={project.id}>
                   <Card
                     sx={{
                       height: '100%',

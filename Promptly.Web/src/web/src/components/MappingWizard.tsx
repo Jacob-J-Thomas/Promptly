@@ -18,12 +18,12 @@ import {
   FormControl,
   InputLabel,
   Paper,
-  Grid,
   Divider,
 } from '@mui/material';
 import Editor from '@monaco-editor/react';
-import { mappingApi } from '../api/mapping';
+import { mappingApi, type CanonicalTrace } from '../api/mapping';
 import { endpointsApi, type CreateEndpointRequest } from '../api/endpoints';
+import { getApiErrorMessage } from '../api/errors';
 
 interface MappingWizardProps {
   open: boolean;
@@ -63,7 +63,7 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
   // Step 3 & 4: Proposed mapping
   const [proposedMappingJson, setProposedMappingJson] = useState('');
   const [proposalReason, setProposalReason] = useState('');
-  const [previewTrace, setPreviewTrace] = useState<any>(null);
+  const [previewTrace, setPreviewTrace] = useState<CanonicalTrace | null>(null);
 
   // Step 5: Mapping name
   const [mappingName, setMappingName] = useState('');
@@ -95,7 +95,7 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
           if (sampleRequest) {
             JSON.parse(sampleRequest);
           }
-        } catch (err) {
+        } catch {
           setError('Invalid JSON format in sample data');
           return;
         }
@@ -110,8 +110,11 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
         // Save mapping
         await handleSaveMapping();
       }
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'An error occurred');
+    } catch (error: unknown) {
+      const fallback = error instanceof Error && error.message
+        ? error.message
+        : 'An error occurred';
+      setError(getApiErrorMessage(error, fallback));
     }
   };
 
@@ -129,7 +132,7 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
       const endpointData: CreateEndpointRequest = {
         name: endpointName,
         path: endpointPath,
-        method: httpMethod,
+        httpMethod,
         timeoutSeconds,
       };
 
@@ -148,8 +151,8 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
 
       // Move to next step
       setActiveStep(3);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to propose mapping');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Failed to propose mapping'));
     } finally {
       setLoading(false);
     }
@@ -176,10 +179,10 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
         return;
       }
 
-      setPreviewTrace(result.previewTrace);
+      setPreviewTrace(result.previewTrace ?? null);
       setActiveStep(4);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to validate mapping');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Failed to validate mapping'));
     } finally {
       setLoading(false);
     }
@@ -215,8 +218,8 @@ export const MappingWizard: React.FC<MappingWizardProps> = ({
       onComplete(createdEndpointId);
       handleReset();
       onClose();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to save mapping');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Failed to save mapping'));
     } finally {
       setLoading(false);
     }

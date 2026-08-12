@@ -5,9 +5,9 @@ interface Environment {
   projectId: string;
   name: string;
   baseUrl: string;
-  headersEncrypted?: string;
+  hasHeaders: boolean;
+  headers?: Record<string, string> | null;
   createdAt: string;
-  updatedAt: string;
 }
 
 interface CreateEnvironmentRequest {
@@ -39,11 +39,6 @@ const environmentsApi = {
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/environments/${id}`);
-  },
-
-  getDecryptedHeaders: async (id: string): Promise<Record<string, string>> => {
-    const response = await apiClient.get(`/environments/${id}/headers`);
-    return response.data;
   },
 };
 

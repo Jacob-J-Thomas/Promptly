@@ -5,16 +5,14 @@ interface Endpoint {
   environmentId: string;
   name: string;
   path: string;
-  method: string;
+  httpMethod: string;
   timeoutSeconds: number;
-  createdAt: string;
-  updatedAt: string;
 }
 
 interface CreateEndpointRequest {
   name: string;
   path: string;
-  method: string;
+  httpMethod: string;
   timeoutSeconds: number;
 }
 

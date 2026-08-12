@@ -10,7 +10,8 @@ import {
   Link as MuiLink,
 } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
+import { getApiErrorMessage } from '../api/errors';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -34,8 +35,8 @@ export const Login: React.FC = () => {
     try {
       await login(email, password);
       navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Login failed. Please check your credentials.'));
     } finally {
       setIsLoading(false);
     }

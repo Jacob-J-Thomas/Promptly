@@ -35,6 +35,12 @@ interface CreateTestCaseRequest {
   expectationsJson: string;
 }
 
+interface ImportTestsResponse {
+  importedCount: number;
+  importedTestIds: string[];
+  errors: string[];
+}
+
 const suitesApi = {
   create: async (projectId: string, data: CreateTestSuiteRequest): Promise<TestSuite> => {
     const response = await apiClient.post(`/suites?projectId=${projectId}`, data);
@@ -60,7 +66,7 @@ const suitesApi = {
     await apiClient.delete(`/suites/${id}`);
   },
 
-  importTests: async (suiteId: string, file: File): Promise<any> => {
+  importTests: async (suiteId: string, file: File): Promise<ImportTestsResponse> => {
     const formData = new FormData();
     formData.append('file', file);
 
@@ -107,4 +113,4 @@ const testsApi = {
 };
 
 export { suitesApi, testsApi };
-export type { TestSuite, CreateTestSuiteRequest, TestCase, CreateTestCaseRequest };
+export type { TestSuite, CreateTestSuiteRequest, TestCase, CreateTestCaseRequest, ImportTestsResponse };

@@ -10,7 +10,8 @@ import {
   Link as MuiLink,
 } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
+import { getApiErrorMessage } from '../api/errors';
 
 export const Register: React.FC = () => {
   const navigate = useNavigate();
@@ -47,8 +48,8 @@ export const Register: React.FC = () => {
     try {
       await register(name, email, password);
       navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+    } catch (error: unknown) {
+      setError(getApiErrorMessage(error, 'Registration failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }

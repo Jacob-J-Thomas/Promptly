@@ -28,6 +28,7 @@ public record ValidateMappingResponse
     public bool Success { get; init; }
     public CanonicalTrace? PreviewTrace { get; init; }
     public string? ErrorMessage { get; init; }
+    public string? ErrorPath { get; init; }
 }
 
 public record CreateMappingSpecRequest

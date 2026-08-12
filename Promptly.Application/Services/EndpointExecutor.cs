@@ -305,12 +305,10 @@ public class EndpointExecutor : IEndpointExecutor
         if (exception is AggregateException aggregateException)
         {
             foreach (var nestedRejection in aggregateException.InnerExceptions
-                         .Select(FindDestinationRejection))
+                         .Select(FindDestinationRejection)
+                         .Where(static nestedRejection => nestedRejection != null))
             {
-                if (nestedRejection != null)
-                {
-                    return nestedRejection;
-                }
+                return nestedRejection;
             }
         }
 

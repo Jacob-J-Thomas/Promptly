@@ -46,24 +46,26 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
         }
 
         var environmentId = await user.CreateEnvironmentAsync(projectId);
-        foreach (var invalidBaseUrl in invalidBaseUrls)
+        foreach (var updateRequest in invalidBaseUrls.Select(invalidBaseUrl => new HttpRequestMessage(
+                     HttpMethod.Put,
+                     $"/api/environments/{environmentId}")
         {
-            using var updateRequest = new HttpRequestMessage(
-                HttpMethod.Put,
-                $"/api/environments/{environmentId}")
+            Content = JsonContent.Create(new
             {
-                Content = JsonContent.Create(new
+                name = "unsafe update",
+                baseUrl = invalidBaseUrl,
+                headers = new Dictionary<string, string>
                 {
-                    name = "unsafe update",
-                    baseUrl = invalidBaseUrl,
-                    headers = new Dictionary<string, string>
-                    {
-                        ["Authorization"] = "must-not-persist"
-                    }
-                })
-            };
-            using var update = await user.SendAsync(updateRequest);
-            Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+                    ["Authorization"] = "must-not-persist"
+                }
+            })
+        }))
+        {
+            using (updateRequest)
+            using (var update = await user.SendAsync(updateRequest))
+            {
+                Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+            }
         }
 
         await using var scope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope();

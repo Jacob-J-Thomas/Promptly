@@ -338,7 +338,8 @@ public sealed class EndpointExecutorTargetSecurityTests
         string expected)
     {
         var handler = new RecordingHandler(HttpStatusCode.OK);
-        var factory = new RecordingHttpClientFactory(new HttpClient(handler));
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
         var encryption = new RecordingEncryptionService();
         var executor = new EndpointExecutor(
             factory,
@@ -367,7 +368,8 @@ public sealed class EndpointExecutorTargetSecurityTests
     public async Task Unsafe_legacy_targets_fail_before_decryption_or_send(string target)
     {
         var handler = new RecordingHandler(HttpStatusCode.OK);
-        var factory = new RecordingHttpClientFactory(new HttpClient(handler));
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
         var encryption = new RecordingEncryptionService();
         var executor = new EndpointExecutor(
             factory,
@@ -395,7 +397,8 @@ public sealed class EndpointExecutorTargetSecurityTests
         string baseUrl)
     {
         var handler = new RecordingHandler(HttpStatusCode.OK);
-        var factory = new RecordingHttpClientFactory(new HttpClient(handler));
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
         var encryption = new RecordingEncryptionService();
         var executor = new EndpointExecutor(
             factory,
@@ -418,8 +421,9 @@ public sealed class EndpointExecutorTargetSecurityTests
     public async Task Redirect_response_is_returned_without_a_second_outbound_request()
     {
         var handler = new RecordingHandler(HttpStatusCode.Found);
+        using var client = new HttpClient(handler);
         var executor = new EndpointExecutor(
-            new RecordingHttpClientFactory(new HttpClient(handler)),
+            new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
             NullLogger<EndpointExecutor>.Instance);
 
@@ -446,8 +450,9 @@ public sealed class EndpointExecutorTargetSecurityTests
         string expectedMethod)
     {
         var handler = new RecordingHandler(HttpStatusCode.OK);
+        using var client = new HttpClient(handler);
         var executor = new EndpointExecutor(
-            new RecordingHttpClientFactory(new HttpClient(handler)),
+            new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
             NullLogger<EndpointExecutor>.Instance);
         var endpoint = Endpoint("/v1/chat");
@@ -470,7 +475,8 @@ public sealed class EndpointExecutorTargetSecurityTests
     public async Task Null_input_returns_failure_without_creating_a_client()
     {
         var handler = new RecordingHandler(HttpStatusCode.OK);
-        var factory = new RecordingHttpClientFactory(new HttpClient(handler));
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
         var executor = new EndpointExecutor(
             factory,
             new RecordingEncryptionService(),
@@ -503,8 +509,9 @@ public sealed class EndpointExecutorTargetSecurityTests
             DecryptedValue = decryptedHeaders,
             Failure = throws ? new InvalidOperationException("invalid ciphertext") : null
         };
+        using var client = new HttpClient(handler);
         var executor = new EndpointExecutor(
-            new RecordingHttpClientFactory(new HttpClient(handler)),
+            new RecordingHttpClientFactory(client),
             encryption,
             NullLogger<EndpointExecutor>.Instance);
 
@@ -523,9 +530,10 @@ public sealed class EndpointExecutorTargetSecurityTests
     [Fact]
     public async Task Timeout_is_reported_without_becoming_external_cancellation()
     {
+        using var client = new HttpClient(
+            new ThrowingHandler(new TaskCanceledException("timeout")));
         var executor = new EndpointExecutor(
-            new RecordingHttpClientFactory(new HttpClient(
-                new ThrowingHandler(new TaskCanceledException("timeout")))),
+            new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
             NullLogger<EndpointExecutor>.Instance);
 
@@ -542,9 +550,10 @@ public sealed class EndpointExecutorTargetSecurityTests
     [Fact]
     public async Task Unexpected_send_failure_is_returned_as_an_execution_failure()
     {
+        using var client = new HttpClient(
+            new ThrowingHandler(new HttpRequestException("network down")));
         var executor = new EndpointExecutor(
-            new RecordingHttpClientFactory(new HttpClient(
-                new ThrowingHandler(new HttpRequestException("network down")))),
+            new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
             NullLogger<EndpointExecutor>.Instance);
 

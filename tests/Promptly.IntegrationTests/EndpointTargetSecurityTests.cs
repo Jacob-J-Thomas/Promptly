@@ -45,23 +45,24 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
 
         var endpointId = await user.CreateEndpointAsync(environmentId);
 
-        foreach (var unsafePath in unsafePaths)
+        foreach (var request in unsafePaths.Select(unsafePath => new HttpRequestMessage(
+                     HttpMethod.Put,
+                     $"/api/endpoints/{endpointId}")
         {
-            using var request = new HttpRequestMessage(
-                HttpMethod.Put,
-                $"/api/endpoints/{endpointId}")
+            Content = JsonContent.Create(new
             {
-                Content = JsonContent.Create(new
-                {
-                    name = "unsafe update",
-                    path = unsafePath,
-                    httpMethod = "DELETE",
-                    timeoutSeconds = 299
-                })
-            };
-            using var update = await user.SendAsync(request);
-
-            Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+                name = "unsafe update",
+                path = unsafePath,
+                httpMethod = "DELETE",
+                timeoutSeconds = 299
+            })
+        }))
+        {
+            using (request)
+            using (var update = await user.SendAsync(request))
+            {
+                Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+            }
         }
 
         await using var scope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope();
@@ -83,8 +84,8 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
     public async Task EndpointExecutor_DoesNotForwardEncryptedCredentialsAcrossRedirect()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var redirectListener = new TcpListener(IPAddress.Loopback, 0);
-        var captureListener = new TcpListener(IPAddress.Loopback, 0);
+        using var redirectListener = new TcpListener(IPAddress.Loopback, 0);
+        using var captureListener = new TcpListener(IPAddress.Loopback, 0);
         redirectListener.Start();
         captureListener.Start();
         using var redirectCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -248,18 +249,9 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
             return;
         }
 
-        try
-        {
-            await task;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (SocketException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
+        var exception = await Record.ExceptionAsync(() => task);
+        Assert.True(
+            exception is null or OperationCanceledException or SocketException or ObjectDisposedException,
+            $"Unexpected listener shutdown exception: {exception}");
     }
 }

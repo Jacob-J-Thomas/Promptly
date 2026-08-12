@@ -44,7 +44,7 @@ public sealed class WorkerRunSecurityTests(IntegrationFixture fixture)
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        var captureListener = new TcpListener(IPAddress.Loopback, 0);
+        using var captureListener = new TcpListener(IPAddress.Loopback, 0);
         captureListener.Start();
         using var captureCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
@@ -165,17 +165,16 @@ public sealed class WorkerRunSecurityTests(IntegrationFixture fixture)
         {
             await captureCancellation.CancelAsync();
             captureListener.Stop();
-            try
+            var shutdownException = await Record.ExceptionAsync(async () =>
             {
                 using var unexpectedConnection = await captureTask;
-                Assert.Fail("Unsafe worker target unexpectedly opened the capture listener");
-            }
-            catch (OperationCanceledException) when (captureCancellation.IsCancellationRequested)
-            {
-            }
-            catch (SocketException) when (captureCancellation.IsCancellationRequested)
-            {
-            }
+            });
+            Assert.True(captureCancellation.IsCancellationRequested);
+            Assert.True(
+                shutdownException is OperationCanceledException or SocketException,
+                shutdownException is null
+                    ? "Unsafe worker target unexpectedly opened the capture listener"
+                    : $"Unexpected capture-listener shutdown exception: {shutdownException}");
         }
     }
 

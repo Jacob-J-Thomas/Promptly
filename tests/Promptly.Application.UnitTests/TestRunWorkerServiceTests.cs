@@ -335,10 +335,8 @@ public sealed class TestRunWorkerServiceTests
     private static IConfiguration BuildConfiguration(
         params (string Key, string Value)[] values) =>
         new ConfigurationBuilder()
-            .AddInMemoryCollection(values.ToDictionary(
-                pair => pair.Key,
-                pair => (string?)pair.Value,
-                StringComparer.Ordinal))
+            .AddInMemoryCollection(values.Select(pair =>
+                new KeyValuePair<string, string?>(pair.Key, pair.Value)))
             .Build();
 
     private static TaskCompletionSource NewCompletion() =>

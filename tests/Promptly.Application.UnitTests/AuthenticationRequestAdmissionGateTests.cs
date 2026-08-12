@@ -62,7 +62,7 @@ public sealed class AuthenticationRequestAdmissionGateTests
             {
                 foreach (var lease in admittedLeases)
                 {
-                    lease.Dispose();
+                    using var ownedLease = lease;
                 }
             }
         }

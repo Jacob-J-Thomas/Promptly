@@ -146,8 +146,7 @@ public sealed class AuthenticationRequestAdmissionGate :
         {
             return createInstrument();
         }
-        // codeql[cs/catch-of-all-exceptions]
-        catch (Exception)
+        catch (Exception) // lgtm[cs/catch-of-all-exceptions] Observer failures must not poison auth.
         {
             // Instrument publication invokes external listeners synchronously.
             // A broken observer must not poison authentication initialization.
@@ -166,8 +165,7 @@ public sealed class AuthenticationRequestAdmissionGate :
         {
             instrument.Add(1, CreateOperationTag(operationTag));
         }
-        // codeql[cs/catch-of-all-exceptions]
-        catch (Exception)
+        catch (Exception) // lgtm[cs/catch-of-all-exceptions] Observer failures must not break auth.
         {
             // Metrics observers are untrusted extensions. Telemetry must never
             // leak admission capacity or turn an otherwise valid request into a 500.

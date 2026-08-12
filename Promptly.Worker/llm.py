@@ -187,6 +187,11 @@ def probe_llm_dependency(settings: LlmSettings | None = None) -> None:
         raise LlmDependencyError("LLM provider readiness probe failed") from exc
 
     try:
+        # Azure OpenAI 2024-08-01-preview explicitly defines authenticated
+        # GET {endpoint}/openai/models. AzureOpenAI.models.list() emits that exact
+        # API-key-authenticated route; the provider stub and live contracts enforce
+        # its URL/query/header shape. Canonical Microsoft specification:
+        # https://github.com/Azure/azure-rest-api-specs/blob/main/specification/cognitiveservices/data-plane/AzureOpenAI/authoring/preview/2024-08-01-preview/azureopenai.json
         client.models.list(
             timeout=min(READINESS_TIMEOUT_SECONDS, resolved_settings.timeout_seconds)
         )

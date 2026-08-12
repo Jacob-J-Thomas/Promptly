@@ -185,12 +185,9 @@ public class MappingService : IMappingService
         }
         else if (element.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in element.EnumerateArray())
+            if (element.EnumerateArray().Any(ContainsDuplicateObjectProperty))
             {
-                if (ContainsDuplicateObjectProperty(item))
-                {
-                    return true;
-                }
+                return true;
             }
         }
         else if (element.ValueKind == JsonValueKind.String)
@@ -336,7 +333,7 @@ public class MappingService : IMappingService
             {
                 _jsonPathService.SelectToken("{}", path!);
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
                 throw new MappingSpecValidationException(
                     label,
@@ -491,22 +488,21 @@ public class MappingService : IMappingService
             spec.ToolCalls.ItemsPath!,
             "toolCalls.itemsPath");
         RequireObjectItems(toolCallItems, spec.ToolCalls.ItemsPath!, "toolCalls.itemsPath");
-        var toolCalls = new List<ToolCall>(toolCallItems.Count);
-        foreach (var item in toolCallItems)
+        return toolCallItems.Select(item =>
         {
             var itemJson = item.GetRawText();
-            var name = ExtractRequiredStringValue(
-                itemJson,
-                spec.ToolCalls.NamePath,
-                "toolCalls.namePath");
-            var arguments = ExtractRequiredArgumentsValue(
-                itemJson,
-                spec.ToolCalls.ArgumentsPath,
-                "toolCalls.argumentsPath");
-            toolCalls.Add(new ToolCall { Name = name, ArgumentsJson = arguments });
-        }
-
-        return toolCalls;
+            return new ToolCall
+            {
+                Name = ExtractRequiredStringValue(
+                    itemJson,
+                    spec.ToolCalls.NamePath,
+                    "toolCalls.namePath"),
+                ArgumentsJson = ExtractRequiredArgumentsValue(
+                    itemJson,
+                    spec.ToolCalls.ArgumentsPath,
+                    "toolCalls.argumentsPath")
+            };
+        }).ToList();
     }
 
     private Usage? ExtractUsage(MappingSpecDefinition spec, string responseJson)
@@ -577,11 +573,10 @@ public class MappingService : IMappingService
             docItems,
             spec.RetrievedDocs.MetadataPath,
             "retrievedDocs.metadataPath");
-        var docs = new List<RetrievedDoc>(docItems.Count);
-        foreach (var item in docItems)
+        return docItems.Select(item =>
         {
             var itemJson = item.GetRawText();
-            docs.Add(new RetrievedDoc
+            return new RetrievedDoc
             {
                 Id = ExtractOptionalIdValue(
                     itemJson,
@@ -599,10 +594,8 @@ public class MappingService : IMappingService
                     itemJson,
                     spec.RetrievedDocs.MetadataPath,
                     "retrievedDocs.metadataPath")
-            });
-        }
-
-        return docs;
+            };
+        }).ToList();
     }
 
     private void RequireOptionalPathMatch(
@@ -651,7 +644,7 @@ public class MappingService : IMappingService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             throw new MappingException(label, $"JSONPath '{path}' could not be evaluated", ex);
         }
@@ -677,7 +670,7 @@ public class MappingService : IMappingService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             throw new MappingException(label, $"JSONPath '{path}' could not be evaluated", ex);
         }
@@ -793,7 +786,7 @@ public class MappingService : IMappingService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             throw new MappingException(label, $"JSONPath '{path}' could not be evaluated", ex);
         }
@@ -887,7 +880,7 @@ public class MappingService : IMappingService
                     break;
                 }
 
-                builder.Append(rune.ToString());
+                builder.Append(rune);
                 retainedBytes += rune.Utf8SequenceLength;
             }
 

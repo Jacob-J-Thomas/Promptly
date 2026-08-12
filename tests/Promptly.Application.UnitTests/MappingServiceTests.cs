@@ -700,7 +700,7 @@ public sealed class MappingServiceTests
     }
 
     [Fact]
-    public async Task ApplyMappingAsync_does_not_expose_unexpected_exception_details()
+    public async Task ApplyMappingAsync_does_not_expose_unexpected_adapter_exception_details()
     {
         await using var dbContext = CreateDbContext();
         var service = new MappingService(
@@ -714,8 +714,8 @@ public sealed class MappingServiceTests
 
         Assert.False(result.Success);
         Assert.Null(result.Trace);
-        Assert.Equal("fallback.singleAssistantContentPath", result.ErrorPath);
-        Assert.Contains("could not be evaluated", result.ErrorMessage, StringComparison.Ordinal);
+        Assert.Null(result.ErrorPath);
+        Assert.Equal("Mapping failed due to an unexpected error", result.ErrorMessage);
         Assert.DoesNotContain("secret", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 

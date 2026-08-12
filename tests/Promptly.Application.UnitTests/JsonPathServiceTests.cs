@@ -17,9 +17,9 @@ public sealed class JsonPathServiceTests
             """,
             "$.answer.value");
 
-        Assert.NotNull(result);
-        Assert.Equal(JsonValueKind.Number, result.Value.ValueKind);
-        Assert.Equal(42, result.Value.GetInt32());
+        var value = Assert.IsType<JsonElement>(result);
+        Assert.Equal(JsonValueKind.Number, value.ValueKind);
+        Assert.Equal(42, value.GetInt32());
     }
 
     [Fact]

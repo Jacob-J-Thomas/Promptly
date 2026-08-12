@@ -117,8 +117,12 @@ builder.Services.AddScoped<ITestRunProcessor, TestRunProcessor>();
 // Register Python worker client
 builder.Services.AddHttpClient<IPythonEvalClient, PythonEvalClient>();
 
-// Register background worker
-builder.Services.AddHostedService<Promptly.Server.Services.TestRunWorkerService>();
+// Register the background runner by default. Integration hosts can disable it
+// explicitly so they exercise the real HTTP pipeline without racing queued work.
+if (builder.Configuration.GetValue("TestRunner:Enabled", true))
+{
+    builder.Services.AddHostedService<Promptly.Server.Services.TestRunWorkerService>();
+}
 
 // Add CORS for local development
 builder.Services.AddCors(options =>
@@ -134,9 +138,11 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Apply database migrations automatically at startup
-using (var scope = app.Services.CreateScope())
+// Apply database migrations automatically at startup by default. The explicit
+// switch lets specialized hosts own migration orchestration when required.
+if (builder.Configuration.GetValue("Startup:ApplyDatabaseMigrations", true))
 {
+    using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<PromptlyDbContext>();
     dbContext.Database.Migrate();
 }
@@ -158,3 +164,5 @@ app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
 app.Run();
+
+public partial class Program;

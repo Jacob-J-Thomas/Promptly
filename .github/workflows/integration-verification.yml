@@ -1,0 +1,172 @@
+name: Integration verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-verification:
+    name: Integration verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      PROMPTLY_INTEGRATION_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/test-results/integration
+      PROMPTLY_INTEGRATION_PYTHON: python
+      PROMPTLY_INTEGRATION_WORKER_IMAGE: promptly-worker-integration:${{ github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python for the deterministic provider stub
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version-file: Promptly.Worker/.python-version
+
+      - name: Restore locked dependencies
+        run: dotnet restore Promptly.slnx --locked-mode
+
+      - name: Verify formatting
+        run: dotnet format Promptly.slnx --verify-no-changes --no-restore
+
+      - name: Build without warnings
+        run: dotnet build Promptly.slnx --configuration Release --no-restore -warnaserror
+
+      - name: Clean integration artifacts
+        shell: pwsh
+        run: |
+          Remove-Item $env:PROMPTLY_INTEGRATION_ARTIFACT_DIR -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item $env:PROMPTLY_INTEGRATION_ARTIFACT_DIR -ItemType Directory -Force | Out-Null
+
+      - name: Build the pinned FastAPI worker image
+        run: >-
+          docker build
+          --file Promptly.Worker/Dockerfile
+          --tag "$PROMPTLY_INTEGRATION_WORKER_IMAGE"
+          .
+
+      - name: Record the worker image
+        run: >-
+          docker image inspect "$PROMPTLY_INTEGRATION_WORKER_IMAGE"
+          > "$PROMPTLY_INTEGRATION_ARTIFACT_DIR/worker-image.json"
+
+      - name: Run skip-free integration tests
+        run: >-
+          dotnet test tests/Promptly.IntegrationTests/Promptly.IntegrationTests.csproj
+          --configuration Release
+          --no-build
+          --logger "trx;LogFileName=Promptly.IntegrationTests.trx"
+          --results-directory "$PROMPTLY_INTEGRATION_ARTIFACT_DIR"
+
+      - name: Require executed tests, diagnostics, and image evidence
+        shell: pwsh
+        run: |
+          $trxPath = Join-Path $env:PROMPTLY_INTEGRATION_ARTIFACT_DIR "Promptly.IntegrationTests.trx"
+          if (!(Test-Path $trxPath) -or (Get-Item $trxPath).Length -eq 0) {
+            throw "Integration TRX is missing or empty"
+          }
+
+          [xml]$report = Get-Content $trxPath -Raw
+          $counters = $report.TestRun.ResultSummary.Counters
+          if ([int]$counters.total -lt 10) {
+            throw "Expected at least 10 integration tests, found $($counters.total)"
+          }
+          if ([int]$counters.executed -ne [int]$counters.total -or [int]$counters.notExecuted -ne 0) {
+            throw "Integration tests were skipped or not executed"
+          }
+          if ([int]$counters.passed -ne [int]$counters.total -or [int]$counters.failed -ne 0) {
+            throw "Integration TRX contains failures"
+          }
+
+          $requiredNonEmpty = @(
+            "harness.log",
+            "server.log",
+            "postgres.stdout.log",
+            "provider.stdout.log",
+            "provider-requests.jsonl",
+            "worker-liveness.json",
+            "worker-image.json"
+          )
+          foreach ($name in $requiredNonEmpty) {
+            $path = Join-Path $env:PROMPTLY_INTEGRATION_ARTIFACT_DIR $name
+            if (!(Test-Path $path) -or (Get-Item $path).Length -eq 0) {
+              throw "Required integration artifact is missing or empty: $name"
+            }
+          }
+
+          $requiredLogs = @(
+            "postgres.stderr.log",
+            "worker.stderr.log",
+            "worker.stdout.log",
+            "provider.stderr.log"
+          )
+          foreach ($name in $requiredLogs) {
+            $path = Join-Path $env:PROMPTLY_INTEGRATION_ARTIFACT_DIR $name
+            if (!(Test-Path $path -PathType Leaf)) {
+              throw "Required integration log is missing: $name"
+            }
+          }
+
+          $evidencePath = Join-Path $env:PROMPTLY_INTEGRATION_ARTIFACT_DIR "provider-requests.jsonl"
+          $evidence = @(
+            Get-Content $evidencePath |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+              ForEach-Object { $_ | ConvertFrom-Json }
+          )
+          if ($evidence.Count -lt 2) {
+            throw "Provider evidence must contain readiness and chat-completion requests"
+          }
+          $sequences = @($evidence | ForEach-Object { [int]$_.sequence })
+          if (($sequences | Sort-Object -Unique).Count -ne $sequences.Count -or
+              @($sequences | Where-Object { $_ -lt 1 }).Count -ne 0) {
+            throw "Provider evidence contains invalid or duplicate request sequences"
+          }
+          $readiness = @(
+            $evidence | Where-Object {
+              $_.kind -eq "models" -and $_.method -eq "GET" -and
+              $_.path -eq "/v1/models" -and $_.authorized -eq $true
+            }
+          )
+          if ($readiness.Count -lt 1) {
+            throw "Provider evidence contains no authenticated readiness request"
+          }
+          $mappingRequests = @(
+            $evidence | Where-Object {
+              $_.kind -eq "chat_completion" -and $_.method -eq "POST" -and
+              $_.path -eq "/v1/chat/completions" -and $_.authorized -eq $true -and
+              $_.valid_json -eq $true -and $_.model -eq "verification-model" -and
+              [int]$_.message_count -eq 2 -and
+              [string]$_.correlation_id -match '^[0-9a-f]{32}$'
+            }
+          )
+          if ($mappingRequests.Count -lt 1) {
+            throw "Provider evidence contains no correlated mapping chat-completion request"
+          }
+
+      - name: Upload integration test and service logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-test-results
+          path: artifacts/test-results/integration
+          if-no-files-found: error
+          retention-days: 14

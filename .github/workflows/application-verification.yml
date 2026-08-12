@@ -72,6 +72,7 @@ jobs:
             "Promptly.Sdk.DotNet/Promptly.Sdk.DotNet.csproj"
             "Promptly.Server/Promptly.Server.csproj"
             "tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj"
+            "tests/Promptly.IntegrationTests/Promptly.IntegrationTests.csproj"
           ) | Sort-Object
           $actualProjects = @(
             $scan.projects.path | ForEach-Object {

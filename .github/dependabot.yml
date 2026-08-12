@@ -9,6 +9,7 @@ updates:
       - "/Promptly.Sdk.DotNet"
       - "/Promptly.Server"
       - "/tests/Promptly.Application.UnitTests"
+      - "/tests/Promptly.IntegrationTests"
     schedule:
       interval: weekly
       day: monday

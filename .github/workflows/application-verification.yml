@@ -120,7 +120,11 @@ jobs:
         run: |
           [xml]$coverage = Get-Content artifacts/test-results/csharp/coverage/coverage.cobertura.xml -Raw
           $packages = @($coverage.coverage.packages.package)
-          $expectedAssemblies = @("Promptly.Application", "Promptly.Infrastructure") | Sort-Object
+          $expectedAssemblies = @(
+            "Promptly.Application"
+            "Promptly.Infrastructure"
+            "Promptly.Server"
+          ) | Sort-Object
           $actualAssemblies = @(
             $packages |
               Where-Object { @($_.classes.class).Count -gt 0 } |
@@ -161,9 +165,17 @@ jobs:
           }
 
           $expectedApplicationSources = @(
+            "Promptly.Application/Data/TenantOwnedQueries.cs"
             "Promptly.Application/Services/BoundedRegexMatcher.cs"
+            "Promptly.Application/Services/EndpointService.cs"
+            "Promptly.Application/Services/EnvironmentService.cs"
             "Promptly.Application/Services/ExpectationEvaluator.cs"
             "Promptly.Application/Services/MappingService.cs"
+            "Promptly.Application/Services/ProjectService.cs"
+            "Promptly.Application/Services/TestCaseService.cs"
+            "Promptly.Application/Services/TestRunService.cs"
+            "Promptly.Application/Services/TestRunWorkerStore.cs"
+            "Promptly.Application/Services/TestSuiteService.cs"
           ) | Sort-Object
           $applicationPackage = $packages |
             Where-Object { $_.name -eq "Promptly.Application" } |
@@ -179,7 +191,33 @@ jobs:
             throw "Unexpected scoped Application coverage cohort: $($applicationDifference | Out-String)"
           }
 
-          foreach ($package in @($applicationPackage, $infrastructurePackage)) {
+          $expectedServerSources = @(
+            "Promptly.Server/Controllers/EndpointsController.cs"
+            "Promptly.Server/Controllers/EnvironmentsController.cs"
+            "Promptly.Server/Controllers/MappingController.cs"
+            "Promptly.Server/Controllers/ProjectsController.cs"
+            "Promptly.Server/Controllers/RunsController.cs"
+            "Promptly.Server/Controllers/TestSuitesController.cs"
+            "Promptly.Server/Controllers/TestsController.cs"
+            "Promptly.Server/Security/HttpContextTenantAccessScopeAccessor.cs"
+            "Promptly.Server/Security/TenantAccessScopeFactory.cs"
+            "Promptly.Server/Security/TenantAuthenticationSchemeSelector.cs"
+          ) | Sort-Object
+          $serverPackage = $packages |
+            Where-Object { $_.name -eq "Promptly.Server" } |
+            Select-Object -First 1
+          $actualServerSources = @(
+            $serverPackage.classes.class |
+              ForEach-Object { Get-RepositoryRelativePath ([string]$_.filename) }
+          ) | Sort-Object -Unique
+          $serverDifference = Compare-Object `
+            $expectedServerSources `
+            $actualServerSources
+          if ($serverDifference) {
+            throw "Unexpected scoped Server coverage cohort: $($serverDifference | Out-String)"
+          }
+
+          foreach ($package in @($applicationPackage, $infrastructurePackage, $serverPackage)) {
             $lineRate = [double]::Parse(
               [string]$package.'line-rate',
               [Globalization.CultureInfo]::InvariantCulture)
@@ -192,22 +230,30 @@ jobs:
             Write-Host "$($package.name): line=$('{0:P2}' -f $lineRate) branch=$('{0:P2}' -f $branchRate)"
           }
 
-          $requiredClasses = @(
+          $requiredApplicationClasses = @(
+            "Promptly.Application.Data.TenantOwnedQueries"
             "Promptly.Application.Services.BoundedRegexMatcher"
+            "Promptly.Application.Services.EndpointService"
+            "Promptly.Application.Services.EnvironmentService"
             "Promptly.Application.Services.ExpectationEvaluator"
             "Promptly.Application.Services.MappingService"
             "Promptly.Application.Services.MappingSpecValidationException"
+            "Promptly.Application.Services.ProjectService"
+            "Promptly.Application.Services.TestCaseService"
+            "Promptly.Application.Services.TestRunService"
+            "Promptly.Application.Services.TestRunWorkerStore"
+            "Promptly.Application.Services.TestSuiteService"
           ) | Sort-Object
           $actualTopLevelClasses = @(
             $applicationPackage.classes.class |
               Where-Object { ([string]$_.name) -notmatch '/' } |
               ForEach-Object { [string]$_.name }
           ) | Sort-Object -Unique
-          $classDifference = Compare-Object $requiredClasses $actualTopLevelClasses
+          $classDifference = Compare-Object $requiredApplicationClasses $actualTopLevelClasses
           if ($classDifference) {
             throw "Unexpected top-level Application coverage class cohort: $($classDifference | Out-String)"
           }
-          foreach ($className in $requiredClasses) {
+          foreach ($className in $requiredApplicationClasses) {
             $class = @($applicationPackage.classes.class) |
               Where-Object { $_.name -eq $className } |
               Select-Object -First 1
@@ -224,6 +270,136 @@ jobs:
               throw "Coverage for $className is below 90%: line=$classLineRate branch=$classBranchRate"
             }
             Write-Host "${className}: line=$('{0:P2}' -f $classLineRate) branch=$('{0:P2}' -f $classBranchRate)"
+          }
+
+          $requiredServerClasses = @(
+            "Promptly.Server.Controllers.EndpointsController"
+            "Promptly.Server.Controllers.EnvironmentsController"
+            "Promptly.Server.Controllers.MappingController"
+            "Promptly.Server.Controllers.ProjectsController"
+            "Promptly.Server.Controllers.RunsController"
+            "Promptly.Server.Controllers.TestSuitesController"
+            "Promptly.Server.Controllers.TestsController"
+            "Promptly.Server.Security.HttpContextTenantAccessScopeAccessor"
+            "Promptly.Server.Security.TenantAccessScopeFactory"
+            "Promptly.Server.Security.TenantAuthenticationSchemeSelector"
+          ) | Sort-Object
+          $actualTopLevelServerClasses = @(
+            $serverPackage.classes.class |
+              Where-Object { ([string]$_.name) -notmatch '/' } |
+              ForEach-Object { [string]$_.name }
+          ) | Sort-Object -Unique
+          $serverClassDifference = Compare-Object `
+            $requiredServerClasses `
+            $actualTopLevelServerClasses
+          if ($serverClassDifference) {
+            throw "Unexpected top-level Server coverage class cohort: $($serverClassDifference | Out-String)"
+          }
+          foreach ($className in $requiredServerClasses) {
+            $class = @($serverPackage.classes.class) |
+              Where-Object { $_.name -eq $className } |
+              Select-Object -First 1
+            if (-not $class) {
+              throw "Required covered class is missing: $className"
+            }
+            $classLineRate = [double]::Parse(
+              [string]$class.'line-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            $classBranchRate = [double]::Parse(
+              [string]$class.'branch-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            if ($classLineRate -lt 0.90 -or $classBranchRate -lt 0.90) {
+              throw "Coverage for $className is below 90%: line=$classLineRate branch=$classBranchRate"
+            }
+            Write-Host "${className}: line=$('{0:P2}' -f $classLineRate) branch=$('{0:P2}' -f $classBranchRate)"
+          }
+
+          # Coverlet represents async method bodies as generated nested classes.
+          # Enforce the threshold by source file as well as package so an exact
+          # top-level class filter cannot accidentally count only constructors.
+          $coverageJson = Get-Content artifacts/test-results/csharp/coverage/coverage.json -Raw |
+            ConvertFrom-Json -AsHashtable
+
+          function Get-SourceCoverage(
+            [string]$assemblyName,
+            [string]$sourcePath
+          ) {
+            $assembly = $coverageJson["$assemblyName.dll"]
+            if (-not $assembly) {
+              throw "Coverage JSON is missing assembly $assemblyName"
+            }
+
+            $sourceKeys = @(
+              $assembly.Keys |
+                Where-Object { (Get-RepositoryRelativePath ([string]$_)) -eq $sourcePath }
+            )
+            if ($sourceKeys.Count -ne 1) {
+              throw "Expected one coverage JSON source for ${sourcePath}; found $($sourceKeys.Count)"
+            }
+
+            $lineHits = @{}
+            $branchHits = @{}
+            foreach ($classEntry in $assembly[$sourceKeys[0]].GetEnumerator()) {
+              foreach ($methodEntry in $classEntry.Value.GetEnumerator()) {
+                $method = $methodEntry.Value
+                foreach ($line in $method.Lines.GetEnumerator()) {
+                  $hits = [int]$line.Value
+                  if (-not $lineHits.ContainsKey($line.Key) -or $hits -gt $lineHits[$line.Key]) {
+                    $lineHits[$line.Key] = $hits
+                  }
+                }
+                foreach ($branch in @($method.Branches)) {
+                  if (-not $branch) {
+                    continue
+                  }
+                  $branchKey = @(
+                    $classEntry.Key
+                    $methodEntry.Key
+                    $branch.Line
+                    $branch.Offset
+                    $branch.EndOffset
+                    $branch.Path
+                    $branch.Ordinal
+                  ) -join '|'
+                  $hits = [int]$branch.Hits
+                  if (-not $branchHits.ContainsKey($branchKey) -or $hits -gt $branchHits[$branchKey]) {
+                    $branchHits[$branchKey] = $hits
+                  }
+                }
+              }
+            }
+
+            if ($lineHits.Count -eq 0) {
+              throw "Coverage JSON has no executable lines for ${sourcePath}"
+            }
+
+            $coveredLines = @($lineHits.Values | Where-Object { $_ -gt 0 }).Count
+            $coveredBranches = @($branchHits.Values | Where-Object { $_ -gt 0 }).Count
+            return [pscustomobject]@{
+              LineRate = $coveredLines / $lineHits.Count
+              BranchRate = if ($branchHits.Count -eq 0) {
+                1.0
+              }
+              else {
+                $coveredBranches / $branchHits.Count
+              }
+            }
+          }
+
+          foreach ($sourcePath in $expectedApplicationSources) {
+            $sourceCoverage = Get-SourceCoverage "Promptly.Application" $sourcePath
+            if ($sourceCoverage.LineRate -lt 0.90 -or $sourceCoverage.BranchRate -lt 0.90) {
+              throw "Coverage for $sourcePath is below 90%: line=$($sourceCoverage.LineRate) branch=$($sourceCoverage.BranchRate)"
+            }
+            Write-Host "${sourcePath}: line=$('{0:P2}' -f $sourceCoverage.LineRate) branch=$('{0:P2}' -f $sourceCoverage.BranchRate)"
+          }
+
+          foreach ($sourcePath in $expectedServerSources) {
+            $sourceCoverage = Get-SourceCoverage "Promptly.Server" $sourcePath
+            if ($sourceCoverage.LineRate -lt 0.90 -or $sourceCoverage.BranchRate -lt 0.90) {
+              throw "Coverage for $sourcePath is below 90%: line=$($sourceCoverage.LineRate) branch=$($sourceCoverage.BranchRate)"
+            }
+            Write-Host "${sourcePath}: line=$('{0:P2}' -f $sourceCoverage.LineRate) branch=$('{0:P2}' -f $sourceCoverage.BranchRate)"
           }
 
       - name: Require test and coverage artifacts

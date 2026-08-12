@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Server.Models;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -11,11 +12,16 @@ namespace Promptly.Server.Controllers;
 public class EndpointsController : ControllerBase
 {
     private readonly IEndpointService _endpointService;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<EndpointsController> _logger;
 
-    public EndpointsController(IEndpointService endpointService, ILogger<EndpointsController> logger)
+    public EndpointsController(
+        IEndpointService endpointService,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
+        ILogger<EndpointsController> logger)
     {
         _endpointService = endpointService;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
 
@@ -26,7 +32,19 @@ public class EndpointsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<EndpointResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetEndpoints(Guid environmentId)
     {
-        var endpoints = await _endpointService.GetEndpointsByEnvironmentAsync(environmentId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var endpoints = await _endpointService.GetEndpointsByEnvironmentAsync(
+            environmentId,
+            scope);
+
+        if (endpoints == null)
+        {
+            return NotFound(new { message = "Environment not found" });
+        }
 
         var response = endpoints.Select(e => new EndpointResponse
         {
@@ -49,7 +67,12 @@ public class EndpointsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetEndpoint(Guid endpointId)
     {
-        var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId, scope);
 
         if (endpoint == null)
         {
@@ -82,12 +105,23 @@ public class EndpointsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
         var endpoint = await _endpointService.CreateEndpointAsync(
             environmentId,
             request.Name,
             request.Path,
             request.HttpMethod,
-            request.TimeoutSeconds);
+            request.TimeoutSeconds,
+            scope);
+
+        if (endpoint == null)
+        {
+            return NotFound(new { message = "Environment not found" });
+        }
 
         var response = new EndpointResponse
         {
@@ -115,12 +149,18 @@ public class EndpointsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
         var endpoint = await _endpointService.UpdateEndpointAsync(
             endpointId,
             request.Name,
             request.Path,
             request.HttpMethod,
-            request.TimeoutSeconds);
+            request.TimeoutSeconds,
+            scope);
 
         if (endpoint == null)
         {
@@ -148,7 +188,12 @@ public class EndpointsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteEndpoint(Guid endpointId)
     {
-        var deleted = await _endpointService.DeleteEndpointAsync(endpointId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var deleted = await _endpointService.DeleteEndpointAsync(endpointId, scope);
 
         if (!deleted)
         {

@@ -1,5 +1,6 @@
 using Promptly.Domain.Entities;
 using Promptly.Domain.Enums;
+using Promptly.Application.Models;
 
 namespace Promptly.Application.Interfaces;
 
@@ -8,32 +9,39 @@ public interface ITestRunService
     /// <summary>
     /// Queue a new test run
     /// </summary>
-    Task<TestRun> QueueRunAsync(
+    Task<TestRun?> QueueRunAsync(
         Guid suiteId,
         Guid environmentId,
         Guid endpointId,
         Guid mappingSpecId,
-        string createdByUserId,
-        string? gitCommitHash = null,
-        string? configSnapshotJson = null);
+        string? gitCommitHash,
+        string? configSnapshotJson,
+        TenantAccessScope scope);
 
     /// <summary>
     /// Get run by ID
     /// </summary>
-    Task<TestRun?> GetRunByIdAsync(Guid runId);
+    Task<TestRun?> GetRunByIdAsync(Guid runId, TenantAccessScope scope);
 
     /// <summary>
     /// Get all runs for a suite with optional filters
     /// </summary>
-    Task<List<TestRun>> GetRunsBySuiteAsync(Guid suiteId, TestRunStatus? status = null, int? limit = null);
+    Task<List<TestRun>?> GetRunsBySuiteAsync(
+        Guid suiteId,
+        TestRunStatus? status,
+        int? limit,
+        TenantAccessScope scope);
 
     /// <summary>
-    /// Atomically claim the next queued run for processing
+    /// Get all results for an accessible test run
     /// </summary>
-    Task<TestRun?> ClaimNextQueuedRunAsync();
+    Task<List<TestRunResult>?> GetRunResultsAsync(Guid runId, TenantAccessScope scope);
 
     /// <summary>
-    /// Update run status and summary
+    /// Get an accessible result constrained to its parent run
     /// </summary>
-    Task UpdateRunStatusAsync(Guid runId, TestRunStatus status, string? summaryJson = null, string? errorMessage = null);
+    Task<TestRunResult?> GetRunResultAsync(
+        Guid runId,
+        Guid resultId,
+        TenantAccessScope scope);
 }

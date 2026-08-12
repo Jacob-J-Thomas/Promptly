@@ -1,8 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Promptly.Application.Interfaces;
-using Promptly.Domain.Entities;
 using Promptly.Application.Data;
+using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
+using Promptly.Domain.Entities;
 
 namespace Promptly.Application.Services;
 
@@ -17,44 +18,58 @@ public class ProjectService : IProjectService
         _logger = logger;
     }
 
-    public async Task<IEnumerable<Project>> GetProjectsByUserAsync(string userId)
+    public async Task<IReadOnlyList<Project>> GetProjectsAsync(TenantAccessScope scope)
     {
         return await _dbContext.Projects
-            .Where(p => p.OwnerUserId == userId)
-            .OrderByDescending(p => p.CreatedAt)
+            .ForTenant(scope)
+            .OrderByDescending(project => project.CreatedAt)
             .ToListAsync();
     }
 
-    public async Task<Project?> GetProjectByIdAsync(Guid projectId, string userId)
+    public async Task<Project?> GetProjectByIdAsync(Guid projectId, TenantAccessScope scope)
     {
-        var project = await _dbContext.Projects
-            .FirstOrDefaultAsync(p => p.Id == projectId && p.OwnerUserId == userId);
-
-        return project;
+        return await _dbContext.Projects
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(project => project.Id == projectId);
     }
 
-    public async Task<Project> CreateProjectAsync(string userId, string name, string? description)
+    public async Task<Project?> CreateProjectAsync(
+        string name,
+        string? description,
+        TenantAccessScope scope)
     {
+        if (scope.ProjectId is not null)
+        {
+            return null;
+        }
+
         var project = new Project
         {
             Id = Guid.NewGuid(),
             Name = name,
             Description = description,
-            OwnerUserId = userId,
+            OwnerUserId = scope.OwnerUserId,
             CreatedAt = DateTime.UtcNow
         };
 
         _dbContext.Projects.Add(project);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Project {ProjectId} created by user {UserId}", project.Id, userId);
+        _logger.LogInformation(
+            "Project {ProjectId} created by user {UserId}",
+            project.Id,
+            scope.OwnerUserId);
 
         return project;
     }
 
-    public async Task<Project?> UpdateProjectAsync(Guid projectId, string userId, string name, string? description)
+    public async Task<Project?> UpdateProjectAsync(
+        Guid projectId,
+        string name,
+        string? description,
+        TenantAccessScope scope)
     {
-        var project = await GetProjectByIdAsync(projectId, userId);
+        var project = await GetProjectByIdAsync(projectId, scope);
         if (project == null)
         {
             return null;
@@ -65,14 +80,17 @@ public class ProjectService : IProjectService
 
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Project {ProjectId} updated by user {UserId}", projectId, userId);
+        _logger.LogInformation(
+            "Project {ProjectId} updated by user {UserId}",
+            projectId,
+            scope.OwnerUserId);
 
         return project;
     }
 
-    public async Task<bool> DeleteProjectAsync(Guid projectId, string userId)
+    public async Task<bool> DeleteProjectAsync(Guid projectId, TenantAccessScope scope)
     {
-        var project = await GetProjectByIdAsync(projectId, userId);
+        var project = await GetProjectByIdAsync(projectId, scope);
         if (project == null)
         {
             return false;
@@ -81,7 +99,10 @@ public class ProjectService : IProjectService
         _dbContext.Projects.Remove(project);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Project {ProjectId} deleted by user {UserId}", projectId, userId);
+        _logger.LogInformation(
+            "Project {ProjectId} deleted by user {UserId}",
+            projectId,
+            scope.OwnerUserId);
 
         return true;
     }

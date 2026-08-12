@@ -1,9 +1,10 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Promptly.Application.Interfaces;
-using Promptly.Domain.Entities;
 using Promptly.Application.Data;
+using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
+using Promptly.Domain.Entities;
 using Environment = Promptly.Domain.Entities.Environment;
 
 namespace Promptly.Application.Services;
@@ -24,26 +25,43 @@ public class EnvironmentService : IEnvironmentService
         _logger = logger;
     }
 
-    public async Task<IEnumerable<Environment>> GetEnvironmentsByProjectAsync(Guid projectId)
+    public async Task<IReadOnlyList<Environment>?> GetEnvironmentsByProjectAsync(
+        Guid projectId,
+        TenantAccessScope scope)
     {
+        if (!await IsOwnedProjectAsync(projectId, scope))
+        {
+            return null;
+        }
+
         return await _dbContext.Environments
-            .Where(e => e.ProjectId == projectId)
-            .OrderByDescending(e => e.CreatedAt)
+            .ForTenant(scope)
+            .Where(environment => environment.ProjectId == projectId)
+            .OrderByDescending(environment => environment.CreatedAt)
             .ToListAsync();
     }
 
-    public async Task<Environment?> GetEnvironmentByIdAsync(Guid environmentId)
+    public async Task<Environment?> GetEnvironmentByIdAsync(
+        Guid environmentId,
+        TenantAccessScope scope)
     {
         return await _dbContext.Environments
-            .FirstOrDefaultAsync(e => e.Id == environmentId);
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(environment => environment.Id == environmentId);
     }
 
-    public async Task<Environment> CreateEnvironmentAsync(
+    public async Task<Environment?> CreateEnvironmentAsync(
         Guid projectId,
         string name,
         string baseUrl,
-        Dictionary<string, string>? headers)
+        Dictionary<string, string>? headers,
+        TenantAccessScope scope)
     {
+        if (!await IsOwnedProjectAsync(projectId, scope))
+        {
+            return null;
+        }
+
         var environment = new Environment
         {
             Id = Guid.NewGuid(),
@@ -71,9 +89,10 @@ public class EnvironmentService : IEnvironmentService
         Guid environmentId,
         string name,
         string baseUrl,
-        Dictionary<string, string>? headers)
+        Dictionary<string, string>? headers,
+        TenantAccessScope scope)
     {
-        var environment = await GetEnvironmentByIdAsync(environmentId);
+        var environment = await GetEnvironmentByIdAsync(environmentId, scope);
         if (environment == null)
         {
             return null;
@@ -99,9 +118,11 @@ public class EnvironmentService : IEnvironmentService
         return environment;
     }
 
-    public async Task<bool> DeleteEnvironmentAsync(Guid environmentId)
+    public async Task<bool> DeleteEnvironmentAsync(
+        Guid environmentId,
+        TenantAccessScope scope)
     {
-        var environment = await GetEnvironmentByIdAsync(environmentId);
+        var environment = await GetEnvironmentByIdAsync(environmentId, scope);
         if (environment == null)
         {
             return false;
@@ -115,9 +136,11 @@ public class EnvironmentService : IEnvironmentService
         return true;
     }
 
-    public async Task<Dictionary<string, string>?> GetDecryptedHeadersAsync(Guid environmentId)
+    public async Task<Dictionary<string, string>?> GetDecryptedHeadersAsync(
+        Guid environmentId,
+        TenantAccessScope scope)
     {
-        var environment = await GetEnvironmentByIdAsync(environmentId);
+        var environment = await GetEnvironmentByIdAsync(environmentId, scope);
         if (environment == null || string.IsNullOrWhiteSpace(environment.DefaultHeadersEncryptedJson))
         {
             return null;
@@ -134,4 +157,9 @@ public class EnvironmentService : IEnvironmentService
             throw;
         }
     }
+
+    private async Task<bool> IsOwnedProjectAsync(Guid projectId, TenantAccessScope scope) =>
+        await _dbContext.Projects
+            .ForTenant(scope)
+            .AnyAsync(project => project.Id == projectId);
 }

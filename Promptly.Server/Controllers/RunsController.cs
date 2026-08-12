@@ -1,11 +1,9 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
-using Promptly.Application.Data;
 using Promptly.Domain.Enums;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -15,16 +13,16 @@ namespace Promptly.Server.Controllers;
 public class RunsController : ControllerBase
 {
     private readonly ITestRunService _testRunService;
-    private readonly PromptlyDbContext _dbContext;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<RunsController> _logger;
 
     public RunsController(
         ITestRunService testRunService,
-        PromptlyDbContext dbContext,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
         ILogger<RunsController> logger)
     {
         _testRunService = testRunService;
-        _dbContext = dbContext;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
 
@@ -36,16 +34,23 @@ public class RunsController : ControllerBase
     {
         try
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
 
             var run = await _testRunService.QueueRunAsync(
                 request.SuiteId,
                 request.EnvironmentId,
                 request.EndpointId,
                 request.MappingSpecId,
-                userId,
                 request.GitCommitHash,
-                request.ConfigSnapshotJson);
+                request.ConfigSnapshotJson,
+                scope);
+            if (run == null)
+            {
+                return NotFound(new { message = "Run inputs not found" });
+            }
 
             var response = new TestRunResponse
             {
@@ -82,7 +87,12 @@ public class RunsController : ControllerBase
     {
         try
         {
-            var run = await _testRunService.GetRunByIdAsync(id);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var run = await _testRunService.GetRunByIdAsync(id, scope);
             if (run == null)
             {
                 return NotFound(new { message = "Test run not found" });
@@ -123,13 +133,26 @@ public class RunsController : ControllerBase
     {
         try
         {
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
             TestRunStatus? statusEnum = null;
             if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<TestRunStatus>(status, true, out var parsedStatus))
             {
                 statusEnum = parsedStatus;
             }
 
-            var runs = await _testRunService.GetRunsBySuiteAsync(suiteId, statusEnum, limit);
+            var runs = await _testRunService.GetRunsBySuiteAsync(
+                suiteId,
+                statusEnum,
+                limit,
+                scope);
+            if (runs == null)
+            {
+                return NotFound(new { message = "Test suite not found" });
+            }
 
             var responses = runs.Select(r => new TestRunResponse
             {
@@ -166,13 +189,16 @@ public class RunsController : ControllerBase
     {
         try
         {
-            var results = await _dbContext.TestRunResults
-                .Include(r => r.TestCase)
-                .Where(r => r.RunId == id)
-                .OrderBy(r => r.Status == TestResultStatus.Error ? 0 :
-                    r.Status == TestResultStatus.Fail ? 1 : 2)
-                .ThenBy(r => r.TestCase!.ExternalId)
-                .ToListAsync();
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var results = await _testRunService.GetRunResultsAsync(id, scope);
+            if (results == null)
+            {
+                return NotFound(new { message = "Test run not found" });
+            }
 
             var responses = results.Select(r => new TestRunResultResponse
             {
@@ -205,9 +231,12 @@ public class RunsController : ControllerBase
     {
         try
         {
-            var result = await _dbContext.TestRunResults
-                .Include(r => r.TestCase)
-                .FirstOrDefaultAsync(r => r.Id == resultId && r.RunId == runId);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var result = await _testRunService.GetRunResultAsync(runId, resultId, scope);
 
             if (result == null)
             {

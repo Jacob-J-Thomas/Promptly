@@ -63,6 +63,7 @@ public static class AuthenticationRequestAdmissionMetrics
         {
             instrument.Add(value, CreateOperationTag(operationTag));
         }
+        // codeql[cs/catch-of-all-exceptions]
         catch (Exception)
         {
             // Metrics observers are untrusted extensions. Telemetry must never
@@ -76,6 +77,7 @@ public static class AuthenticationRequestAdmissionMetrics
         {
             instrument.Add(value, CreateOperationTag(operationTag));
         }
+        // codeql[cs/catch-of-all-exceptions]
         catch (Exception)
         {
             // Metrics observers are untrusted extensions. Telemetry must never

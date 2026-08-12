@@ -64,7 +64,7 @@ public sealed class AuthenticationRequestAdmissionGateTests
     public void LeaseReleaseIsIdempotentAndCapacityRecoversExactlyOnce()
     {
         var gate = CreateGate(1);
-        var first = gate.TryAcquire(AuthenticationOperation.Login);
+        using var first = gate.TryAcquire(AuthenticationOperation.Login);
         Assert.NotNull(first);
 
         first.Dispose();
@@ -172,7 +172,7 @@ public sealed class AuthenticationRequestAdmissionGateTests
         listener.Start();
         var gate = CreateGate(1);
 
-        var first = gate.TryAcquire(AuthenticationOperation.Login);
+        using var first = gate.TryAcquire(AuthenticationOperation.Login);
         Assert.NotNull(first);
         Assert.Null(gate.TryAcquire(AuthenticationOperation.Registration));
         first.Dispose();

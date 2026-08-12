@@ -265,7 +265,7 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
                 accounts[1],
                 WrongPassword,
                 client: "aggregate-holder-second");
-            HttpResponseMessage? secondResponse = null;
+            var secondResponseDisposed = false;
             try
             {
                 using var heldTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -316,16 +316,21 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
                 Assert.Equal(usersBeforeSaturation + 1, await CountUsersAsync(host));
 
                 credentialGate.Release();
-                secondResponse = await secondHeld;
-                await AssertGenericUnauthorizedAsync(secondResponse);
+                using (var secondResponse = await secondHeld)
+                {
+                    secondResponseDisposed = true;
+                    await AssertGenericUnauthorizedAsync(secondResponse);
+                }
             }
             finally
             {
                 credentialGate.Release();
                 firstCancellation.Cancel();
-                secondResponse?.Dispose();
                 await DrainAuthenticationRequestAsync(firstHeld);
-                await DrainAuthenticationRequestAsync(secondHeld, secondResponse);
+                if (!secondResponseDisposed)
+                {
+                    await DrainAuthenticationRequestAsync(secondHeld);
+                }
             }
         });
     }
@@ -923,16 +928,11 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
     }
 
     private static async Task DrainAuthenticationRequestAsync(
-        Task<HttpResponseMessage> request,
-        HttpResponseMessage? alreadyDisposed = null)
+        Task<HttpResponseMessage> request)
     {
         try
         {
-            var response = await request;
-            if (!ReferenceEquals(response, alreadyDisposed))
-            {
-                response.Dispose();
-            }
+            using var response = await request;
         }
         catch (OperationCanceledException)
         {

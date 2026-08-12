@@ -143,10 +143,11 @@ returns the same private one-second `429` contract without reading the rejected 
 
 The `Promptly.Server.Authentication` .NET meter exposes the cardinality-safe instruments
 `promptly.authentication.requests.admitted`, `promptly.authentication.requests.rejected`, and
-`promptly.authentication.requests.in_flight`. Their only dimension is the bounded `operation`
-value (`login` or `registration`); they never include client, account, route, or credential
-values. These instruments are the integration seam for #63. This release does not yet configure
-an exporter, scrape endpoint, dashboard, external alert evaluator, or operated alert.
+the observable gauge `promptly.authentication.requests.in_flight`. Their only dimension is the
+bounded `operation` value (`login` or `registration`); they never include client, account, route,
+or credential values. The gauge reports current state even when collection begins after requests
+were admitted. These instruments are the integration seam for #63. This release does not yet
+configure an exporter, scrape endpoint, dashboard, external alert evaluator, or operated alert.
 
 Promptly ignores `X-Forwarded-For` by default. If a reverse proxy is the Server's only direct
 peer, add each exact canonical CIDR as an indexed value such as

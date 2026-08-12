@@ -200,7 +200,10 @@ jobs:
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.LeaseReleaseIsIdempotentAndCapacityRecoversExactlyOnce"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.ConstructorAndOperationValidateInputs"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.MetricsUseExactNamesAndOnlyBoundedOperationTags"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.InFlightGaugeReportsCurrentStateForLateAndRenewedSubscriptions"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.ThrowingMetricListenerCannotLeakCapacityOrEscapeAdmissionOperations"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.ThrowingInstrumentPublicationCannotPoisonAdmissionInitialization"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.InFlightGaugeSnapshotNeverExceedsCeilingDuringConcurrentHandoffs"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.NullAdmissionGateIsRejected"; Count = 1 }
           )
           $passedNames = @(

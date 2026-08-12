@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Promptly.Application.Data;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 using PromptlyEnvironment = Promptly.Domain.Entities.Environment;
 
@@ -14,6 +15,69 @@ namespace Promptly.IntegrationTests;
 
 public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
 {
+    [Fact]
+    public async Task EnvironmentApi_RejectsUnsafeBaseUrlsWithoutCreatingOrMutatingState()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var user = await PromptlyApiClient.RegisterAsync(fixture.PrimaryHost.Factory);
+        var projectId = await user.CreateProjectAsync();
+        var invalidBaseUrls = new[]
+        {
+            "ftp://example.test/api",
+            "https://user:secret@example.test/api",
+            "//example.test/api",
+            "https://example.test/api path"
+        };
+
+        foreach (var invalidBaseUrl in invalidBaseUrls)
+        {
+            using var create = await user.PostJsonAsync(
+                $"/api/projects/{projectId}/environments",
+                new
+                {
+                    name = "unsafe create",
+                    baseUrl = invalidBaseUrl,
+                    headers = new Dictionary<string, string>
+                    {
+                        ["Authorization"] = "must-not-persist"
+                    }
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        }
+
+        var environmentId = await user.CreateEnvironmentAsync(projectId);
+        foreach (var invalidBaseUrl in invalidBaseUrls)
+        {
+            using var update = await user.SendAsync(new HttpRequestMessage(
+                HttpMethod.Put,
+                $"/api/environments/{environmentId}")
+            {
+                Content = JsonContent.Create(new
+                {
+                    name = "unsafe update",
+                    baseUrl = invalidBaseUrl,
+                    headers = new Dictionary<string, string>
+                    {
+                        ["Authorization"] = "must-not-persist"
+                    }
+                })
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+        }
+
+        await using var scope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<PromptlyDbContext>();
+        var environments = await dbContext.Environments
+            .AsNoTracking()
+            .Where(environment => environment.ProjectId == projectId)
+            .ToListAsync(cancellationToken);
+        var persisted = Assert.Single(environments);
+        Assert.Equal(environmentId, persisted.Id);
+        Assert.Equal("Integration", persisted.Name);
+        Assert.Equal("https://integration.example.test", persisted.BaseUrl);
+        Assert.DoesNotContain("must-not-persist", persisted.DefaultHeadersEncryptedJson);
+    }
+
     [Fact]
     public async Task EndpointApi_RejectsUnsafeTargetsWithoutCreatingOrMutatingState()
     {
@@ -109,63 +173,82 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
                 captureListener,
                 captureCancellation.Token);
 
-            await using var scope = fixture.PrimaryHost.Factory.Services.CreateAsyncScope();
-            var encryptionService = scope.ServiceProvider.GetRequiredService<IEncryptionService>();
-            var endpointExecutor = scope.ServiceProvider.GetRequiredService<IEndpointExecutor>();
-            var secret = $"redirect-secret-{Guid.NewGuid():N}";
-            var environment = new PromptlyEnvironment
-            {
-                Id = Guid.NewGuid(),
-                ProjectId = Guid.NewGuid(),
-                Name = "redirect security proof",
-                BaseUrl = $"http://127.0.0.1:{redirectPort}",
-                DefaultHeadersEncryptedJson = encryptionService.Encrypt(
-                    JsonSerializer.Serialize(new Dictionary<string, string>
+            await fixture.RunWithHostAsync(
+                fixture.DefaultWorkerBaseUrl,
+                async host =>
+                {
+                    await using var scope = host.Factory.Services.CreateAsyncScope();
+                    var encryptionService = scope.ServiceProvider
+                        .GetRequiredService<IEncryptionService>();
+                    var endpointExecutor = scope.ServiceProvider
+                        .GetRequiredService<IEndpointExecutor>();
+                    var secret = $"redirect-secret-{Guid.NewGuid():N}";
+                    var environment = new PromptlyEnvironment
                     {
-                        ["X-Promptly-Secret"] = secret
-                    }))
-            };
-            var endpoint = new Endpoint
-            {
-                Id = Guid.NewGuid(),
-                EnvironmentId = environment.Id,
-                Name = "redirect",
-                Path = "/redirect",
-                HttpMethod = "POST",
-                TimeoutSeconds = 5
-            };
-            var testCase = new TestCase
-            {
-                Id = Guid.NewGuid(),
-                SuiteId = Guid.NewGuid(),
-                ExternalId = "redirect-security-proof",
-                Name = "redirect security proof",
-                InputSpecJson = "{\"messages\":[]}",
-                ExpectationsJson = "[]"
-            };
+                        Id = Guid.NewGuid(),
+                        ProjectId = Guid.NewGuid(),
+                        Name = "redirect security proof",
+                        BaseUrl = $"http://127.0.0.1:{redirectPort}",
+                        DefaultHeadersEncryptedJson = encryptionService.Encrypt(
+                            JsonSerializer.Serialize(new Dictionary<string, string>
+                            {
+                                ["X-Promptly-Secret"] = secret
+                            }))
+                    };
+                    var endpoint = new Endpoint
+                    {
+                        Id = Guid.NewGuid(),
+                        EnvironmentId = environment.Id,
+                        Name = "redirect",
+                        Path = "/redirect",
+                        HttpMethod = "POST",
+                        TimeoutSeconds = 5
+                    };
+                    var testCase = new TestCase
+                    {
+                        Id = Guid.NewGuid(),
+                        SuiteId = Guid.NewGuid(),
+                        ExternalId = "redirect-security-proof",
+                        Name = "redirect security proof",
+                        InputSpecJson = "{\"messages\":[]}",
+                        ExpectationsJson = "[]"
+                    };
 
-            var result = await endpointExecutor.ExecuteAsync(
-                endpoint,
-                environment,
-                testCase,
-                cancellationToken);
-            var redirectRequest = await redirectRequestTask;
+                    var result = await endpointExecutor.ExecuteAsync(
+                        endpoint,
+                        environment,
+                        testCase,
+                        cancellationToken);
+                    var redirectRequest = await redirectRequestTask;
 
-            Assert.False(result.Success);
-            Assert.Equal((int)HttpStatusCode.Redirect, result.StatusCode);
-            Assert.Contains("POST /redirect HTTP/1.1", redirectRequest, StringComparison.Ordinal);
-            Assert.Contains(
-                $"X-Promptly-Secret: {secret}",
-                redirectRequest,
-                StringComparison.OrdinalIgnoreCase);
+                    Assert.False(result.Success);
+                    Assert.Equal((int)HttpStatusCode.Redirect, result.StatusCode);
+                    Assert.Contains(
+                        "POST /redirect HTTP/1.1",
+                        redirectRequest,
+                        StringComparison.Ordinal);
+                    Assert.Contains(
+                        $"X-Promptly-Secret: {secret}",
+                        redirectRequest,
+                        StringComparison.OrdinalIgnoreCase);
 
-            var captureObservation = await Task.WhenAny(
-                captureRequestTask,
-                Task.Delay(TimeSpan.FromSeconds(1), cancellationToken));
-            Assert.NotSame(captureRequestTask, captureObservation);
+                    var captureObservation = await Task.WhenAny(
+                        captureRequestTask,
+                        Task.Delay(TimeSpan.FromSeconds(1), cancellationToken));
+                    Assert.NotSame(captureRequestTask, captureObservation);
 
-            await captureCancellation.CancelAsync();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => captureRequestTask!);
+                    await captureCancellation.CancelAsync();
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                        () => captureRequestTask!);
+                },
+                new Dictionary<string, string?>
+                {
+                    ["EndpointEgress:AllowedNonPublicDestinations:0:Host"] = "127.0.0.1",
+                    ["EndpointEgress:AllowedNonPublicDestinations:0:Port"] =
+                        redirectPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["EndpointEgress:AllowedNonPublicDestinations:0:Cidrs:0"] =
+                        "127.0.0.1/32"
+                });
         }
         finally
         {
@@ -175,6 +258,170 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
             captureListener.Stop();
             await ObserveExpectedShutdownAsync(redirectRequestTask);
             await ObserveExpectedShutdownAsync(captureRequestTask);
+        }
+    }
+
+    [Fact]
+    public async Task EndpointExecutor_UsesTheExplicitProxyAndSanitizesItsPolicyDenial()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var proxyListener = new TcpListener(IPAddress.Loopback, 0);
+        proxyListener.Start();
+        using var proxyCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        proxyCancellation.CancelAfter(TimeSpan.FromSeconds(10));
+        var proxyPort = ((IPEndPoint)proxyListener.LocalEndpoint).Port;
+        var proxyRequestTask = ServeProxyDenialAsync(
+            proxyListener,
+            proxyCancellation.Token);
+
+        try
+        {
+            await fixture.RunWithHostAsync(
+                fixture.DefaultWorkerBaseUrl,
+                async host =>
+                {
+                    await using var scope = host.Factory.Services.CreateAsyncScope();
+                    var endpointExecutor = scope.ServiceProvider
+                        .GetRequiredService<IEndpointExecutor>();
+                    var environment = new PromptlyEnvironment
+                    {
+                        Id = Guid.NewGuid(),
+                        ProjectId = Guid.NewGuid(),
+                        Name = "explicit proxy proof",
+                        // IANA's PCP anycast address is globally reachable, so the
+                        // application preflight permits it without a direct-mode
+                        // private exception. The fake proxy returns before dialing it.
+                        BaseUrl = "http://192.0.0.9:8080"
+                    };
+                    var endpoint = new Endpoint
+                    {
+                        Id = Guid.NewGuid(),
+                        EnvironmentId = environment.Id,
+                        Name = "proxy denial",
+                        Path = "/proxy-proof",
+                        HttpMethod = "POST",
+                        TimeoutSeconds = 5
+                    };
+                    var testCase = new TestCase
+                    {
+                        Id = Guid.NewGuid(),
+                        SuiteId = Guid.NewGuid(),
+                        ExternalId = "explicit-proxy-proof",
+                        Name = "explicit proxy proof",
+                        InputSpecJson = "{}",
+                        ExpectationsJson = "[]"
+                    };
+
+                    var result = await endpointExecutor.ExecuteAsync(
+                        endpoint,
+                        environment,
+                        testCase,
+                        cancellationToken);
+                    var proxyRequest = await proxyRequestTask;
+
+                    Assert.False(result.Success);
+                    Assert.Equal(
+                        EndpointDestinationRejectedException.SafeMessage,
+                        result.ErrorMessage);
+                    Assert.Equal(
+                        (int)HttpStatusCode.ProxyAuthenticationRequired,
+                        result.StatusCode);
+                    Assert.Null(result.ResponseJson);
+                    Assert.Contains(
+                        "POST http://192.0.0.9:8080/proxy-proof HTTP/1.1",
+                        proxyRequest,
+                        StringComparison.Ordinal);
+                },
+                new Dictionary<string, string?>
+                {
+                    ["EndpointEgress:RequireProxy"] = "true",
+                    ["EndpointEgress:ProxyUrl"] = $"http://127.0.0.1:{proxyPort}"
+                });
+        }
+        finally
+        {
+            await proxyCancellation.CancelAsync();
+            proxyListener.Stop();
+            await ObserveExpectedShutdownAsync(proxyRequestTask);
+        }
+    }
+
+    [Fact]
+    public async Task EndpointExecutor_SanitizesARealSocketsHttpHandlerConnectFailure()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var proxyListener = new TcpListener(IPAddress.Loopback, 0);
+        proxyListener.Start();
+        using var proxyCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        proxyCancellation.CancelAfter(TimeSpan.FromSeconds(10));
+        var proxyPort = ((IPEndPoint)proxyListener.LocalEndpoint).Port;
+        var proxyRequestTask = ServeProxyConnectFailureAsync(
+            proxyListener,
+            proxyCancellation.Token);
+
+        try
+        {
+            await fixture.RunWithHostAsync(
+                fixture.DefaultWorkerBaseUrl,
+                async host =>
+                {
+                    await using var scope = host.Factory.Services.CreateAsyncScope();
+                    var endpointExecutor = scope.ServiceProvider
+                        .GetRequiredService<IEndpointExecutor>();
+                    var result = await endpointExecutor.ExecuteAsync(
+                        new Endpoint
+                        {
+                            Id = Guid.NewGuid(),
+                            EnvironmentId = Guid.NewGuid(),
+                            Name = "CONNECT failure",
+                            Path = "/proxy-proof",
+                            HttpMethod = "GET",
+                            TimeoutSeconds = 5
+                        },
+                        new PromptlyEnvironment
+                        {
+                            Id = Guid.NewGuid(),
+                            ProjectId = Guid.NewGuid(),
+                            Name = "CONNECT failure",
+                            BaseUrl = "https://192.0.0.9:8443"
+                        },
+                        new TestCase
+                        {
+                            Id = Guid.NewGuid(),
+                            SuiteId = Guid.NewGuid(),
+                            ExternalId = "connect-failure-proof",
+                            Name = "CONNECT failure",
+                            InputSpecJson = "{}",
+                            ExpectationsJson = "[]"
+                        },
+                        cancellationToken);
+
+                    var proxyRequest = await proxyRequestTask;
+                    Assert.False(result.Success);
+                    Assert.Equal(
+                        EndpointDestinationRejectedException.SafeMessage,
+                        result.ErrorMessage);
+                    Assert.Equal((int)HttpStatusCode.BadGateway, result.StatusCode);
+                    Assert.Null(result.ResponseJson);
+                    Assert.Contains(
+                        "CONNECT 192.0.0.9:8443 HTTP/1.1",
+                        proxyRequest,
+                        StringComparison.Ordinal);
+                    Assert.DoesNotContain("internal proxy topology", result.ErrorMessage);
+                },
+                new Dictionary<string, string?>
+                {
+                    ["EndpointEgress:RequireProxy"] = "true",
+                    ["EndpointEgress:ProxyUrl"] = $"http://127.0.0.1:{proxyPort}"
+                });
+        }
+        finally
+        {
+            await proxyCancellation.CancelAsync();
+            proxyListener.Stop();
+            await ObserveExpectedShutdownAsync(proxyRequestTask);
         }
     }
 
@@ -191,6 +438,46 @@ public sealed class EndpointTargetSecurityTests(IntegrationFixture fixture)
             $"Location: {redirectTarget.AbsoluteUri}\r\n" +
             "Content-Length: 0\r\n" +
             "Connection: close\r\n\r\n");
+        await stream.WriteAsync(response, cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+        return request;
+    }
+
+    private static async Task<string> ServeProxyDenialAsync(
+        TcpListener listener,
+        CancellationToken cancellationToken)
+    {
+        using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+        await using var stream = client.GetStream();
+        var request = await ReadRequestAsync(stream, cancellationToken);
+        const string body = "upstream address and deployment details must not escape";
+        var response = Encoding.ASCII.GetBytes(
+            "HTTP/1.1 407 Proxy Authentication Required\r\n" +
+            "X-Smokescreen-Error: sensitive upstream policy detail\r\n" +
+            "Content-Type: text/plain\r\n" +
+            $"Content-Length: {Encoding.ASCII.GetByteCount(body)}\r\n" +
+            "Connection: close\r\n\r\n" +
+            body);
+        await stream.WriteAsync(response, cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+        return request;
+    }
+
+    private static async Task<string> ServeProxyConnectFailureAsync(
+        TcpListener listener,
+        CancellationToken cancellationToken)
+    {
+        using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+        await using var stream = client.GetStream();
+        var request = await ReadRequestAsync(stream, cancellationToken);
+        const string body = "internal proxy topology must not escape";
+        var response = Encoding.ASCII.GetBytes(
+            "HTTP/1.1 502 Bad Gateway\r\n" +
+            "X-Smokescreen-Error: sensitive resolver and dial detail\r\n" +
+            "Content-Type: text/plain\r\n" +
+            $"Content-Length: {Encoding.ASCII.GetByteCount(body)}\r\n" +
+            "Connection: close\r\n\r\n" +
+            body);
         await stream.WriteAsync(response, cancellationToken);
         await stream.FlushAsync(cancellationToken);
         return request;

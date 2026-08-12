@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Promptly.Application.Models;
 
 namespace Promptly.Server.Models;
 
@@ -8,7 +9,7 @@ public record CreateEnvironmentRequest
     public required string Name { get; init; }
 
     [Required]
-    [Url]
+    [EnvironmentBaseUrl]
     public required string BaseUrl { get; init; }
 
     public Dictionary<string, string>? Headers { get; init; }
@@ -20,7 +21,7 @@ public record UpdateEnvironmentRequest
     public required string Name { get; init; }
 
     [Required]
-    [Url]
+    [EnvironmentBaseUrl]
     public required string BaseUrl { get; init; }
 
     public Dictionary<string, string>? Headers { get; init; }

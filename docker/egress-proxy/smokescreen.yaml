@@ -1,0 +1,85 @@
+---
+ip: 0.0.0.0
+port: 4750
+network: ip
+acl_file: /etc/smokescreen/egress-acl.yaml
+allow_missing_role: true
+unsafe_allow_private_ranges: false
+deny_message_extra: Promptly outbound policy denied this destination.
+
+# These are the IANA globally reachable exceptions inside broader special-
+# purpose blocks denied below. Smokescreen evaluates explicit allows first.
+allow_ranges:
+  - 2001:3::/32
+  - 2001:4:112::/48
+  - 2001:20::/28
+  - 2001:30::/28
+allow_addresses:
+  - 192.0.0.9
+  - 192.0.0.10
+  - 2001:1::1
+  - 2001:1::2
+  - 2001:1::3
+
+# Explicit special-purpose ranges supplement Smokescreen's default
+# IsGlobalUnicast, IsPrivate, CGNAT, loopback, and IPv6-embedding checks.
+deny_ranges:
+  - 0.0.0.0/8
+  - 10.0.0.0/8
+  - 100.64.0.0/10
+  - 127.0.0.0/8
+  - 169.254.0.0/16
+  - 172.16.0.0/12
+  - 192.0.0.0/24
+  - 192.0.2.0/24
+  - 192.88.99.0/24
+  - 192.168.0.0/16
+  - 198.18.0.0/15
+  - 198.51.100.0/24
+  - 203.0.113.0/24
+  - 224.0.0.0/4
+  - 240.0.0.0/4
+  # As of the pinned IANA registry snapshot, global IPv6 unicast allocations
+  # are within 2000::/3. Deny all other top-level space unless it is handled by
+  # a narrower rule above or below.
+  - ::/3
+  - ::/128
+  - ::1/128
+  - 64:ff9b::/96
+  - 64:ff9b:1::/48
+  - 100::/64
+  - 100:0:0:1::/64
+  - 2001::/23
+  - 2001:db8::/32
+  - 2002::/16
+  - 3fff::/20
+  - 4000::/2
+  - 5f00::/16
+  - 8000::/1
+  - fc00::/7
+  - fe80::/10
+  - ff00::/8
+deny_addresses:
+  # Azure WireServer and the canonical IPv4 metadata address must remain
+  # unavailable even if an operator later broadens another range.
+  - 168.63.129.16
+  - 100.100.100.200
+  - 169.254.169.254
+  - 169.254.170.2
+  - 192.0.0.192
+  - fd00:ec2::254
+  - fd20:ce::254
+
+connect_timeout: 5s
+dns_timeout: 3s
+idle_timeout: 30s
+exit_timeout: 15s
+read_header_timeout: 5s
+read_timeout: 30s
+write_timeout: 30s
+transport_max_idle_conns: 64
+transport_max_idle_conns_per_host: 8
+max_concurrent_requests: 64
+max_request_rate: 100
+max_request_burst: 200
+max_concurrent_connect_tunnels: 32

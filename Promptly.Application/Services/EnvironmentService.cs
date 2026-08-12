@@ -57,6 +57,8 @@ public class EnvironmentService : IEnvironmentService
         Dictionary<string, string>? headers,
         TenantAccessScope scope)
     {
+        EndpointTargetPolicy.EnsureBaseUri(baseUrl);
+
         if (!await IsOwnedProjectAsync(projectId, scope))
         {
             return null;
@@ -92,6 +94,8 @@ public class EnvironmentService : IEnvironmentService
         Dictionary<string, string>? headers,
         TenantAccessScope scope)
     {
+        EndpointTargetPolicy.EnsureBaseUri(baseUrl);
+
         var environment = await GetEnvironmentByIdAsync(environmentId, scope);
         if (environment == null)
         {

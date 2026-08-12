@@ -17,7 +17,7 @@ jobs:
   integration-verification:
     name: Integration verification
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
@@ -161,11 +161,19 @@ jobs:
             throw "Provider evidence contains no correlated mapping chat-completion request"
           }
 
+      - name: Verify the Compose egress policy boundary
+        env:
+          PROMPTLY_EGRESS_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/test-results/egress-policy
+          JWT__Key: QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
+        run: ./scripts/verify-egress-policy.sh
+
       - name: Upload integration test and service logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: integration-test-results
-          path: artifacts/test-results/integration
+          path: |
+            artifacts/test-results/integration
+            artifacts/test-results/egress-policy
           if-no-files-found: error
           retention-days: 14

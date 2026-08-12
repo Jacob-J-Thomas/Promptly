@@ -19,6 +19,7 @@ public sealed class ExternalCallCancellationTests
         var executor = new EndpointExecutor(
             new StubHttpClientFactory(new HttpClient(handler)),
             new StubEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
         using var cancellation = new CancellationTokenSource();
 

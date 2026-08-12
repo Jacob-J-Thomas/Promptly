@@ -167,8 +167,11 @@ jobs:
           $expectedApplicationSources = @(
             "Promptly.Application/Data/ExecutableRunQueries.cs"
             "Promptly.Application/Data/TenantOwnedQueries.cs"
+            "Promptly.Application/Models/EndpointDestinationPolicy.cs"
+            "Promptly.Application/Models/EndpointEgressOptions.cs"
             "Promptly.Application/Models/EndpointTargetPolicy.cs"
             "Promptly.Application/Services/BoundedRegexMatcher.cs"
+            "Promptly.Application/Services/EndpointDestinationGuard.cs"
             "Promptly.Application/Services/EndpointExecutor.cs"
             "Promptly.Application/Services/EndpointService.cs"
             "Promptly.Application/Services/EnvironmentService.cs"
@@ -238,10 +241,17 @@ jobs:
           $requiredApplicationClasses = @(
             "Promptly.Application.Data.ExecutableRunQueries"
             "Promptly.Application.Data.TenantOwnedQueries"
+            "Promptly.Application.Models.AllowedNonPublicDestinationRule"
+            "Promptly.Application.Models.EndpointDestinationPolicy"
+            "Promptly.Application.Models.EndpointDestinationRejectedException"
+            "Promptly.Application.Models.EndpointEgressOptions"
             "Promptly.Application.Models.EndpointTargetAttribute"
             "Promptly.Application.Models.EndpointTargetPolicy"
             "Promptly.Application.Models.EndpointTargetValidationException"
+            "Promptly.Application.Models.EnvironmentBaseUrlAttribute"
+            "Promptly.Application.Models.EnvironmentBaseUrlValidationException"
             "Promptly.Application.Services.BoundedRegexMatcher"
+            "Promptly.Application.Services.EndpointDestinationGuard"
             "Promptly.Application.Services.EndpointExecutor"
             "Promptly.Application.Services.EndpointService"
             "Promptly.Application.Services.EnvironmentService"
@@ -396,6 +406,14 @@ jobs:
                 $coveredBranches / $branchHits.Count
               }
             }
+          }
+
+          foreach ($sourcePath in $expectedInfrastructureSources) {
+            $sourceCoverage = Get-SourceCoverage "Promptly.Infrastructure" $sourcePath
+            if ($sourceCoverage.LineRate -lt 0.90 -or $sourceCoverage.BranchRate -lt 0.90) {
+              throw "Coverage for $sourcePath is below 90%: line=$($sourceCoverage.LineRate) branch=$($sourceCoverage.BranchRate)"
+            }
+            Write-Host "${sourcePath}: line=$('{0:P2}' -f $sourceCoverage.LineRate) branch=$('{0:P2}' -f $sourceCoverage.BranchRate)"
           }
 
           foreach ($sourcePath in $expectedApplicationSources) {

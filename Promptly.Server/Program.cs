@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -6,10 +7,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using Promptly.Infrastructure.Clients;
 using Promptly.Infrastructure.Configuration;
+using Promptly.Infrastructure.Networking;
 using Promptly.Application.Data;
 using Promptly.Infrastructure.Security;
 using Promptly.Infrastructure.Services;
@@ -129,11 +132,53 @@ builder.Services.AddScoped<ITestCaseService, TestCaseService>();
 builder.Services.AddScoped<IYamlService, YamlService>();
 builder.Services.AddScoped<ITestRunService, TestRunService>();
 builder.Services.AddScoped<ITestRunWorkerStore, TestRunWorkerStore>();
+builder.Services.AddOptions<EndpointEgressOptions>()
+    .Bind(builder.Configuration.GetSection(EndpointEgressOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<EndpointEgressOptions>, EndpointEgressOptionsValidator>();
+builder.Services.AddSingleton<IDestinationAddressResolver, SystemDestinationAddressResolver>();
+builder.Services.AddSingleton<IEndpointDestinationGuard, EndpointDestinationGuard>();
+builder.Services.AddSingleton<IEndpointSocketConnector, EndpointSocketConnector>();
+builder.Services.AddSingleton<EndpointDestinationConnector>();
 builder.Services.AddScoped<IEndpointExecutor, EndpointExecutor>();
-builder.Services.AddHttpClient(EndpointExecutor.HttpClientName)
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+builder.Services.AddHttpClient(EndpointExecutor.HttpClientName, httpClient =>
     {
-        AllowAutoRedirect = false
+        // Explicitly cap endpoint traffic at HTTP/2. HTTP/3 uses QUIC and would bypass
+        // the TCP ConnectCallback used by the direct transport.
+        httpClient.DefaultRequestVersion = HttpVersion.Version20;
+        httpClient.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+    })
+    .ConfigurePrimaryHttpMessageHandler(serviceProvider =>
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<EndpointEgressOptions>>().Value;
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.None,
+            ConnectTimeout = TimeSpan.FromSeconds(options.ConnectTimeoutSeconds),
+            EnableMultipleHttp2Connections = false,
+            PooledConnectionLifetime = TimeSpan.FromSeconds(
+                options.PooledConnectionLifetimeSeconds),
+            UseCookies = false
+        };
+
+        if (!string.IsNullOrEmpty(options.ProxyUrl))
+        {
+            handler.Proxy = new WebProxy(new Uri(options.ProxyUrl))
+            {
+                BypassProxyOnLocal = false
+            };
+            handler.UseProxy = true;
+        }
+        else
+        {
+            handler.UseProxy = false;
+            handler.ConnectCallback = serviceProvider
+                .GetRequiredService<EndpointDestinationConnector>()
+                .ConnectAsync;
+        }
+
+        return handler;
     });
 builder.Services.AddSingleton<IBoundedRegexMatcher, BoundedRegexMatcher>();
 builder.Services.AddScoped<IExpectationEvaluator, ExpectationEvaluator>();

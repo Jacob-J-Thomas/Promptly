@@ -2,9 +2,11 @@ using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Promptly.Application.Data;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
@@ -19,6 +21,54 @@ namespace Promptly.Application.UnitTests;
 
 public sealed class EndpointTargetPolicyTests
 {
+    [Theory]
+    [InlineData("https://example.test/api/")]
+    [InlineData("http://127.0.0.1:8080/")]
+    [InlineData("https://bücher.example/v1")]
+    public void Http_environment_base_urls_are_accepted(string baseUrl)
+    {
+        Assert.True(EndpointTargetPolicy.TryValidateBaseUri(
+            baseUrl,
+            out var parsed,
+            out var error));
+        Assert.Equal(new Uri(baseUrl), parsed);
+        Assert.Equal(parsed, EndpointTargetPolicy.EnsureBaseUri(baseUrl));
+        Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("relative")]
+    [InlineData("ftp://example.test/")]
+    [InlineData("https://user@example.test/")]
+    [InlineData("https://example.test/path with space")]
+    [InlineData("https://example.test\\path")]
+    public void Unsafe_environment_base_urls_are_rejected(string? baseUrl)
+    {
+        Assert.False(EndpointTargetPolicy.TryValidateBaseUri(
+            baseUrl,
+            out var parsed,
+            out var error));
+        Assert.Null(parsed);
+        Assert.NotEmpty(error);
+        Assert.Throws<EnvironmentBaseUrlValidationException>(
+            () => EndpointTargetPolicy.EnsureBaseUri(baseUrl));
+    }
+
+    [Fact]
+    public void Environment_base_url_validation_rejects_unpaired_utf16()
+    {
+        var malformed = $"https://example.test/{new string('\uD800', 1)}";
+
+        Assert.False(EndpointTargetPolicy.TryValidateBaseUri(
+            malformed,
+            out var parsed,
+            out var error));
+        Assert.Null(parsed);
+        Assert.Contains("absolute HTTP(S)", error);
+    }
+
     [Theory]
     [InlineData("/v1/chat")]
     [InlineData("v1/chat")]
@@ -170,6 +220,37 @@ public sealed class EndpointTargetPolicyTests
     }
 
     [Fact]
+    public void Environment_request_models_validate_base_urls()
+    {
+        var valid = new CreateEnvironmentRequest
+        {
+            Name = "public",
+            BaseUrl = "https://example.test/api/"
+        };
+        var invalid = new UpdateEnvironmentRequest
+        {
+            Name = "unsafe",
+            BaseUrl = "ftp://example.test/"
+        };
+
+        Assert.Empty(Validate(valid));
+        Assert.Contains(Validate(invalid), result =>
+            result.ErrorMessage?.Contains(
+                "Invalid environment base URL",
+                StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void Environment_base_url_attribute_handles_non_string_values_defensively()
+    {
+        var attribute = new EnvironmentBaseUrlAttribute();
+        var context = new ValidationContext(new object());
+
+        Assert.Null(attribute.GetValidationResult(null, context));
+        Assert.NotNull(attribute.GetValidationResult(42, context));
+    }
+
+    [Fact]
     public void Endpoint_target_attribute_handles_non_string_values_defensively()
     {
         var attribute = new EndpointTargetAttribute();
@@ -184,6 +265,187 @@ public sealed class EndpointTargetPolicyTests
         var results = new List<ValidationResult>();
         Validator.TryValidateObject(request, new ValidationContext(request), results, true);
         return results;
+    }
+}
+
+public sealed class EnvironmentBaseUrlServiceAndControllerTests
+{
+    [Fact]
+    public async Task Service_rejects_unsafe_base_urls_without_mutating_state_or_headers()
+    {
+        await using var dbContext = CreateDbContext();
+        var (project, environment, scope) = await SeedGraphAsync(dbContext);
+        var encryption = new RecordingEnvironmentEncryptionService();
+        var service = new EnvironmentService(
+            dbContext,
+            encryption,
+            NullLogger<EnvironmentService>.Instance);
+
+        await Assert.ThrowsAsync<EnvironmentBaseUrlValidationException>(() =>
+            service.CreateEnvironmentAsync(
+                project.Id,
+                "unsafe create",
+                "ftp://example.test/",
+                new Dictionary<string, string> { ["Authorization"] = "secret" },
+                scope));
+        await Assert.ThrowsAsync<EnvironmentBaseUrlValidationException>(() =>
+            service.UpdateEnvironmentAsync(
+                environment.Id,
+                "unsafe update",
+                "https://user@example.test/",
+                new Dictionary<string, string> { ["Authorization"] = "changed" },
+                scope));
+
+        Assert.Equal(1, await dbContext.Environments.CountAsync(
+            TestContext.Current.CancellationToken));
+        Assert.Equal("safe", environment.Name);
+        Assert.Equal("https://example.test/api/", environment.BaseUrl);
+        Assert.Null(environment.DefaultHeadersEncryptedJson);
+        Assert.Equal(0, encryption.EncryptCount);
+    }
+
+    [Fact]
+    public async Task Service_persists_valid_http_and_https_base_urls()
+    {
+        await using var dbContext = CreateDbContext();
+        var (project, environment, scope) = await SeedGraphAsync(dbContext);
+        var service = new EnvironmentService(
+            dbContext,
+            new RecordingEnvironmentEncryptionService(),
+            NullLogger<EnvironmentService>.Instance);
+
+        var created = await service.CreateEnvironmentAsync(
+            project.Id,
+            "created",
+            "http://public.example.test:8080/api/",
+            null,
+            scope);
+        var updated = await service.UpdateEnvironmentAsync(
+            environment.Id,
+            "updated",
+            "https://bücher.example/v2/",
+            null,
+            scope);
+
+        Assert.Equal(
+            "http://public.example.test:8080/api/",
+            Assert.IsType<Environment>(created).BaseUrl);
+        Assert.Equal("https://bücher.example/v2/", Assert.IsType<Environment>(updated).BaseUrl);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Controller_converts_service_base_url_validation_to_bad_request(bool create)
+    {
+        var controller = new EnvironmentsController(
+            new RejectingEnvironmentService(),
+            new EnvironmentFixedScopeAccessor(),
+            NullLogger<EnvironmentsController>.Instance);
+
+        var result = create
+            ? await controller.CreateEnvironment(
+                Guid.NewGuid(),
+                new CreateEnvironmentRequest { Name = "unsafe", BaseUrl = "ftp://example.test" })
+            : await controller.UpdateEnvironment(
+                Guid.NewGuid(),
+                new UpdateEnvironmentRequest
+                {
+                    Name = "unsafe",
+                    BaseUrl = "https://user@example.test"
+                });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("Invalid environment base URL", badRequest.Value?.ToString());
+    }
+
+    private static PromptlyDbContext CreateDbContext()
+    {
+        var options = new DbContextOptionsBuilder<PromptlyDbContext>()
+            .UseInMemoryDatabase($"environment-targets-{Guid.NewGuid():N}")
+            .Options;
+        return new PromptlyDbContext(options);
+    }
+
+    private static async Task<(Project Project, Environment Environment, TenantAccessScope Scope)>
+        SeedGraphAsync(PromptlyDbContext dbContext)
+    {
+        const string ownerId = "environment-owner";
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Name = "project",
+            OwnerUserId = ownerId
+        };
+        var environment = new Environment
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Id,
+            Project = project,
+            Name = "safe",
+            BaseUrl = "https://example.test/api/"
+        };
+
+        dbContext.Users.Add(new User { Id = ownerId, UserName = ownerId });
+        dbContext.Projects.Add(project);
+        dbContext.Environments.Add(environment);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return (project, environment, new TenantAccessScope(ownerId, ProjectId: null));
+    }
+
+    private sealed class RecordingEnvironmentEncryptionService : IEncryptionService
+    {
+        public int EncryptCount { get; private set; }
+
+        public string Encrypt(string plainText)
+        {
+            EncryptCount++;
+            return plainText;
+        }
+
+        public string Decrypt(string cipherText) => cipherText;
+    }
+
+    private sealed class EnvironmentFixedScopeAccessor : ITenantAccessScopeAccessor
+    {
+        public bool TryGetScope([NotNullWhen(true)] out TenantAccessScope? scope)
+        {
+            scope = new TenantAccessScope("owner", ProjectId: null);
+            return true;
+        }
+    }
+
+    private sealed class RejectingEnvironmentService : IEnvironmentService
+    {
+        public Task<IReadOnlyList<Environment>?> GetEnvironmentsByProjectAsync(
+            Guid projectId,
+            TenantAccessScope scope) => throw new NotSupportedException();
+
+        public Task<Environment?> GetEnvironmentByIdAsync(
+            Guid environmentId,
+            TenantAccessScope scope) => throw new NotSupportedException();
+
+        public Task<Environment?> CreateEnvironmentAsync(
+            Guid projectId,
+            string name,
+            string baseUrl,
+            Dictionary<string, string>? headers,
+            TenantAccessScope scope) => throw new EnvironmentBaseUrlValidationException("unsafe");
+
+        public Task<Environment?> UpdateEnvironmentAsync(
+            Guid environmentId,
+            string name,
+            string baseUrl,
+            Dictionary<string, string>? headers,
+            TenantAccessScope scope) => throw new EnvironmentBaseUrlValidationException("unsafe");
+
+        public Task<bool> DeleteEnvironmentAsync(
+            Guid environmentId,
+            TenantAccessScope scope) => throw new NotSupportedException();
+
+        public Task<Dictionary<string, string>?> GetDecryptedHeadersAsync(
+            Guid environmentId,
+            TenantAccessScope scope) => throw new NotSupportedException();
     }
 }
 
@@ -352,6 +614,358 @@ public sealed class EndpointTargetServiceAndControllerTests
 
 public sealed class EndpointExecutorTargetSecurityTests
 {
+    [Fact]
+    public void Constructor_rejects_null_dependencies()
+    {
+        using var client = new HttpClient(new RecordingHandler(HttpStatusCode.OK));
+        var factory = new RecordingHttpClientFactory(client);
+        var encryption = new RecordingEncryptionService();
+        var guard = new PassThroughEndpointDestinationGuard();
+        var logger = NullLogger<EndpointExecutor>.Instance;
+
+        Assert.Equal(
+            "httpClientFactory",
+            Assert.Throws<ArgumentNullException>(() =>
+                new EndpointExecutor(null!, encryption, guard, logger)).ParamName);
+        Assert.Equal(
+            "encryptionService",
+            Assert.Throws<ArgumentNullException>(() =>
+                new EndpointExecutor(factory, null!, guard, logger)).ParamName);
+        Assert.Equal(
+            "destinationGuard",
+            Assert.Throws<ArgumentNullException>(() =>
+                new EndpointExecutor(factory, encryption, null!, logger)).ParamName);
+        Assert.Equal(
+            "logger",
+            Assert.Throws<ArgumentNullException>(() =>
+                new EndpointExecutor(factory, encryption, guard, null!)).ParamName);
+    }
+
+    [Fact]
+    public async Task Destination_policy_denial_precedes_input_parsing_decryption_and_client_creation()
+    {
+        var rejection = new EndpointDestinationRejectedException(
+            EndpointDestinationRejectionReason.PermanentlyDeniedDestination);
+        var guard = new RecordingDestinationGuard(rejection);
+        var handler = new RecordingHandler(HttpStatusCode.OK);
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
+        var encryption = new RecordingEncryptionService();
+        var testCase = TestCase();
+        testCase.InputSpecJson = "{";
+
+        var result = await new EndpointExecutor(
+            factory,
+            encryption,
+            guard,
+            NullLogger<EndpointExecutor>.Instance).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: "ciphertext"),
+                testCase,
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+        Assert.Null(result.StatusCode);
+        var authorization = Assert.Single(guard.Calls);
+        Assert.Equal("https://example.test/v1/chat", authorization.Destination.AbsoluteUri);
+        Assert.Equal(TestContext.Current.CancellationToken, authorization.CancellationToken);
+        Assert.Equal(0, encryption.DecryptCount);
+        Assert.Equal(0, factory.CreateCount);
+        Assert.Equal(0, handler.SendCount);
+    }
+
+    [Fact]
+    public async Task Nested_connector_policy_denial_is_sanitized()
+    {
+        var rejection = new EndpointDestinationRejectedException(
+            EndpointDestinationRejectionReason.NonPublicDestination);
+        var connectorFailure = new HttpRequestException(
+            "connector failed",
+            new AggregateException(
+                new InvalidOperationException("unrelated address failure"),
+                new InvalidOperationException("dial failed", rejection)));
+        var handler = new ThrowingHandler(connectorFailure);
+        using var client = new HttpClient(handler);
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance,
+            ProxyEgressOptions()).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+        Assert.Null(result.StatusCode);
+        Assert.DoesNotContain("connector failed", result.ErrorMessage);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Fact]
+    public async Task Proxy_407_response_is_sanitized_and_preserves_status()
+    {
+        var handler = new RecordingHandler(HttpStatusCode.ProxyAuthenticationRequired);
+        using var client = new HttpClient(handler);
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance,
+            ProxyEgressOptions()).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+        Assert.Equal((int)HttpStatusCode.ProxyAuthenticationRequired, result.StatusCode);
+        Assert.Null(result.ResponseJson);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.GatewayTimeout)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task Smokescreen_error_response_is_sanitized_and_preserves_status(
+        HttpStatusCode statusCode)
+    {
+        var handler = new RecordingHandler(statusCode, addSmokescreenError: true);
+        using var client = new HttpClient(handler);
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance,
+            ProxyEgressOptions()).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+        Assert.Equal((int)statusCode, result.StatusCode);
+        Assert.Null(result.ResponseJson);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Proxy_407_request_exception_is_sanitized_and_preserves_status(bool nested)
+    {
+        var proxyDenial = new HttpRequestException(
+            "proxy response contained deployment details",
+            inner: null,
+            statusCode: HttpStatusCode.ProxyAuthenticationRequired);
+        Exception failure = nested
+            ? new HttpRequestException(
+                "connector failed",
+                new AggregateException(
+                    new InvalidOperationException("unrelated failure"),
+                    proxyDenial))
+            : proxyDenial;
+        var handler = new ThrowingHandler(failure);
+        using var client = new HttpClient(handler);
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance,
+            ProxyEgressOptions()).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+        Assert.Equal((int)HttpStatusCode.ProxyAuthenticationRequired, result.StatusCode);
+        Assert.DoesNotContain("deployment details", result.ErrorMessage);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.GatewayTimeout)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task Proxy_connect_failure_is_sanitized_and_preserves_status(
+        HttpStatusCode statusCode)
+    {
+        using var client = new HttpClient(
+            new ThrowingHandler(
+                new HttpRequestException(
+                    "proxy tunnel to internal-proxy-origin failed",
+                    inner: null,
+                    statusCode)));
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance,
+            ProxyEgressOptions()).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+        Assert.Equal((int)statusCode, result.StatusCode);
+        Assert.DoesNotContain("internal-proxy-origin", result.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ProxyAuthenticationRequired, false)]
+    [InlineData(HttpStatusCode.BadGateway, true)]
+    public async Task Direct_mode_preserves_legitimate_upstream_proxy_like_responses(
+        HttpStatusCode statusCode,
+        bool addSmokescreenError)
+    {
+        var handler = new RecordingHandler(statusCode, addSmokescreenError);
+        using var client = new HttpClient(handler);
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: null),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal((int)statusCode, result.StatusCode);
+        Assert.Equal("{}", result.ResponseJson);
+        Assert.Contains("HTTP ", result.ErrorMessage);
+        Assert.NotEqual(EndpointDestinationRejectedException.SafeMessage, result.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("hOsT")]
+    [InlineData("Connection")]
+    [InlineData("Keep-Alive")]
+    [InlineData("Transfer-Encoding")]
+    [InlineData("TE")]
+    [InlineData("Trailer")]
+    [InlineData("Upgrade")]
+    [InlineData("Content-Length")]
+    [InlineData("X-Upstream-Https-Proxy")]
+    [InlineData("pRoXy-Authorization")]
+    [InlineData("X-Smokescreen-Role")]
+    public async Task Reserved_headers_fail_before_client_creation(string headerName)
+    {
+        var handler = new RecordingHandler(HttpStatusCode.OK);
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
+        var encryption = new RecordingEncryptionService
+        {
+            DecryptedValue = JsonSerializer.Serialize(
+                new Dictionary<string, string> { [headerName] = "attacker-controlled" })
+        };
+
+        var result = await new EndpointExecutor(
+            factory,
+            encryption,
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: "ciphertext"),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal("Unsafe endpoint headers", result.ErrorMessage);
+        Assert.Equal(1, encryption.DecryptCount);
+        Assert.Equal(0, factory.CreateCount);
+        Assert.Equal(0, handler.SendCount);
+    }
+
+    [Theory]
+    [InlineData("Bad Header", "value")]
+    [InlineData("X-Test", "safe\r\nInjected: value")]
+    [InlineData("Content-Type", "text/plain")]
+    public async Task Malformed_or_misused_headers_fail_before_client_creation(
+        string headerName,
+        string headerValue)
+    {
+        var handler = new RecordingHandler(HttpStatusCode.OK);
+        using var client = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(client);
+        var encryption = new RecordingEncryptionService
+        {
+            DecryptedValue = JsonSerializer.Serialize(
+                new Dictionary<string, string> { [headerName] = headerValue })
+        };
+
+        var result = await new EndpointExecutor(
+            factory,
+            encryption,
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: "ciphertext"),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal("Unsafe endpoint headers", result.ErrorMessage);
+        Assert.Equal(1, encryption.DecryptCount);
+        Assert.Equal(0, factory.CreateCount);
+        Assert.Equal(0, handler.SendCount);
+    }
+
+    [Fact]
+    public async Task Normal_headers_are_forwarded_with_bounded_http_version_policy()
+    {
+        var handler = new RecordingHandler(HttpStatusCode.OK);
+        using var client = new HttpClient(handler);
+        var encryption = new RecordingEncryptionService
+        {
+            DecryptedValue = JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["Authorization"] = "Bearer secret",
+                ["X-Correlation-Id"] = "trace-123"
+            })
+        };
+
+        var result = await new EndpointExecutor(
+            new RecordingHttpClientFactory(client),
+            encryption,
+            new PassThroughEndpointDestinationGuard(),
+            NullLogger<EndpointExecutor>.Instance).ExecuteAsync(
+                Endpoint("/v1/chat"),
+                Environment("https://example.test/api/", encryptedHeaders: "ciphertext"),
+                TestCase(),
+                TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Equal(HttpVersion.Version20, handler.RequestVersion);
+        Assert.Equal(HttpVersionPolicy.RequestVersionOrLower, handler.RequestVersionPolicy);
+        Assert.Contains(handler.Headers, header =>
+            string.Equals(header.Key, "Authorization", StringComparison.OrdinalIgnoreCase)
+            && header.Value.SequenceEqual(["Bearer secret"]));
+        Assert.Contains(handler.Headers, header =>
+            string.Equals(header.Key, "X-Correlation-Id", StringComparison.OrdinalIgnoreCase)
+            && header.Value.SequenceEqual(["trace-123"]));
+        Assert.Equal(1, encryption.DecryptCount);
+        Assert.Equal(1, handler.SendCount);
+    }
+
     [Theory]
     [InlineData("/v1/chat", "https://example.test/v1/chat")]
     [InlineData("v1/chat", "https://example.test/api/v1/chat")]
@@ -368,6 +982,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             factory,
             encryption,
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -398,6 +1013,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             factory,
             encryption,
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -427,6 +1043,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             factory,
             encryption,
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -449,6 +1066,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -478,6 +1096,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
         var endpoint = Endpoint("/v1/chat");
         endpoint.HttpMethod = configuredMethod;
@@ -504,6 +1123,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             factory,
             new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
         var testCase = TestCase();
         testCase.InputSpecJson = "null";
@@ -537,6 +1157,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             new RecordingHttpClientFactory(client),
             encryption,
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -559,6 +1180,7 @@ public sealed class EndpointExecutorTargetSecurityTests
         var executor = new EndpointExecutor(
             new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -572,13 +1194,14 @@ public sealed class EndpointExecutorTargetSecurityTests
     }
 
     [Fact]
-    public async Task Unexpected_send_failure_is_returned_as_an_execution_failure()
+    public async Task Unexpected_http_failure_is_sanitized()
     {
         using var client = new HttpClient(
             new ThrowingHandler(new HttpRequestException("network down")));
         var executor = new EndpointExecutor(
             new RecordingHttpClientFactory(client),
             new RecordingEncryptionService(),
+            new PassThroughEndpointDestinationGuard(),
             NullLogger<EndpointExecutor>.Instance);
 
         var result = await executor.ExecuteAsync(
@@ -588,7 +1211,8 @@ public sealed class EndpointExecutorTargetSecurityTests
             TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
-        Assert.Contains("Execution failed: network down", result.ErrorMessage);
+        Assert.Equal("Endpoint transport failed", result.ErrorMessage);
+        Assert.DoesNotContain("network down", result.ErrorMessage);
     }
 
     private static Endpoint Endpoint(string path) => new()
@@ -620,23 +1244,35 @@ public sealed class EndpointExecutorTargetSecurityTests
         ExpectationsJson = "[]"
     };
 
+    private static IOptions<EndpointEgressOptions> ProxyEgressOptions() =>
+        Options.Create(new EndpointEgressOptions
+        {
+            ProxyUrl = "http://proxy.example:3128"
+        });
+
     private sealed class RecordingHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public string? ClientName { get; private set; }
+        public int CreateCount { get; private set; }
 
         public HttpClient CreateClient(string name)
         {
+            CreateCount++;
             ClientName = name;
             return client;
         }
     }
 
-    private sealed class RecordingHandler(HttpStatusCode statusCode) : HttpMessageHandler
+    private sealed class RecordingHandler(
+        HttpStatusCode statusCode,
+        bool addSmokescreenError = false) : HttpMessageHandler
     {
         public int SendCount { get; private set; }
         public Uri? RequestUri { get; private set; }
         public HttpMethod? Method { get; private set; }
         public string? ContentJson { get; private set; }
+        public Version? RequestVersion { get; private set; }
+        public HttpVersionPolicy? RequestVersionPolicy { get; private set; }
         public IReadOnlyList<KeyValuePair<string, IEnumerable<string>>> Headers { get; private set; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
@@ -646,22 +1282,49 @@ public sealed class EndpointExecutorTargetSecurityTests
             SendCount++;
             RequestUri = request.RequestUri;
             Method = request.Method;
+            RequestVersion = request.Version;
+            RequestVersionPolicy = request.VersionPolicy;
             ContentJson = request.Content == null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             Headers = request.Headers.ToList();
-            return new HttpResponseMessage(statusCode)
+            var response = new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent("{}", Encoding.UTF8, "application/json")
             };
+            if (addSmokescreenError)
+            {
+                response.Headers.Add("X-Smokescreen-Error", "internal resolver detail");
+            }
+
+            return response;
         }
     }
 
     private sealed class ThrowingHandler(Exception failure) : HttpMessageHandler
     {
+        public int SendCount { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) => Task.FromException<HttpResponseMessage>(failure);
+            CancellationToken cancellationToken)
+        {
+            SendCount++;
+            return Task.FromException<HttpResponseMessage>(failure);
+        }
+    }
+
+    private sealed class RecordingDestinationGuard(Exception failure) : IEndpointDestinationGuard
+    {
+        public List<(Uri Destination, CancellationToken CancellationToken)> Calls { get; } = [];
+
+        public Task<AuthorizedEndpointDestination> AuthorizeAsync(
+            Uri destination,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add((destination, cancellationToken));
+            return Task.FromException<AuthorizedEndpointDestination>(failure);
+        }
     }
 
     private sealed class RecordingEncryptionService : IEncryptionService
@@ -682,5 +1345,19 @@ public sealed class EndpointExecutorTargetSecurityTests
 
             return DecryptedValue;
         }
+    }
+}
+
+internal sealed class PassThroughEndpointDestinationGuard : IEndpointDestinationGuard
+{
+    public Task<AuthorizedEndpointDestination> AuthorizeAsync(
+        Uri destination,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new AuthorizedEndpointDestination(
+            destination.IdnHost,
+            destination.Port,
+            [IPAddress.Parse("93.184.216.34")]));
     }
 }

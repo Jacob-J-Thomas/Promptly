@@ -1,0 +1,10 @@
+---
+version: v1
+services: []
+
+# Promptly remains useful for arbitrary public API testing. Smokescreen still
+# classifies the resolved address before dialing it, so this open hostname rule
+# does not permit loopback, private, link-local, metadata, or reserved IPs.
+default:
+  project: promptly
+  action: open

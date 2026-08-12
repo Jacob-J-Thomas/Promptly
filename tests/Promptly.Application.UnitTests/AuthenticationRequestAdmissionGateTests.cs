@@ -274,7 +274,7 @@ public sealed class AuthenticationRequestAdmissionGateTests
     public void ThrowingInstrumentPublicationCannotPoisonAdmissionInitialization()
     {
         var publicationCalls = 0;
-        using (var throwingListener = new MeterListener
+        using var throwingListener = new MeterListener
         {
             InstrumentPublished = (instrument, _) =>
             {
@@ -286,34 +286,50 @@ public sealed class AuthenticationRequestAdmissionGateTests
                         "Simulated instrument publication failure.");
                 }
             }
-        })
-        {
-            throwingListener.Start();
-            using var gate = CreateGate(1);
-            using var login = gate.TryAcquire(AuthenticationOperation.Login);
-            Assert.NotNull(login);
-            Assert.Null(gate.TryAcquire(AuthenticationOperation.Registration));
-            login.Dispose();
-            using var recovered = gate.TryAcquire(AuthenticationOperation.Registration);
-            Assert.NotNull(recovered);
-        }
+        };
+        throwingListener.Start();
+        using var gate = CreateGate(1);
+        using var initialLogin = gate.TryAcquire(AuthenticationOperation.Login);
+        Assert.NotNull(initialLogin);
+        Assert.Null(gate.TryAcquire(AuthenticationOperation.Registration));
+        initialLogin.Dispose();
+        using var initialRecovered = gate.TryAcquire(AuthenticationOperation.Registration);
+        Assert.NotNull(initialRecovered);
+        initialRecovered.Dispose();
+        throwingListener.Dispose();
 
-        Assert.True(Volatile.Read(ref publicationCalls) > 0);
+        Assert.Equal(3, Volatile.Read(ref publicationCalls));
 
-        var published = new ConcurrentDictionary<string, Instrument>();
-        using var recoveredListener = new MeterListener
+        var published = new ConcurrentQueue<Instrument>();
+        var measurements = new ConcurrentQueue<MetricMeasurement>();
+        using var healthyListener = new MeterListener
         {
-            InstrumentPublished = (instrument, _) =>
+            InstrumentPublished = (instrument, meterListener) =>
             {
-                if (instrument.Meter.Name == AuthenticationRequestAdmissionMetrics.MeterName)
+                if (instrument.Meter.Name ==
+                    AuthenticationRequestAdmissionMetrics.MeterName)
                 {
-                    published[instrument.Name] = instrument;
+                    published.Enqueue(instrument);
+                    meterListener.EnableMeasurementEvents(instrument);
                 }
             }
         };
-        recoveredListener.Start();
-        using var recoveredGate = CreateGate(1);
+        healthyListener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+        {
+            var copiedTags = new KeyValuePair<string, object?>[tags.Length];
+            tags.CopyTo(copiedTags);
+            measurements.Enqueue(new MetricMeasurement(instrument.Name, value, copiedTags));
+        });
+        healthyListener.Start();
 
+        using var login = gate.TryAcquire(AuthenticationOperation.Login);
+        Assert.NotNull(login);
+        Assert.Null(gate.TryAcquire(AuthenticationOperation.Registration));
+        healthyListener.RecordObservableInstruments();
+
+        var publishedInstruments = published.ToArray();
+        Assert.Equal(3, publishedInstruments.Length);
+        Assert.Single(publishedInstruments.Select(instrument => instrument.Meter).Distinct());
         Assert.Equal(
             new[]
             {
@@ -321,7 +337,27 @@ public sealed class AuthenticationRequestAdmissionGateTests
                 AuthenticationRequestAdmissionMetrics.InFlightInstrumentName,
                 AuthenticationRequestAdmissionMetrics.RejectedInstrumentName
             },
-            published.Keys.Order(StringComparer.Ordinal));
+            publishedInstruments.Select(instrument => instrument.Name).Order(StringComparer.Ordinal));
+        Assert.Collection(
+            measurements.Where(measurement =>
+                measurement.InstrumentName !=
+                AuthenticationRequestAdmissionMetrics.InFlightInstrumentName),
+            measurement => AssertMeasurement(
+                measurement,
+                AuthenticationRequestAdmissionMetrics.AdmittedInstrumentName,
+                1,
+                AuthenticationRequestAdmissionMetrics.LoginOperationTagValue),
+            measurement => AssertMeasurement(
+                measurement,
+                AuthenticationRequestAdmissionMetrics.RejectedInstrumentName,
+                1,
+                AuthenticationRequestAdmissionMetrics.RegistrationOperationTagValue));
+        AssertGaugePair(
+            measurements.Where(measurement =>
+                measurement.InstrumentName ==
+                AuthenticationRequestAdmissionMetrics.InFlightInstrumentName).ToArray(),
+            login: 1,
+            registration: 0);
     }
 
     [Fact]

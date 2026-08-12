@@ -39,9 +39,9 @@ public sealed class AuthenticationRequestAdmissionGate :
 
     private readonly int _maximumConcurrentRequests;
     private readonly Meter _meter;
-    private readonly Counter<long>? _admitted;
-    private readonly Counter<long>? _rejected;
-    private readonly ObservableGauge<long>? _inFlight;
+    private readonly Counter<long> _admitted;
+    private readonly Counter<long> _rejected;
+    private readonly ObservableGauge<long> _inFlight;
     private long _inFlightByOperation;
 
     public AuthenticationRequestAdmissionGate(IOptions<AuthenticationAbuseOptions> options)
@@ -59,19 +59,25 @@ public sealed class AuthenticationRequestAdmissionGate :
 
         _maximumConcurrentRequests = maximumConcurrentRequests;
         _meter = new Meter(AuthenticationRequestAdmissionMetrics.MeterName);
-        _admitted = TryCreateInstrument(() => _meter.CreateCounter<long>(
+        _admitted = TryCreateInstrument(
             AuthenticationRequestAdmissionMetrics.AdmittedInstrumentName,
-            unit: "{request}",
-            description: "Authentication requests admitted by the process-wide concurrency gate."));
-        _rejected = TryCreateInstrument(() => _meter.CreateCounter<long>(
+            () => _meter.CreateCounter<long>(
+                AuthenticationRequestAdmissionMetrics.AdmittedInstrumentName,
+                unit: "{request}",
+                description: "Authentication requests admitted by the process-wide concurrency gate."));
+        _rejected = TryCreateInstrument(
             AuthenticationRequestAdmissionMetrics.RejectedInstrumentName,
-            unit: "{request}",
-            description: "Authentication requests rejected by the process-wide concurrency gate."));
-        _inFlight = TryCreateInstrument(() => _meter.CreateObservableGauge(
+            () => _meter.CreateCounter<long>(
+                AuthenticationRequestAdmissionMetrics.RejectedInstrumentName,
+                unit: "{request}",
+                description: "Authentication requests rejected by the process-wide concurrency gate."));
+        _inFlight = TryCreateInstrument(
             AuthenticationRequestAdmissionMetrics.InFlightInstrumentName,
-            ObserveInFlight,
-            unit: "{request}",
-            description: "Authentication requests currently holding process-wide admission."));
+            () => _meter.CreateObservableGauge(
+                AuthenticationRequestAdmissionMetrics.InFlightInstrumentName,
+                ObserveInFlight,
+                unit: "{request}",
+                description: "Authentication requests currently holding process-wide admission."));
     }
 
     public IAuthenticationRequestAdmissionLease? TryAcquire(AuthenticationOperation operation)
@@ -138,7 +144,8 @@ public sealed class AuthenticationRequestAdmissionGate :
         ];
     }
 
-    private static TInstrument? TryCreateInstrument<TInstrument>(
+    private TInstrument TryCreateInstrument<TInstrument>(
+        string instrumentName,
         Func<TInstrument> createInstrument)
         where TInstrument : Instrument
     {
@@ -149,18 +156,35 @@ public sealed class AuthenticationRequestAdmissionGate :
         catch (Exception) // lgtm[cs/catch-of-all-exceptions] Observer failures must not poison auth.
         {
             // Instrument publication invokes external listeners synchronously.
-            // A broken observer must not poison authentication initialization.
-            return null;
+            // The runtime publishes before invoking those listeners, so recover
+            // that exact instrument without creating duplicates or disabling it.
+            return FindPublishedInstrument<TInstrument>(instrumentName);
         }
     }
 
-    private static void TryAdd(Counter<long>? instrument, string operationTag)
+    private TInstrument FindPublishedInstrument<TInstrument>(string instrumentName)
+        where TInstrument : Instrument
     {
-        if (instrument is null)
+        TInstrument? publishedInstrument = null;
+        using var recoveryListener = new MeterListener
         {
-            return;
-        }
+            InstrumentPublished = (instrument, _) =>
+            {
+                if (ReferenceEquals(instrument.Meter, _meter)
+                    && instrument.Name == instrumentName)
+                {
+                    publishedInstrument = (TInstrument)instrument;
+                }
+            }
+        };
+        recoveryListener.Start();
+        // Meter.Publish registers the new instrument before it invokes external
+        // listeners, so a listener callback fault guarantees this was found.
+        return publishedInstrument!;
+    }
 
+    private static void TryAdd(Counter<long> instrument, string operationTag)
+    {
         try
         {
             instrument.Add(1, CreateOperationTag(operationTag));

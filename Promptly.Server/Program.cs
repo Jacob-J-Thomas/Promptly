@@ -110,6 +110,7 @@ builder.Services.AddScoped<ITestCaseService, TestCaseService>();
 builder.Services.AddScoped<IYamlService, YamlService>();
 builder.Services.AddScoped<ITestRunService, TestRunService>();
 builder.Services.AddScoped<IEndpointExecutor, EndpointExecutor>();
+builder.Services.AddSingleton<IBoundedRegexMatcher, BoundedRegexMatcher>();
 builder.Services.AddScoped<IExpectationEvaluator, ExpectationEvaluator>();
 builder.Services.AddScoped<ITestRunProcessor, TestRunProcessor>();
 

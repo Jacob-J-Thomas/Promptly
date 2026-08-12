@@ -38,10 +38,11 @@ public class TestRunProcessor : ITestRunProcessor
         _logger = logger;
     }
 
-    public async Task ProcessRunAsync(Guid runId)
+    public async Task ProcessRunAsync(Guid runId, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _logger.LogInformation("Starting processing for run {RunId}", runId);
 
             // Load run details
@@ -55,7 +56,7 @@ public class TestRunProcessor : ITestRunProcessor
             // Load test cases
             var testCases = await _dbContext.TestCases
                 .Where(tc => tc.SuiteId == run.SuiteId)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             if (testCases.Count == 0)
             {
@@ -85,7 +86,8 @@ public class TestRunProcessor : ITestRunProcessor
             {
                 try
                 {
-                    var result = await ProcessTestCaseAsync(run, testCase);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var result = await ProcessTestCaseAsync(run, testCase, cancellationToken);
                     results.Add(result);
 
                     if (result.Status == TestResultStatus.Pass)
@@ -121,6 +123,10 @@ public class TestRunProcessor : ITestRunProcessor
                         }
                     }
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process test case {TestCaseId} in run {RunId}", testCase.Id, runId);
@@ -144,7 +150,7 @@ public class TestRunProcessor : ITestRunProcessor
 
             // Save all results
             _dbContext.TestRunResults.AddRange(results);
-            await _dbContext.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync(cancellationToken);
 
             // Compute summary
             var summary = new
@@ -168,6 +174,26 @@ public class TestRunProcessor : ITestRunProcessor
                 "Completed run {RunId}: {Passed}/{Total} passed, {Failed} failed, {Errors} errors",
                 runId, totalPassed, testCases.Count, totalFailed, totalErrors);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Run {RunId} was cancelled before completion", runId);
+            try
+            {
+                await _testRunService.UpdateRunStatusAsync(
+                    runId,
+                    TestRunStatus.Failed,
+                    errorMessage: "Run processing was cancelled before completion");
+            }
+            catch (Exception statusException)
+            {
+                _logger.LogError(
+                    statusException,
+                    "Failed to record cancellation for run {RunId}; manual recovery may be required",
+                    runId);
+            }
+
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fatal error processing run {RunId}", runId);
@@ -178,10 +204,14 @@ public class TestRunProcessor : ITestRunProcessor
         }
     }
 
-    private async Task<TestRunResult> ProcessTestCaseAsync(TestRun run, TestCase testCase)
+    private async Task<TestRunResult> ProcessTestCaseAsync(
+        TestRun run,
+        TestCase testCase,
+        CancellationToken cancellationToken)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Step 1: Execute HTTP request
             var executionResult = await _endpointExecutor.ExecuteAsync(run.Endpoint!, run.Environment!, testCase);
 
@@ -240,10 +270,12 @@ public class TestRunProcessor : ITestRunProcessor
             var expectationResults = new List<ExpectationResult>();
             int passed = 0;
             int failed = 0;
+            int errors = 0;
             var failureReasons = new List<string>();
 
             foreach (var exp in expectations)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var expType = exp.ContainsKey("type") ? exp["type"].ToString() : "";
                 ExpectationResult expResult;
 
@@ -251,7 +283,7 @@ public class TestRunProcessor : ITestRunProcessor
                 if (expType == "contains_text" || expType == "banned_text" || expType == "regex_match" ||
                     expType == "link_pattern" || expType == "tool_called" || expType == "tool_sequence")
                 {
-                    expResult = await _expectationEvaluator.EvaluateAsync(exp, trace);
+                    expResult = await _expectationEvaluator.EvaluateAsync(exp, trace, cancellationToken);
                 }
                 // LLM-based expectations
                 else if (expType == "llm_judge")
@@ -276,7 +308,14 @@ public class TestRunProcessor : ITestRunProcessor
                 expectationResults.Add(expResult);
 
                 if (expResult.Passed)
+                {
                     passed++;
+                }
+                else if (expResult.ErrorCode != null)
+                {
+                    errors++;
+                    failureReasons.Add($"[{expType}:{expResult.ErrorCode}] {expResult.Reason}");
+                }
                 else
                 {
                     failed++;
@@ -288,6 +327,7 @@ public class TestRunProcessor : ITestRunProcessor
             {
                 passed,
                 failed,
+                errors,
                 total = expectations.Count,
                 expectationResults
             });
@@ -297,12 +337,20 @@ public class TestRunProcessor : ITestRunProcessor
                 Id = Guid.NewGuid(),
                 RunId = run.Id,
                 TestCaseId = testCase.Id,
-                Status = failed == 0 ? TestResultStatus.Pass : TestResultStatus.Fail,
+                Status = errors > 0
+                    ? TestResultStatus.Error
+                    : failed > 0
+                        ? TestResultStatus.Fail
+                        : TestResultStatus.Pass,
                 TraceJson = traceJson,
                 MetricsJson = metricsJson,
                 FailureReasonsJson = failureReasons.Count > 0 ? JsonSerializer.Serialize(failureReasons) : null,
                 CreatedAt = DateTime.UtcNow
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

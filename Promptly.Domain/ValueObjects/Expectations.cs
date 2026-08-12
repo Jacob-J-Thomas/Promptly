@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Promptly.Domain.ValueObjects;
 
 public abstract record Expectation
@@ -59,5 +61,7 @@ public record ExpectationResult
     public bool Passed { get; init; }
     public double Score { get; init; }
     public required string Reason { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ErrorCode { get; init; }
     public Dictionary<string, object>? Metrics { get; init; }
 }

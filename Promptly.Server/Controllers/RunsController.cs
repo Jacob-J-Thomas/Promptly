@@ -169,7 +169,8 @@ public class RunsController : ControllerBase
             var results = await _dbContext.TestRunResults
                 .Include(r => r.TestCase)
                 .Where(r => r.RunId == id)
-                .OrderBy(r => r.Status == TestResultStatus.Fail ? 0 : 1)  // Failed tests first
+                .OrderBy(r => r.Status == TestResultStatus.Error ? 0 :
+                    r.Status == TestResultStatus.Fail ? 1 : 2)
                 .ThenBy(r => r.TestCase!.ExternalId)
                 .ToListAsync();
 

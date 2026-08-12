@@ -8,5 +8,8 @@ public interface IExpectationEvaluator
     /// <summary>
     /// Evaluate a single expectation against a canonical trace
     /// </summary>
-    Task<ExpectationResult> EvaluateAsync(object expectation, CanonicalTrace trace);
+    Task<ExpectationResult> EvaluateAsync(
+        object expectation,
+        CanonicalTrace trace,
+        CancellationToken cancellationToken = default);
 }

@@ -1,10 +1,10 @@
-using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
@@ -64,8 +64,13 @@ builder.Services.AddIdentity<User, IdentityRole>(options =>
 .AddDefaultTokenProviders();
 
 // Configure JWT
-var jwtSettings = builder.Configuration.GetSection("JWT").Get<JwtSettings>()!;
-builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JWT"));
+var jwtSection = builder.Configuration.GetSection("JWT");
+var jwtSettings = jwtSection.Get<JwtSettings>() ?? new JwtSettings();
+var jwtSigningKey = JwtSettingsValidator.GetValidatedSigningKeyBytes(jwtSettings);
+builder.Services.AddOptions<JwtSettings>()
+    .Bind(jwtSection)
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<JwtSettings>, JwtSettingsValidator>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 
 // Configure Authentication
@@ -84,7 +89,10 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = jwtSettings.Issuer,
         ValidAudience = jwtSettings.Audience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Key))
+        IssuerSigningKey = new SymmetricSecurityKey(jwtSigningKey)
+        {
+            KeyId = JwtSettingsValidator.GetSigningKeyId(jwtSigningKey)
+        }
     };
 })
 .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>("ApiKey", null);

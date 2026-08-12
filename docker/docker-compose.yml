@@ -29,7 +29,8 @@ services:
       - ConnectionStrings__Default=Host=postgres;Database=promptly;Username=promptly;Password=promptly_dev_password
       - JWT__Issuer=Promptly
       - JWT__Audience=Promptly
-      - JWT__Key=YourSuperSecretJWTKeyThatShouldBeAtLeast32CharactersLongForProduction
+      - JWT__Key=${JWT__Key:?JWT__Key must be set to base64-encoded random bytes}
+      - JWT__RetiredKeyFingerprints=${JWT__RetiredKeyFingerprints:-}
       - JWT__ExpiryMinutes=60
       - DATA_PROTECTION_PATH=/app/dataprotection-keys
       - PROMPTLY_EVAL_BASE_URL=http://promptly-eval:8000

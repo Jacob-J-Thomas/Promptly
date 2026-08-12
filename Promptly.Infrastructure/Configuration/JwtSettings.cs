@@ -1,9 +1,10 @@
 namespace Promptly.Infrastructure.Configuration;
 
-public class JwtSettings
+public sealed class JwtSettings
 {
-    public required string Issuer { get; set; }
-    public required string Audience { get; set; }
-    public required string Key { get; set; }
+    public string Issuer { get; set; } = string.Empty;
+    public string Audience { get; set; } = string.Empty;
+    public string Key { get; set; } = string.Empty;
     public int ExpiryMinutes { get; set; } = 60;
+    public string RetiredKeyFingerprints { get; set; } = string.Empty;
 }

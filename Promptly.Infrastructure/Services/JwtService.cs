@@ -1,6 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Promptly.Application.Interfaces;
@@ -12,10 +11,12 @@ namespace Promptly.Infrastructure.Services;
 public class JwtService : IJwtService
 {
     private readonly JwtSettings _jwtSettings;
+    private readonly byte[] _signingKey;
 
     public JwtService(IOptions<JwtSettings> jwtSettings)
     {
         _jwtSettings = jwtSettings.Value;
+        _signingKey = JwtSettingsValidator.GetValidatedSigningKeyBytes(_jwtSettings);
     }
 
     public string GenerateToken(User user)
@@ -28,7 +29,10 @@ public class JwtService : IJwtService
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Key));
+        var key = new SymmetricSecurityKey(_signingKey)
+        {
+            KeyId = JwtSettingsValidator.GetSigningKeyId(_signingKey)
+        };
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(

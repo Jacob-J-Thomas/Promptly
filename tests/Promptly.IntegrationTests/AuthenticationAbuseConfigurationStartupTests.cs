@@ -16,6 +16,9 @@ public sealed class AuthenticationAbuseConfigurationStartupTests
     [InlineData("unsafe-proxy", "TrustedProxyNetworks:0 must not use an unspecified network address")]
     [InlineData("broad-public-proxy", "publicly reachable and must use an exact /32 host route")]
     [InlineData("too-many-proxies", "TrustedProxyNetworks cannot contain more than 256 entries")]
+    [InlineData(
+        "aggregate-concurrency",
+        "MaximumConcurrentAuthenticationRequests must be between 1 and 256")]
     public void Unsafe_configuration_fails_before_host_startup(
         string configurationCase,
         string expectedFailure)
@@ -44,6 +47,10 @@ public sealed class AuthenticationAbuseConfigurationStartupTests
                 .ToDictionary<int, string, string?>(
                     index => $"AuthenticationAbuse:TrustedProxyNetworks:{index}",
                     index => $"10.{index / 256}.{index % 256}.1/32"),
+            "aggregate-concurrency" => new Dictionary<string, string?>
+            {
+                ["AuthenticationAbuse:MaximumConcurrentAuthenticationRequests"] = "257"
+            },
             _ => throw new ArgumentOutOfRangeException(nameof(configurationCase))
         };
         using var factory = new AuthenticationAbuseConfigurationFactory(settings);

@@ -34,6 +34,7 @@ services:
       - JWT__ExpiryMinutes=60
       # Authentication rate-limit state is process-local in this release.
       - AuthenticationAbuse__ApiReplicaCount=${AuthenticationAbuse__ApiReplicaCount:-1}
+      - AuthenticationAbuse__MaximumConcurrentAuthenticationRequests=${AuthenticationAbuse__MaximumConcurrentAuthenticationRequests:-16}
       - DATA_PROTECTION_PATH=/app/dataprotection-keys
       - PROMPTLY_EVAL_BASE_URL=http://promptly-eval:8000
       - EndpointEgress__RequireProxy=true

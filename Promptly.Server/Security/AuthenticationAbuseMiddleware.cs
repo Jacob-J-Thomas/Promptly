@@ -15,10 +15,12 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
     public async Task InvokeAsync(
         HttpContext httpContext,
         IAuthenticationAbuseGuard abuseGuard,
+        IAuthenticationRequestAdmissionGate requestAdmissionGate,
         IAuthenticationThrottleResponseWriter responseWriter)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         ArgumentNullException.ThrowIfNull(abuseGuard);
+        ArgumentNullException.ThrowIfNull(requestAdmissionGate);
         ArgumentNullException.ThrowIfNull(responseWriter);
 
         var operation = httpContext.GetEndpoint()
@@ -30,16 +32,6 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
             return;
         }
 
-        var requestSizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
-        var effectiveBodyLimit = Math.Min(
-            requestSizeFeature?.MaxRequestBodySize
-                ?? AuthenticationInputLimits.RequestBodyMaxBytes,
-            AuthenticationInputLimits.RequestBodyMaxBytes);
-        if (requestSizeFeature is { IsReadOnly: false })
-        {
-            requestSizeFeature.MaxRequestBodySize = effectiveBodyLimit;
-        }
-
         var decision = abuseGuard.TryAcquireClient(operation.Operation, httpContext);
         if (!decision.IsAllowed)
         {
@@ -49,6 +41,27 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
                     httpContext.RequestAborted)
                 .ConfigureAwait(false);
             return;
+        }
+
+        using var admissionLease = requestAdmissionGate.TryAcquire(operation.Operation);
+        if (admissionLease is null)
+        {
+            await responseWriter.WriteAsync(
+                    httpContext,
+                    AuthenticationThrottleDecision.RejectAfter(1),
+                    httpContext.RequestAborted)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var requestSizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        var effectiveBodyLimit = Math.Min(
+            requestSizeFeature?.MaxRequestBodySize
+                ?? AuthenticationInputLimits.RequestBodyMaxBytes,
+            AuthenticationInputLimits.RequestBodyMaxBytes);
+        if (requestSizeFeature is { IsReadOnly: false })
+        {
+            requestSizeFeature.MaxRequestBodySize = effectiveBodyLimit;
         }
 
         if (httpContext.Request.ContentLength > effectiveBodyLimit)

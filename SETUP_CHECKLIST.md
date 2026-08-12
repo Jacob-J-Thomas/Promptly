@@ -14,6 +14,8 @@ PROMPTLY_LLM_MODEL_DEFAULT=___________________  # ← YOUR DEPLOYMENT NAME HERE
 JWT__Key=___________________  # ← OUTPUT OF: openssl rand -base64 48
 # Leave at 1 until Promptly has a shared authentication limiter store.
 AuthenticationAbuse__ApiReplicaCount=1
+# Combined zero-queue registration/login in-flight ceiling (validated 1-256).
+AuthenticationAbuse__MaximumConcurrentAuthenticationRequests=16
 ```
 
 **Where to find these:**
@@ -90,6 +92,7 @@ Open: http://localhost:5000/swagger
 | **Database** | Docker container | ✅ AUTO-CONFIGURED |
 | **JWT signing key** | untracked `docker/.env` / secret manager | ⚠️ YOU GENERATE |
 | **API replica count** | `AuthenticationAbuse__ApiReplicaCount=1` | ✅ REQUIRED FOR CURRENT LIMITER |
+| **Authentication concurrency** | `AuthenticationAbuse__MaximumConcurrentAuthenticationRequests=16` | ✅ BOUNDED DEFAULT |
 | **Test Endpoint** | Built-in or UI | ✅ BUILT-IN DEMO AVAILABLE |
 
 ---

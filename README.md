@@ -151,9 +151,11 @@ Configuration via `appsettings.json` or environment variables:
 - **JWT:RetiredKeyFingerprints**: Optional comma-separated SHA-256 fingerprints of retired
   signing keys; startup rejects reuse (see `CONFIGURATION.md` for rotation and incident response)
 - **AuthenticationAbuse:…**: Persisted account lockout plus bounded per-client,
-  per-account, registration, login, and password-spray controls. The current implementation
-  supports exactly one API replica and refuses unsafe multi-replica configuration; see
-  `CONFIGURATION.md` for thresholds and trusted-proxy handling.
+  per-account, registration, login, password-spray, and combined in-flight controls. The
+  zero-queue aggregate ceiling defaults to 16 and rejects excess work before reading its body.
+  The current implementation supports exactly one API replica and refuses unsafe multi-replica
+  configuration; see `CONFIGURATION.md` for thresholds, trusted-proxy handling, bounded metrics,
+  and production Kestrel/reverse-proxy guidance.
 - **DATA_PROTECTION_PATH**: Path for Data Protection keys persistence
 - **PROMPTLY_EVAL_BASE_URL**: Python worker base URL
 - **TestRunner:PollingIntervalSeconds**: Background worker polling interval (default: 5)

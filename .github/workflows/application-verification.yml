@@ -190,6 +190,18 @@ jobs:
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.Transport413WhileBufferingReturnsPrivateNoStore413"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.StricterWritableTransportBodyLimitIsPreserved"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.StricterTransportBodyLimitRejectsKnownAndUnknownLengths"; Count = 4 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.ClientAdmissionRunsBeforeAggregateAdmissionAndDownstream"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.AggregateRejectionReturnsGeneric429WithoutReadingBody"; Count = 2 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.AdmissionLeaseRemainsHeldUntilDownstreamResponseCompletes"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.DownstreamExceptionPropagatesAndReleasesAdmission"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.RequestCancellationWhileReadingBodyReleasesAdmission"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.ConcurrentAttemptsAdmitExactlyConfiguredCeilingWithoutQueueing"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.LoginAndRegistrationShareOneProcessWideCeiling"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.LeaseReleaseIsIdempotentAndCapacityRecoversExactlyOnce"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.ConstructorAndOperationValidateInputs"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.MetricsUseExactNamesAndOnlyBoundedOperationTags"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationRequestAdmissionGateTests.ThrowingMetricListenerCannotLeakCapacityOrEscapeAdmissionOperations"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthenticationAbuseMiddlewareTests.NullAdmissionGateIsRejected"; Count = 1 }
           )
           $passedNames = @(
             $unitResults |
@@ -303,6 +315,7 @@ jobs:
             "Promptly.Server/Security/AuthenticationAbuseGuard.cs"
             "Promptly.Server/Security/AuthenticationAbuseMiddleware.cs"
             "Promptly.Server/Security/AuthenticationAbuseOptions.cs"
+            "Promptly.Server/Security/AuthenticationRequestAdmissionGate.cs"
             "Promptly.Server/Security/AuthenticationPartitionKeyProvider.cs"
             "Promptly.Server/Security/AuthenticationThrottleResponseWriter.cs"
             "Promptly.Server/Security/HttpContextTenantAccessScopeAccessor.cs"
@@ -411,6 +424,8 @@ jobs:
             "Promptly.Server.Security.AuthenticationAbuseMiddleware"
             "Promptly.Server.Security.AuthenticationAbuseOptions"
             "Promptly.Server.Security.AuthenticationAbuseOptionsValidator"
+            "Promptly.Server.Security.AuthenticationRequestAdmissionGate"
+            "Promptly.Server.Security.AuthenticationRequestAdmissionMetrics"
             "Promptly.Server.Security.AuthenticationAccountAttempt"
             "Promptly.Server.Security.AuthenticationPartitionKeyProvider"
             "Promptly.Server.Security.AuthenticationThrottleDecision"

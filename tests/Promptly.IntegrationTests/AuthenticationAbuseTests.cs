@@ -234,6 +234,103 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task Aggregate_authentication_saturation_is_zero_queue_and_recovers_after_cancellation()
+    {
+        var settings = CreateSettings();
+        settings["AuthenticationAbuse:MaximumConcurrentAuthenticationRequests"] = "2";
+
+        await RunWithPartitionedHostAsync(settings, async host =>
+        {
+            var accounts = CreateEmailsOnDistinctStripes(
+                "aggregate-holder",
+                count: 2,
+                stripeCount: 64);
+            var credentialGate = host.Factory.Services
+                .GetRequiredService<AuthenticationCredentialGate>();
+            var partitionKeys = host.Factory.Services
+                .GetRequiredService<TestAuthenticationPartitionKeyProvider>();
+            var bodyProbe = host.Factory.Services
+                .GetRequiredService<AuthenticationBodyReadProbe>();
+            credentialGate.Hold(accounts);
+
+            using var firstCancellation = new CancellationTokenSource();
+            var firstHeld = SendLoginAsync(
+                host.Client,
+                accounts[0],
+                WrongPassword,
+                client: "aggregate-holder-first",
+                cancellationToken: firstCancellation.Token);
+            var secondHeld = SendLoginAsync(
+                host.Client,
+                accounts[1],
+                WrongPassword,
+                client: "aggregate-holder-second");
+            HttpResponseMessage? secondResponse = null;
+            try
+            {
+                using var heldTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await credentialGate.WaitUntilHeldAsync(heldTimeout.Token);
+
+                var clientCallsBeforeSaturation = partitionKeys.ClientKeyCallCount;
+                var accountCallsBeforeSaturation = partitionKeys.AccountKeyCallCount;
+                var verificationCallsBeforeSaturation = credentialGate.VerificationCallCount;
+                var usersBeforeSaturation = await CountUsersAsync(host);
+                var bodyReadsBeforeSaturation = bodyProbe.ReadCount;
+
+                using var saturatedLogin = await SendLoginAsync(
+                    host.Client,
+                    UniqueEmail("aggregate-saturated-login"),
+                    WrongPassword,
+                    client: "aggregate-saturated-login-client",
+                    observeBodyReads: true);
+                await AssertThrottleProblemAsync(saturatedLogin, 60);
+
+                using var saturatedRegistration = await SendRegistrationAsync(
+                    host.Client,
+                    UniqueEmail("aggregate-saturated-registration"),
+                    client: "aggregate-saturated-registration-client",
+                    observeBodyReads: true);
+                await AssertThrottleProblemAsync(saturatedRegistration, 60);
+
+                Assert.Equal(
+                    clientCallsBeforeSaturation + 2,
+                    partitionKeys.ClientKeyCallCount);
+                Assert.Equal(accountCallsBeforeSaturation, partitionKeys.AccountKeyCallCount);
+                Assert.Equal(
+                    verificationCallsBeforeSaturation,
+                    credentialGate.VerificationCallCount);
+                Assert.Equal(usersBeforeSaturation, await CountUsersAsync(host));
+                Assert.Equal(bodyReadsBeforeSaturation, bodyProbe.ReadCount);
+
+                firstCancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstHeld);
+
+                // Reuse the canceled holder's account so recovery does not depend on
+                // a randomly selected account stripe being distinct from the survivor.
+                var recoveredEmail = accounts[0];
+                using var recovered = await SendRegistrationAsync(
+                    host.Client,
+                    recoveredEmail,
+                    client: "aggregate-recovered-registration-client");
+                Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
+                Assert.Equal(usersBeforeSaturation + 1, await CountUsersAsync(host));
+
+                credentialGate.Release();
+                secondResponse = await secondHeld;
+                await AssertGenericUnauthorizedAsync(secondResponse);
+            }
+            finally
+            {
+                credentialGate.Release();
+                firstCancellation.Cancel();
+                secondResponse?.Dispose();
+                await DrainAuthenticationRequestAsync(firstHeld);
+                await DrainAuthenticationRequestAsync(secondHeld, secondResponse);
+            }
+        });
+    }
+
+    [Fact]
     public async Task Concurrent_login_account_limits_are_exact_and_partition_isolated()
     {
         var settings = CreateSettings();
@@ -727,6 +824,10 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
                     serviceProvider.GetRequiredService<
                         TestAuthenticationPartitionKeyProvider>());
                 services.AddSingleton<AuthenticationCredentialGate>();
+                services.AddSingleton<AuthenticationBodyReadProbe>();
+                services.AddSingleton<
+                    IStartupFilter,
+                    AuthenticationBodyReadProbeStartupFilter>();
                 services.RemoveAll<IIdentityCredentialVerifier>();
                 services.AddScoped<IdentityCredentialVerifier>();
                 services.AddScoped<
@@ -763,6 +864,7 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
         ["AuthenticationAbuse:PasswordSprayWindowSeconds"] = "60",
         ["AuthenticationAbuse:PasswordSprayBlockSeconds"] = "60",
         ["AuthenticationAbuse:MaximumTrackedPartitions"] = "100000",
+        ["AuthenticationAbuse:MaximumConcurrentAuthenticationRequests"] = "16",
         ["AuthenticationAbuse:AccountLockStripeCount"] = "64",
         ["AuthenticationAbuse:MaximumRetryAfterSeconds"] = "60"
     };
@@ -773,7 +875,9 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
         string password,
         string? client = null,
         string? origin = null,
-        string? forwardedFor = null)
+        string? forwardedFor = null,
+        bool observeBodyReads = false,
+        CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
         {
@@ -782,13 +886,23 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
         AddOptionalHeader(request, TestAuthenticationPartitionKeyProvider.ClientHeaderName, client);
         AddOptionalHeader(request, "Origin", origin);
         AddOptionalHeader(request, "X-Forwarded-For", forwardedFor);
-        return await httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+        if (observeBodyReads)
+        {
+            request.Headers.TryAddWithoutValidation(AuthenticationBodyReadProbe.HeaderName, "1");
+        }
+
+        return await httpClient.SendAsync(
+            request,
+            cancellationToken == default
+                ? TestContext.Current.CancellationToken
+                : cancellationToken);
     }
 
     private static async Task<HttpResponseMessage> SendRegistrationAsync(
         HttpClient httpClient,
         string email,
-        string client)
+        string client,
+        bool observeBodyReads = false)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/register")
         {
@@ -800,7 +914,30 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
             })
         };
         AddOptionalHeader(request, TestAuthenticationPartitionKeyProvider.ClientHeaderName, client);
+        if (observeBodyReads)
+        {
+            request.Headers.TryAddWithoutValidation(AuthenticationBodyReadProbe.HeaderName, "1");
+        }
+
         return await httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    private static async Task DrainAuthenticationRequestAsync(
+        Task<HttpResponseMessage> request,
+        HttpResponseMessage? alreadyDisposed = null)
+    {
+        try
+        {
+            var response = await request;
+            if (!ReferenceEquals(response, alreadyDisposed))
+            {
+                response.Dispose();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is an expected cleanup path for a held authentication request.
+        }
     }
 
     private static async Task<HttpResponseMessage> SendMalformedLoginAsync(

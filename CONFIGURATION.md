@@ -124,6 +124,7 @@ with the usual double-underscore environment-variable syntax:
 | `AuthenticationAbuse__PasswordSprayWindowSeconds` / `PasswordSprayBlockSeconds` | `600` / `900` | Spray observation and client-block periods. |
 | `AuthenticationAbuse__MaximumTrackedPartitions` | `10000` | Hard memory bound split across independently reserved login-client, registration-client, login-account/spray, and registration-account cohorts; new partitions fail closed within their cohort at capacity. |
 | `AuthenticationAbuse__MaximumTrackedSprayAccountEntries` | `50000` | Hard global bound for distinct hashed account keys retained by password-spray tracking; new distinct entries fail closed at capacity. |
+| `AuthenticationAbuse__MaximumConcurrentAuthenticationRequests` | `16` | Process-wide, combined registration/login in-flight ceiling. Values from `1` through `256` are accepted; excess work is rejected without queuing or reading its body. |
 | `AuthenticationAbuse__AccountLockStripeCount` | `256` | Bounded zero-queue synchronization stripes for Identity updates; a busy stripe returns a generic one-second `429` instead of accumulating waiters. |
 | `AuthenticationAbuse__MaximumRetryAfterSeconds` | `900` | Maximum integer `Retry-After` returned to clients. |
 
@@ -132,6 +133,20 @@ identifiers are not retained in limiter state. A restart clears request-limit st
 Identity lockout remains in PostgreSQL. This release deliberately supports one Server API
 replica: horizontal API scaling requires a shared, atomic limiter store and must not be enabled
 by bypassing the startup validator.
+
+Client-window accounting runs before aggregate admission, so a saturated caller cannot avoid
+its client limit. An admitted aggregate reservation spans request-body inspection, model
+binding, account admission, Identity/password work, and response completion. It is released on
+every success, validation failure, throttle, cancellation, transport failure, and exception.
+When the combined registration/login ceiling is full, Promptly waits for no queue slot and
+returns the same private one-second `429` contract without reading the rejected request body.
+
+The `Promptly.Server.Authentication` .NET meter exposes the cardinality-safe instruments
+`promptly.authentication.requests.admitted`, `promptly.authentication.requests.rejected`, and
+`promptly.authentication.requests.in_flight`. Their only dimension is the bounded `operation`
+value (`login` or `registration`); they never include client, account, route, or credential
+values. These instruments are the integration seam for #63. This release does not yet configure
+an exporter, scrape endpoint, dashboard, external alert evaluator, or operated alert.
 
 Promptly ignores `X-Forwarded-For` by default. If a reverse proxy is the Server's only direct
 peer, add each exact canonical CIDR as an indexed value such as
@@ -154,6 +169,17 @@ have a separate 256-character input bound. New registration passwords are capped
 characters and retain their 8-character minimum. Login accepts longer legacy passwords within
 the 8 KiB body cap so accounts created before this policy remain usable. Overlong bounded fields
 are rejected before account partitioning, password verification, or user persistence.
+
+The application limit complements, rather than replaces, edge and transport controls. In
+production, configure the reverse proxy with an 8 KiB body limit specifically for
+`/api/auth/login` and `/api/auth/register`, finite upstream connection limits, header/request/body
+timeouts, and slow-body protection. Configure finite Kestrel connection capacity and a bounded
+`Kestrel:Limits:RequestHeadersTimeout` for the deployment's total traffic, leaving enough room
+for health and non-authentication endpoints. Do not set Kestrel's global request-body limit to
+8 KiB unless every API route has that requirement: Promptly preserves a stricter host limit, but
+the 8 KiB application cap intentionally applies only to authentication. Size edge connection
+capacity from production load tests and keep the authentication ceiling conservative; it is not
+a substitute for proxy connection, request-rate, or timeout enforcement.
 
 ---
 
@@ -191,6 +217,7 @@ JWT__ExpiryMinutes=60
 
 # Authentication abuse controls are process-local and require one API replica.
 AuthenticationAbuse__ApiReplicaCount=1
+AuthenticationAbuse__MaximumConcurrentAuthenticationRequests=16
 
 # ========================================
 # Optional: Test Runner Settings

@@ -23,6 +23,7 @@ public sealed class AuthenticationAbuseOptions
     public int PasswordSprayDistinctAccountLimit { get; set; } = 10;
     public int PasswordSprayWindowSeconds { get; set; } = 600;
     public int PasswordSprayBlockSeconds { get; set; } = 900;
+    public int MaximumConcurrentAuthenticationRequests { get; set; } = 16;
     public int MaximumTrackedPartitions { get; set; } = 10_000;
     public int MaximumTrackedSprayAccountEntries { get; set; } = 50_000;
     public int AccountLockStripeCount { get; set; } = 256;
@@ -124,6 +125,12 @@ public sealed class AuthenticationAbuseOptionsValidator
         ValidateWindow(
             options.PasswordSprayBlockSeconds,
             nameof(options.PasswordSprayBlockSeconds),
+            failures);
+        ValidateRange(
+            options.MaximumConcurrentAuthenticationRequests,
+            nameof(options.MaximumConcurrentAuthenticationRequests),
+            minimum: 1,
+            maximum: 256,
             failures);
         ValidateRange(
             options.MaximumTrackedPartitions,

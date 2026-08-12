@@ -150,9 +150,10 @@ return the same generic `401` response.
 
 Authentication JSON bodies are capped at 8 KiB before model binding. Email addresses are capped
 at 256 characters to match the ASP.NET Identity persistence boundary; registration display names
-have a separate 256-character input bound. Passwords are capped at 128 characters while
-registration retains its 8-character minimum. Overlong fields are rejected before account
-partitioning, password verification, or user persistence.
+have a separate 256-character input bound. New registration passwords are capped at 128
+characters and retain their 8-character minimum. Login accepts longer legacy passwords within
+the 8 KiB body cap so accounts created before this policy remain usable. Overlong bounded fields
+are rejected before account partitioning, password verification, or user persistence.
 
 ---
 

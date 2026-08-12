@@ -209,7 +209,7 @@ public sealed class AuthenticationPartitionKeyProviderTests
     [Fact]
     public void DisposeIsIdempotentAndPreventsFurtherKeyUse()
     {
-        var provider = CreateProvider();
+        using var provider = CreateProvider();
 
         provider.Dispose();
         provider.Dispose();

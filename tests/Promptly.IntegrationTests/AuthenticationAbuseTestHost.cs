@@ -79,13 +79,12 @@ internal sealed class AuthenticationCredentialGate
                 throw new InvalidOperationException("The credential gate can be configured once.");
             }
 
-            foreach (var email in emails)
+            if (emails.Distinct(StringComparer.OrdinalIgnoreCase).Count() != emails.Length)
             {
-                if (!_targets.Add(email))
-                {
-                    throw new ArgumentException("Credential gate targets must be unique.", nameof(emails));
-                }
+                throw new ArgumentException("Credential gate targets must be unique.", nameof(emails));
             }
+
+            _targets.UnionWith(emails);
         }
     }
 

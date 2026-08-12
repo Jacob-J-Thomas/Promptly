@@ -43,7 +43,7 @@ public sealed class AuthenticationAbuseConfigurationStartupTests
                     AuthenticationAbuseOptions.MaximumTrustedProxyNetworkCount + 1)
                 .ToDictionary(
                     index => $"AuthenticationAbuse:TrustedProxyNetworks:{index}",
-                    index => (string?)$"10.{index / 256}.{index % 256}.1/32"),
+                    index => $"10.{index / 256}.{index % 256}.1/32"),
             _ => throw new ArgumentOutOfRangeException(nameof(configurationCase))
         };
         using var factory = new AuthenticationAbuseConfigurationFactory(settings);

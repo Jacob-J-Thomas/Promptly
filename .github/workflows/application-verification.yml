@@ -169,7 +169,8 @@ jobs:
             @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Admitted_login_success_completes_when_spray_block_activates_during_verification"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Login_records_a_completed_wrong_password_before_honoring_cancellation"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Register_rejects_overlong_fields_before_account_or_identity_work"; Count = 3 }
-            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Login_rejects_overlong_fields_before_account_or_credential_work"; Count = 2 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Login_rejects_overlong_email_before_account_or_credential_work"; Count = 1 }
+            @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Login_accepts_legacy_password_above_the_registration_limit"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Authentication_models_accept_values_at_the_documented_limits"; Count = 1 }
             @{ BaseName = "Promptly.Application.UnitTests.AuthControllerTests.Authentication_actions_publish_the_request_body_limit"; Count = 2 }
             @{ BaseName = "Promptly.Application.UnitTests.IdentityCredentialVerifierTests.Completed_wrong_password_returns_for_accounting_even_when_verification_cancels"; Count = 1 }

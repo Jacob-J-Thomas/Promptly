@@ -93,24 +93,16 @@ public sealed class AuthControllerTests
         Assert.Empty(await harness.DbContext.Users.ToListAsync(TestContext.Current.CancellationToken));
     }
 
-    [Theory]
-    [InlineData(nameof(Promptly.Server.Models.LoginRequest.Email))]
-    [InlineData(nameof(Promptly.Server.Models.LoginRequest.Password))]
-    public async Task Login_rejects_overlong_fields_before_account_or_credential_work(
-        string memberName)
+    [Fact]
+    public async Task Login_rejects_overlong_email_before_account_or_credential_work()
     {
-        var request = memberName switch
-        {
-            nameof(Promptly.Server.Models.LoginRequest.Email) => LoginRequest(
-                email: OverlongEmail()),
-            nameof(Promptly.Server.Models.LoginRequest.Password) => LoginRequest(
-                password: new string('a', AuthenticationInputLimits.PasswordMaxLength + 1)),
-            _ => throw new ArgumentOutOfRangeException(nameof(memberName))
-        };
+        var request = LoginRequest(email: OverlongEmail());
         var validationErrors = Validate(request);
         Assert.Contains(
             validationErrors,
-            error => error.MemberNames.Contains(memberName, StringComparer.Ordinal));
+            error => error.MemberNames.Contains(
+                nameof(Promptly.Server.Models.LoginRequest.Email),
+                StringComparer.Ordinal));
         await using var harness = CreateHarness();
         AddValidationErrors(harness.Controller, validationErrors);
 
@@ -122,6 +114,16 @@ public sealed class AuthControllerTests
         Assert.Empty(harness.PartitionKeys.AccountInputs);
         Assert.Equal(0, harness.Credentials.CallCount);
         Assert.Equal(0, harness.Jwt.CallCount);
+    }
+
+    [Fact]
+    public void Login_accepts_legacy_password_above_the_registration_limit()
+    {
+        var legacyPassword = new string(
+            'a',
+            AuthenticationInputLimits.PasswordMaxLength + 1);
+
+        Assert.Empty(Validate(LoginRequest(password: legacyPassword)));
     }
 
     [Fact]

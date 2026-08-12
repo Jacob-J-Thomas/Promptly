@@ -198,33 +198,24 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
                     WrongPassword,
                     concurrentClient))
                 .ToArray();
-            var responses = await Task.WhenAll(requests);
-            try
-            {
-                Assert.Equal(
-                    4,
-                    responses.Count(response => response.StatusCode == HttpStatusCode.Unauthorized));
-                Assert.Equal(
-                    8,
-                    responses.Count(
-                        response => response.StatusCode == HttpStatusCode.TooManyRequests));
-                Assert.All(
-                    responses,
-                    response => Assert.Contains(
-                        response.StatusCode,
-                        new[]
-                        {
-                            HttpStatusCode.Unauthorized,
-                            HttpStatusCode.TooManyRequests
-                        }));
-            }
-            finally
-            {
-                foreach (var response in responses)
-                {
-                    response.Dispose();
-                }
-            }
+            using var responses = await HttpResponseBatch.WhenAllAsync(requests);
+            Assert.Equal(
+                4,
+                responses.Messages.Count(
+                    response => response.StatusCode == HttpStatusCode.Unauthorized));
+            Assert.Equal(
+                8,
+                responses.Messages.Count(
+                    response => response.StatusCode == HttpStatusCode.TooManyRequests));
+            Assert.All(
+                responses.Messages,
+                response => Assert.Contains(
+                    response.StatusCode,
+                    new[]
+                    {
+                        HttpStatusCode.Unauthorized,
+                        HttpStatusCode.TooManyRequests
+                    }));
 
             const string malformedClient = "malformed-login-client";
             for (var index = 0; index < 4; index++)
@@ -277,26 +268,16 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
                             WrongPassword,
                             $"busy-{accountIndex}-{index}")))
                     .ToArray();
-                var busyResponses = await Task.WhenAll(busyRequests);
-                try
+                using var busyResponses = await HttpResponseBatch.WhenAllAsync(busyRequests);
+                Assert.All(busyResponses.Messages, response =>
+                    Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode));
+                foreach (var response in busyResponses.Messages)
                 {
-                    Assert.All(busyResponses, response =>
-                        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode));
-                    foreach (var response in busyResponses)
-                    {
-                        await AssertThrottleProblemAsync(
-                            response,
-                            maximumRetryAfterSeconds: 60,
-                            accounts[0],
-                            accounts[1]);
-                    }
-                }
-                finally
-                {
-                    foreach (var response in busyResponses)
-                    {
-                        response.Dispose();
-                    }
+                    await AssertThrottleProblemAsync(
+                        response,
+                        maximumRetryAfterSeconds: 60,
+                        accounts[0],
+                        accounts[1]);
                 }
             }
             finally
@@ -312,12 +293,10 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
                 }
                 finally
                 {
-                    foreach (var heldRequest in heldRequests)
+                    foreach (var heldRequest in heldRequests.Where(
+                                 heldRequest => heldRequest.IsCompletedSuccessfully))
                     {
-                        if (heldRequest.IsCompletedSuccessfully)
-                        {
-                            heldRequest.Result.Dispose();
-                        }
+                        heldRequest.Result.Dispose();
                     }
                 }
             }
@@ -375,33 +354,16 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
             var accountKeyCallsBefore = partitionKeys.AccountKeyCallCount;
             var userCountBefore = await CountUsersAsync(host);
 
-            foreach (var login in new[]
-                     {
-                         new
-                         {
-                             Email = OverlongEmail(),
-                             Password = WrongPassword
-                         },
-                         new
-                         {
-                             Email = UniqueEmail("overlong-login-password"),
-                             Password = new string(
-                                 'a',
-                                 AuthenticationInputLimits.PasswordMaxLength + 1)
-                         }
-                     })
-            {
-                using var response = await SendAuthenticationJsonAsync(
-                    host.Client,
-                    "/api/auth/login",
-                    JsonSerializer.Serialize(new
-                    {
-                        email = login.Email,
-                        password = login.Password
-                    }),
-                    client: UniqueEmail("overlong-login-client"));
-                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            }
+            using var overlongLogin = await SendAuthenticationJsonAsync(
+                host.Client,
+                "/api/auth/login",
+                JsonSerializer.Serialize(new
+                {
+                    email = OverlongEmail(),
+                    password = WrongPassword
+                }),
+                client: UniqueEmail("overlong-login-client"));
+            Assert.Equal(HttpStatusCode.BadRequest, overlongLogin.StatusCode);
 
             var registrations = new[]
             {
@@ -444,6 +406,41 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
             Assert.Equal(verificationCallsBefore, credentialGate.VerificationCallCount);
             Assert.Equal(accountKeyCallsBefore, partitionKeys.AccountKeyCallCount);
             Assert.Equal(userCountBefore, await CountUsersAsync(host));
+        });
+    }
+
+    [Fact]
+    public async Task Legacy_password_above_registration_limit_remains_login_compatible()
+    {
+        var settings = CreateSettings();
+
+        await RunWithPartitionedHostAsync(settings, async host =>
+        {
+            var email = UniqueEmail("legacy-long-password");
+            var legacyPassword = string.Concat(
+                "A1",
+                new string('a', AuthenticationInputLimits.PasswordMaxLength - 1));
+            await using (var scope = host.Factory.Services.CreateAsyncScope())
+            {
+                var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+                var result = await userManager.CreateAsync(
+                    new User
+                    {
+                        UserName = email,
+                        Email = email,
+                        CreatedAt = DateTime.UtcNow
+                    },
+                    legacyPassword);
+                Assert.True(result.Succeeded, FormatIdentityErrors(result));
+            }
+
+            using var login = await SendLoginAsync(
+                host.Client,
+                email,
+                legacyPassword,
+                client: "legacy-long-password-client");
+
+            Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         });
     }
 
@@ -960,6 +957,38 @@ public sealed class AuthenticationAbuseTests(IntegrationFixture fixture)
 
     private static string FormatIdentityErrors(IdentityResult result) =>
         string.Join("; ", result.Errors.Select(error => $"{error.Code}: {error.Description}"));
+
+    private sealed class HttpResponseBatch(HttpResponseMessage[] responses) : IDisposable
+    {
+        public IReadOnlyList<HttpResponseMessage> Messages { get; } = responses;
+
+        public static async Task<HttpResponseBatch> WhenAllAsync(
+            IEnumerable<Task<HttpResponseMessage>> responseTasks)
+        {
+            var tasks = responseTasks.ToArray();
+            try
+            {
+                return new HttpResponseBatch(await Task.WhenAll(tasks));
+            }
+            catch
+            {
+                foreach (var task in tasks.Where(task => task.IsCompletedSuccessfully))
+                {
+                    task.Result.Dispose();
+                }
+
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var response in Messages)
+            {
+                response.Dispose();
+            }
+        }
+    }
 
     private sealed class UnknownLengthJsonContent : HttpContent
     {

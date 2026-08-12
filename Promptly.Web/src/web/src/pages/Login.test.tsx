@@ -72,11 +72,11 @@ describe('Login', () => {
     });
   });
 
-  it('publishes the server-compatible authentication input bounds', () => {
+  it('bounds email while allowing login with legacy long passwords', () => {
     renderLogin();
 
     expect(screen.getByLabelText(/Email Address/)).toHaveAttribute('maxlength', '256');
-    expect(screen.getByLabelText(/Password/)).toHaveAttribute('maxlength', '128');
+    expect(screen.getByLabelText(/Password/)).not.toHaveAttribute('maxlength');
   });
 
   it('submits entered credentials and navigates after a successful login', async () => {

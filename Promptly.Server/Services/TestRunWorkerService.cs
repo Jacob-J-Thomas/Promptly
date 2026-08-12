@@ -78,6 +78,10 @@ public class TestRunWorkerService : BackgroundService
     {
         try
         {
+            using var processingScope = _serviceProvider.CreateScope();
+            var testRunProcessor = processingScope.ServiceProvider
+                .GetRequiredService<ITestRunProcessor>();
+
             Guid? runId;
             using (var claimScope = _serviceProvider.CreateScope())
             {
@@ -93,13 +97,7 @@ public class TestRunWorkerService : BackgroundService
             }
 
             _logger.LogInformation("Processing run {RunId}", runId.Value);
-
-            using (var processingScope = _serviceProvider.CreateScope())
-            {
-                var testRunProcessor = processingScope.ServiceProvider
-                    .GetRequiredService<ITestRunProcessor>();
-                await testRunProcessor.ProcessRunAsync(runId.Value, stoppingToken);
-            }
+            await testRunProcessor.ProcessRunAsync(runId.Value, stoppingToken);
 
             _logger.LogInformation("Completed processing run {RunId}", runId.Value);
         }

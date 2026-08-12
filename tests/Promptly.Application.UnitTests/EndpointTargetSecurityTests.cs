@@ -27,6 +27,8 @@ public sealed class EndpointTargetPolicyTests
     [InlineData("#response")]
     [InlineData("v1/chat?model=safe#response")]
     [InlineData("caf%C3%A9")]
+    [InlineData("/v1/😀")]
+    [InlineData("/v1/𠀀")]
     [InlineData("/v1:chat")]
     public void Relative_targets_are_accepted(string target)
     {
@@ -60,6 +62,28 @@ public sealed class EndpointTargetPolicyTests
         Assert.NotEmpty(error);
         Assert.Throws<EndpointTargetValidationException>(
             () => EndpointTargetPolicy.EnsureRelativeTarget(target));
+    }
+
+    [Fact]
+    public void Unpaired_utf16_surrogates_are_rejected()
+    {
+        var highSurrogate = new string('\uD800', 1);
+        var lowSurrogate = new string('\uDC00', 1);
+        var targets = new[]
+        {
+            $"/v1/{highSurrogate}",
+            $"/v1/{lowSurrogate}",
+            $"/v1/{highSurrogate}text",
+            $"/v1/text{lowSurrogate}"
+        };
+
+        Assert.All(targets, target =>
+        {
+            Assert.False(EndpointTargetPolicy.TryValidateRelativeTarget(target, out var error));
+            Assert.NotEmpty(error);
+            Assert.Throws<EndpointTargetValidationException>(
+                () => EndpointTargetPolicy.EnsureRelativeTarget(target));
+        });
     }
 
     [Theory]

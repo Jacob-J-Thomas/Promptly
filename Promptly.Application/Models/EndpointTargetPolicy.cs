@@ -25,7 +25,7 @@ public static class EndpointTargetPolicy
             return false;
         }
 
-        if (target.Any(char.IsSurrogate))
+        if (HasUnpairedSurrogate(target))
         {
             validationError = "the endpoint target cannot contain malformed Unicode";
             return false;
@@ -182,6 +182,28 @@ public static class EndpointTargetPolicy
         }
 
         return true;
+    }
+
+    private static bool HasUnpairedSurrogate(string target)
+    {
+        for (var index = 0; index < target.Length; index++)
+        {
+            if (char.IsHighSurrogate(target[index]))
+            {
+                if (index + 1 >= target.Length || !char.IsLowSurrogate(target[index + 1]))
+                {
+                    return true;
+                }
+
+                index++;
+            }
+            else if (char.IsLowSurrogate(target[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 }

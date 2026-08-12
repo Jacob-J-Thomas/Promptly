@@ -27,12 +27,22 @@ public sealed class TestRunWorkerServiceTests
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         await claimEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
-        await scopeFactory.WaitForScopeDisposalAsync(1, TestContext.Current.CancellationToken);
+        await scopeFactory.WaitForScopeDisposalAsync(2, TestContext.Current.CancellationToken);
         await worker.StopAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, store.ClaimCount);
         Assert.Equal(0, processor.ProcessCount);
-        Assert.Equal(1, scopeFactory.ScopeCount);
+        Assert.Equal(2, scopeFactory.ScopeCount);
+        Assert.Equal(
+            [
+                "scope:1:created",
+                "scope:1:resolve:ITestRunProcessor",
+                "scope:2:created",
+                "scope:2:resolve:ITestRunWorkerStore",
+                "scope:2:disposed",
+                "scope:1:disposed"
+            ],
+            scopeFactory.Events);
         Assert.Contains(
             logger.Messages,
             message => message.Contains(
@@ -70,11 +80,11 @@ public sealed class TestRunWorkerServiceTests
         Assert.Equal(
             [
                 "scope:1:created",
-                "scope:1:resolve:ITestRunWorkerStore",
-                "scope:1:disposed",
+                "scope:1:resolve:ITestRunProcessor",
                 "scope:2:created",
-                "scope:2:resolve:ITestRunProcessor",
-                "scope:2:disposed"
+                "scope:2:resolve:ITestRunWorkerStore",
+                "scope:2:disposed",
+                "scope:1:disposed"
             ],
             scopeFactory.Events);
         Assert.Contains(
@@ -113,7 +123,7 @@ public sealed class TestRunWorkerServiceTests
 
         Assert.Equal(1, store.ClaimCount);
         Assert.Equal(failProcessor ? 1 : 0, processor.ProcessCount);
-        Assert.Equal(failProcessor ? 2 : 1, scopeFactory.ScopeCount);
+        Assert.Equal(2, scopeFactory.ScopeCount);
         var log = Assert.Single(
             logger.Entries,
             entry => entry.Message.Contains("Error processing run", StringComparison.Ordinal));
@@ -121,6 +131,43 @@ public sealed class TestRunWorkerServiceTests
         Assert.All(
             Enumerable.Range(1, scopeFactory.ScopeCount),
             scopeId => Assert.Contains($"scope:{scopeId}:disposed", scopeFactory.Events));
+    }
+
+    [Fact]
+    public async Task Worker_resolves_the_processor_before_claiming_a_run()
+    {
+        var resolutionFailure = new InvalidOperationException("invalid processor configuration");
+        var store = new StubWorkerStore(_ => Task.FromResult<Guid?>(Guid.NewGuid()));
+        var scopeFactory = new RecordingScopeFactory(
+            store,
+            StubRunProcessor.Unused(),
+            resolutionFailure);
+        var logger = new RecordingLogger<TestRunWorkerService>();
+        var errorLogged = logger.WaitForMessageAsync(
+            "Error processing run",
+            TestContext.Current.CancellationToken);
+        var configuration = BuildConfiguration(
+            ("TestRunner:PollingIntervalSeconds", int.MaxValue.ToString()));
+        using var worker = CreateWorker(scopeFactory, logger, configuration);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await errorLogged;
+        await scopeFactory.WaitForScopeDisposalAsync(1, TestContext.Current.CancellationToken);
+        await worker.StopAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, store.ClaimCount);
+        Assert.Equal(1, scopeFactory.ScopeCount);
+        Assert.Equal(
+            [
+                "scope:1:created",
+                "scope:1:resolve:ITestRunProcessor",
+                "scope:1:disposed"
+            ],
+            scopeFactory.Events);
+        var log = Assert.Single(
+            logger.Entries,
+            entry => entry.Message.Contains("Error processing run", StringComparison.Ordinal));
+        Assert.Same(resolutionFailure, log.Exception);
     }
 
     [Fact]
@@ -172,6 +219,7 @@ public sealed class TestRunWorkerServiceTests
         await worker.StopAsync(TestContext.Current.CancellationToken);
         await cancellationLogged;
 
+        Assert.Contains("scope:2:disposed", scopeFactory.Events);
         Assert.Contains("scope:1:disposed", scopeFactory.Events);
         Assert.Contains(
             logger.Messages,
@@ -264,17 +312,17 @@ public sealed class TestRunWorkerServiceTests
         Assert.Equal(
             [
                 "scope:1:created",
-                "scope:1:resolve:ITestRunWorkerStore",
-                "scope:1:disposed",
+                "scope:1:resolve:ITestRunProcessor",
                 "scope:2:created",
-                "scope:2:resolve:ITestRunProcessor",
+                "scope:2:resolve:ITestRunWorkerStore",
                 "scope:2:disposed",
+                "scope:1:disposed",
                 "scope:3:created",
-                "scope:3:resolve:ITestRunWorkerStore",
-                "scope:3:disposed",
+                "scope:3:resolve:ITestRunProcessor",
                 "scope:4:created",
-                "scope:4:resolve:ITestRunProcessor",
-                "scope:4:disposed"
+                "scope:4:resolve:ITestRunWorkerStore",
+                "scope:4:disposed",
+                "scope:3:disposed"
             ],
             scopeFactory.Events);
     }
@@ -298,6 +346,7 @@ public sealed class TestRunWorkerServiceTests
         await worker.StopAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, store.ClaimCount);
+        Assert.Contains("scope:2:disposed", scopeFactory.Events);
         Assert.Contains("scope:1:disposed", scopeFactory.Events);
         var error = Assert.Single(
             logger.Entries,
@@ -423,7 +472,8 @@ public sealed class TestRunWorkerServiceTests
 
     private sealed class RecordingScopeFactory(
         ITestRunWorkerStore store,
-        ITestRunProcessor processor) : IServiceScopeFactory
+        ITestRunProcessor processor,
+        Exception? processorResolutionFailure = null) : IServiceScopeFactory
     {
         private readonly ConcurrentQueue<string> _events = new();
         private readonly ConcurrentDictionary<int, TaskCompletionSource> _disposals = new();
@@ -440,7 +490,12 @@ public sealed class TestRunWorkerServiceTests
             Assert.True(_disposals.TryAdd(scopeId, disposal));
             _events.Enqueue($"scope:{scopeId}:created");
             return new RecordingScope(
-                new ScopeServiceProvider(scopeId, store, processor, _events),
+                new ScopeServiceProvider(
+                    scopeId,
+                    store,
+                    processor,
+                    processorResolutionFailure,
+                    _events),
                 () =>
                 {
                     _events.Enqueue($"scope:{scopeId}:disposed");
@@ -467,6 +522,7 @@ public sealed class TestRunWorkerServiceTests
         int scopeId,
         ITestRunWorkerStore store,
         ITestRunProcessor processor,
+        Exception? processorResolutionFailure,
         ConcurrentQueue<string> events) : IServiceProvider
     {
         public object? GetService(Type serviceType)
@@ -479,6 +535,11 @@ public sealed class TestRunWorkerServiceTests
 
             if (serviceType == typeof(ITestRunProcessor))
             {
+                if (processorResolutionFailure != null)
+                {
+                    throw processorResolutionFailure;
+                }
+
                 return processor;
             }
 

@@ -149,7 +149,7 @@ public sealed class TenantOwnershipArchitectureTests
     }
 
     [Fact]
-    public void Worker_disposes_claim_scope_before_opening_processing_scope()
+    public void Worker_uses_distinct_processor_and_claim_scopes()
     {
         var processNextRun = typeof(TestRunWorkerService).GetMethod(
             "ProcessNextRunAsync",

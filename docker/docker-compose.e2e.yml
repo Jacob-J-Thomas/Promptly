@@ -157,13 +157,10 @@ services:
       https_proxy: ""
       all_proxy: ""
       no_proxy: ""
-    ports:
-      - "127.0.0.1:${PROMPTLY_E2E_API_PORT:?PROMPTLY_E2E_API_PORT must be set}:5000"
     volumes:
       - dataprotection-keys:/app/dataprotection-keys
     networks:
       - promptly-control
-      - promptly-ingress
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,11 +174,8 @@ services:
     build:
       context: ../Promptly.Web/src/web
       dockerfile: Dockerfile
-    ports:
-      - "127.0.0.1:${PROMPTLY_E2E_WEB_PORT:?PROMPTLY_E2E_WEB_PORT must be set}:8080"
     networks:
       - promptly-control
-      - promptly-ingress
     depends_on:
       promptly-server:
         condition: service_started
@@ -191,6 +185,37 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
+    restart: "no"
+
+  promptly-ingress-gateway:
+    build:
+      context: e2e-ingress-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${PROMPTLY_E2E_API_PORT:?PROMPTLY_E2E_API_PORT must be set}:5000"
+      - "127.0.0.1:${PROMPTLY_E2E_WEB_PORT:?PROMPTLY_E2E_WEB_PORT must be set}:8080"
+    networks:
+      - promptly-control
+      - promptly-ingress
+    depends_on:
+      promptly-server:
+        condition: service_started
+      promptly-web:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=16m,mode=0755
+      - /var/run:rw,noexec,nosuid,nodev,size=1m,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.5
+    init: true
+    stop_grace_period: 10s
     restart: "no"
 
 networks:

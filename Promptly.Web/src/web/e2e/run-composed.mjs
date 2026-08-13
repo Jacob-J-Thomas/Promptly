@@ -13,7 +13,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  assertBlockedEgressProbe,
+  assertNoDefaultInternetRoute,
   createSafeRunMetadata,
   createArtifactSanitizer,
   resolveFixedE2EPaths,
@@ -71,6 +71,7 @@ const artifactSanitizer = createArtifactSanitizer(secrets);
 const workerImage = `${projectName}-worker:local`;
 const projectImages = [
   `${projectName}-promptly-egress-proxy:latest`,
+  `${projectName}-promptly-ingress-gateway:latest`,
   `${projectName}-promptly-server:latest`,
   `${projectName}-promptly-web:latest`,
   workerImage,
@@ -328,6 +329,7 @@ const writeTopologyAttestation = async () => {
     'postgres',
     'promptly-egress-proxy',
     'promptly-eval',
+    'promptly-ingress-gateway',
     'promptly-server',
     'promptly-web',
     'provider-stub',
@@ -337,31 +339,34 @@ const writeTopologyAttestation = async () => {
     throw new Error(`Unexpected Compose service inventory: ${actualServiceNames.join(',')}`);
   }
   const publicServices = new Map([
-    ['promptly-server', { port: apiPort, target: 5000 }],
-    ['promptly-web', { port: webPort, target: 8080 }],
+    ['promptly-ingress-gateway', [
+      { port: apiPort, target: 5000 },
+      { port: webPort, target: 8080 },
+    ]],
   ]);
   for (const [name, service] of Object.entries(services)) {
     if (service.container_name != null) {
       throw new Error(`${name} must not use a fixed container_name`);
     }
     const ports = service.ports ?? [];
-    const expected = publicServices.get(name);
-    if (!expected && ports.length > 0) {
+    const expectedPorts = publicServices.get(name);
+    if (!expectedPorts && ports.length > 0) {
       throw new Error(`${name} unexpectedly publishes a host port`);
     }
-    if (expected) {
-      if (ports.length !== 1) {
-        throw new Error(`${name} must publish exactly one port`);
+    if (expectedPorts) {
+      if (ports.length !== expectedPorts.length) {
+        throw new Error(`${name} has an unexpected published-port count`);
       }
-      const [published] = ports;
-      if (
-        published.host_ip !== '127.0.0.1'
-        || Number(published.published) !== expected.port
-        || published.mode !== 'ingress'
-        || published.protocol !== 'tcp'
-        || Number(published.target) !== expected.target
-      ) {
-        throw new Error(`${name} has an unexpected port binding`);
+      for (const expected of expectedPorts) {
+        const published = ports.find((candidate) => Number(candidate.target) === expected.target);
+        if (
+          published?.host_ip !== '127.0.0.1'
+          || Number(published.published) !== expected.port
+          || published.mode !== 'ingress'
+          || published.protocol !== 'tcp'
+        ) {
+          throw new Error(`${name} has an unexpected ${expected.target}/tcp binding`);
+        }
       }
     }
   }
@@ -369,8 +374,9 @@ const writeTopologyAttestation = async () => {
     postgres: ['promptly-control'],
     'promptly-egress-proxy': ['promptly-control', 'promptly-egress'],
     'promptly-eval': ['promptly-control'],
-    'promptly-server': ['promptly-control', 'promptly-ingress'],
-    'promptly-web': ['promptly-control', 'promptly-ingress'],
+    'promptly-ingress-gateway': ['promptly-control', 'promptly-ingress'],
+    'promptly-server': ['promptly-control'],
+    'promptly-web': ['promptly-control'],
     'provider-stub': ['promptly-control'],
   };
   for (const [serviceName, expectedNetworksForService] of Object.entries(expectedServiceNetworks)) {
@@ -435,7 +441,12 @@ const writeTopologyAttestation = async () => {
       throw new Error(`${serviceName} has unexpected mounts`);
     }
   }
-  for (const serviceName of ['promptly-egress-proxy', 'promptly-eval', 'promptly-web']) {
+  for (const serviceName of [
+    'promptly-egress-proxy',
+    'promptly-eval',
+    'promptly-ingress-gateway',
+    'promptly-web',
+  ]) {
     if ((services[serviceName]?.volumes ?? []).length !== 0) {
       throw new Error(`${serviceName} must not have persistent or host mounts`);
     }
@@ -445,6 +456,12 @@ const writeTopologyAttestation = async () => {
     .map(([name]) => name);
   if (JSON.stringify(egressMembers) !== JSON.stringify(['promptly-egress-proxy'])) {
     throw new Error(`Unexpected egress-network membership: ${egressMembers.join(',')}`);
+  }
+  const ingressMembers = Object.entries(services)
+    .filter(([, service]) => Object.hasOwn(service.networks ?? {}, 'promptly-ingress'))
+    .map(([name]) => name);
+  if (JSON.stringify(ingressMembers) !== JSON.stringify(['promptly-ingress-gateway'])) {
+    throw new Error(`Unexpected ingress-network membership: ${ingressMembers.join(',')}`);
   }
   if (services['promptly-server']?.environment?.ASPNETCORE_ENVIRONMENT !== 'Production') {
     throw new Error('E2E server must run in Production');
@@ -466,6 +483,7 @@ const writeTopologyAttestation = async () => {
       ephemeralJwtSigningKey: true,
       internalControlNetwork: true,
       ingressIpv6Disabled: true,
+      onlyGatewayHasIngressNetwork: true,
       nonMasqueradedIngressNetwork: true,
       onlyProxyHasEgressNetwork: true,
       productionServerEnvironment: true,
@@ -473,15 +491,21 @@ const writeTopologyAttestation = async () => {
       stateMountsAreProjectScoped: true,
     },
     publishedPorts: {
-      api: { host: '127.0.0.1', port: apiPort },
-      web: { host: '127.0.0.1', port: webPort },
+      api: { gateway: 'promptly-ingress-gateway', host: '127.0.0.1', port: apiPort },
+      web: { gateway: 'promptly-ingress-gateway', host: '127.0.0.1', port: webPort },
     },
-    privateServices: ['postgres', 'provider-stub', 'promptly-egress-proxy', 'promptly-eval'],
+    privateServices: [
+      'postgres',
+      'promptly-egress-proxy',
+      'promptly-eval',
+      'promptly-server',
+      'promptly-web',
+      'provider-stub',
+    ],
   }, null, 2)}\n`);
 };
 
 const writeIngressEgressAttestation = async () => {
-  const blockedMarker = 'PROMPTLY_EGRESS_BLOCKED';
   const routedCanary = await run(
     'docker',
     [
@@ -505,28 +529,24 @@ const writeIngressEgressAttestation = async () => {
   );
   const probes = [
     {
+      service: 'promptly-eval',
+      controlCommand: [
+        'python',
+        '-c',
+        "import socket; socket.create_connection(('provider-stub', 8080), timeout=2).close()",
+      ],
+    },
+    {
       service: 'promptly-server',
       controlCommand: [
         'bash',
         '-c',
         'exec 3<>/dev/tcp/promptly-web/8080',
       ],
-      blockedCommand: [
-        'bash',
-        '-c',
-        `set -e; status=0; timeout 3 bash -c 'exec 3<>/dev/tcp/1.1.1.1/443' `
-          + `>/dev/null 2>&1 || status=$?; [ "$status" -eq 124 ]; printf '%s\\n' ${blockedMarker}; exit 86`,
-      ],
     },
     {
       service: 'promptly-web',
       controlCommand: ['nc', '-w', '2', 'promptly-server', '5000'],
-      blockedCommand: [
-        'sh',
-        '-c',
-        `set -e; status=0; timeout 3 nc 1.1.1.1 443 </dev/null >/dev/null 2>&1 `
-          + `|| status=$?; [ "$status" -eq 143 ]; printf '%s\\n' ${blockedMarker}; exit 86`,
-      ],
     },
   ];
   const results = [];
@@ -541,9 +561,9 @@ const writeIngressEgressAttestation = async () => {
         timeoutMs: 10_000,
       },
     );
-    const blocked = await run(
+    const ipv4Routes = await run(
       'docker',
-      [...composeArguments, 'exec', '--no-TTY', probe.service, ...probe.blockedCommand],
+      [...composeArguments, 'exec', '--no-TTY', probe.service, 'cat', '/proc/net/route'],
       {
         allowFailure: true,
         captureOnly: true,
@@ -551,23 +571,36 @@ const writeIngressEgressAttestation = async () => {
         timeoutMs: 10_000,
       },
     );
-    assertBlockedEgressProbe({
-      blocked,
+    const ipv6Routes = await run(
+      'docker',
+      [...composeArguments, 'exec', '--no-TTY', probe.service, 'cat', '/proc/net/ipv6_route'],
+      {
+        allowFailure: true,
+        captureOnly: true,
+        env: composeEnvironment,
+        timeoutMs: 10_000,
+      },
+    );
+    assertNoDefaultInternetRoute({
       canary: routedCanary,
       control,
-      marker: blockedMarker,
+      ipv4Routes,
+      ipv6Routes,
       service: probe.service,
     });
     results.push({
       service: probe.service,
       controlNetworkConnectionSucceeded: true,
-      directInternetConnectionRejected: true,
-      rejectionContract: 'bounded-timeout',
+      defaultIpv4RouteAbsent: true,
+      defaultIpv6RouteAbsent: true,
+      directInternetRouteAbsent: true,
     });
   }
   await writeFile(path.join(artifactsRoot, 'ingress-egress-attestation.json'), `${JSON.stringify({
     schema: 1,
-    network: 'promptly-ingress',
+    workloadNetwork: 'promptly-control',
+    hostIngressNetwork: 'promptly-ingress',
+    ingressGateway: 'promptly-ingress-gateway',
     ipMasqueradeDisabled: true,
     ipv6Disabled: true,
     routedCanary: {
@@ -886,8 +919,8 @@ try {
   }
   stackStarted = true;
   const [resolvedApiPort, resolvedWebPort] = await Promise.all([
-    resolvePublishedPort('promptly-server', 5000),
-    resolvePublishedPort('promptly-web', 8080),
+    resolvePublishedPort('promptly-ingress-gateway', 5000),
+    resolvePublishedPort('promptly-ingress-gateway', 8080),
   ]);
   if (resolvedApiPort !== apiPort || resolvedWebPort !== webPort) {
     throw new Error('Resolved Compose ports do not match the selected loopback bindings');

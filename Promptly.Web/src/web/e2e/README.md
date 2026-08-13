@@ -25,10 +25,10 @@ npm run test:e2e
 `npm run test:e2e` is the only supported entry point. It generates unique
 Compose project state, high-entropy database/JWT secrets, and free loopback web
 and API ports; builds the static web, Production server, worker, provider stub,
-and egress proxy; waits with fixed bounds; runs the exact required-test inventory;
-collects evidence; and unconditionally removes the containers, networks, volumes,
-and per-run images. It never calls a reset endpoint and never uses production
-credentials.
+egress proxy, and dedicated host-ingress gateway; waits with fixed bounds; runs
+the exact required-test inventory; collects evidence; and unconditionally removes
+the containers, networks, volumes, and per-run images. It never calls a reset
+endpoint and never uses production credentials.
 
 Artifacts are written under `artifacts/test-results/e2e`:
 
@@ -39,7 +39,7 @@ Artifacts are written under `artifacts/test-results/e2e`:
 
 Upload finalization recursively inspects retained trace ZIP contents and scrubs
 generated bearer tokens/passwords plus per-run Compose secrets before creating the
-`upload-safe.json` marker. Nested or oversized archives fail closed.
+`upload-safe.json` marker. Nested, duplicate-entry, or oversized archives fail closed.
 
 ## Retry and quarantine policy
 
@@ -55,8 +55,10 @@ test failures. The expired-session test registers the single expected 401 before
 triggering it and must observe that exact response.
 
 The topology gate first proves its globally routed canary is reachable through the
-allowed egress proxy and that each direct-egress probe is executable with a
-same-container control-network connection. It then requires an exact bounded-timeout
-contract to that same canary without the proxy. The host-ingress network has IPv6
-disabled and IPv4 masquerading disabled; arbitrary command failures are not accepted
-as egress-isolation evidence.
+allowed egress proxy and that each server, web, and evaluation-worker workload can
+use its internal control network. Those workloads belong only to that Docker-internal
+network; their IPv4 and IPv6 route tables must contain no default Internet route. A
+dedicated, read-only gateway is the sole member that bridges the control and
+host-ingress networks and publishes the two loopback ports. The host-ingress network
+has IPv6 disabled and IPv4 masquerading disabled, while only the egress proxy joins
+the globally routed egress network.

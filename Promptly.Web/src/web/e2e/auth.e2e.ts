@@ -68,7 +68,7 @@ test('registration logout and login traverse the real stack', async ({ page }) =
   await page.getByRole('button', { name: 'Sign Up' }).click();
   expect((await registration).status()).toBe(200);
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
   await expect(page.getByText('No projects yet')).toBeVisible();
   await expect.poll(() => page.evaluate(() => ({
     hasToken: localStorage.getItem('auth_token') !== null,
@@ -92,7 +92,7 @@ test('registration logout and login traverse the real stack', async ({ page }) =
   await page.getByRole('button', { name: 'Sign In' }).click();
   expect((await login).status()).toBe(200);
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => ({
     hasToken: localStorage.getItem('auth_token') !== null,
     hasUser: localStorage.getItem('user') !== null,

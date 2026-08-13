@@ -4,7 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { unzipSync, zipSync } from 'fflate';
 import {
-  assertBlockedEgressProbe,
+  assertNoDefaultInternetRoute,
   createSafeRunMetadata,
   createArtifactSanitizer,
   resolveFixedE2EPaths,
@@ -87,6 +87,49 @@ test('rejects nested and over-limit archives instead of scanning them shallowly'
   );
 });
 
+test('rejects duplicate ZIP entry names before a safe entry can shadow a credential', () => {
+  const shadowedName = Buffer.from('shadowed.txt');
+  const retainedName = Buffer.from('retained.txt');
+  const duplicate = Buffer.from(zipSync({
+    'shadowed.txt': Buffer.from(jwt),
+    'retained.txt': Buffer.from('safe content'),
+  }));
+  let replacements = 0;
+  for (let offset = duplicate.indexOf(shadowedName); offset >= 0;) {
+    duplicate.set(retainedName, offset);
+    replacements += 1;
+    offset = duplicate.indexOf(shadowedName, offset + retainedName.length);
+  }
+  assert.equal(replacements, 2);
+
+  const sanitizer = createArtifactSanitizer([]);
+  assert.throws(() => sanitizer.sanitizeArchive(duplicate), /duplicate entry/);
+  assert.throws(() => sanitizer.assertArchiveSafe(duplicate), /duplicate entry/);
+});
+
+test('rejects ZIP entry names that a plain-object result cannot represent safely', () => {
+  const ordinaryName = Buffer.from('safe-name');
+  const specialName = Buffer.from('__proto__');
+  const archive = Buffer.from(zipSync({
+    'safe-name': Buffer.from(jwt),
+  }));
+  let replacements = 0;
+  for (let offset = archive.indexOf(ordinaryName); offset >= 0;) {
+    archive.set(specialName, offset);
+    replacements += 1;
+    offset = archive.indexOf(ordinaryName, offset + specialName.length);
+  }
+  assert.equal(replacements, 2);
+
+  const sanitizer = createArtifactSanitizer([]);
+  assert.throws(() => sanitizer.sanitizeArchive(archive), /entry inventory/);
+  const html = Buffer.from(
+    '<template id="playwrightReportBase64">data:application/zip;base64,'
+    + `${archive.toString('base64')}</template>`,
+  );
+  assert.throws(() => sanitizer.sanitizeHtmlReport(html), /entry inventory/);
+});
+
 test('sanitizes Playwright HTML reports with compressed base64-embedded credentials', () => {
   const sanitizer = createArtifactSanitizer([]);
   const archive = Buffer.from(zipSync({
@@ -106,30 +149,73 @@ test('sanitizes Playwright HTML reports with compressed base64-embedded credenti
   assert.doesNotMatch(sanitized.content.toString('utf8'), /Promptly-/);
 });
 
-test('egress proof requires both a working control and exact timeout marker', () => {
+test('egress proof requires working controls and no workload default routes', () => {
   const valid = {
-    blocked: { code: 86, stderr: '', stdout: 'PROMPTLY_EGRESS_BLOCKED\n' },
     canary: { code: 0, stderr: '', stdout: '' },
     control: { code: 0, stderr: '', stdout: '' },
-    marker: 'PROMPTLY_EGRESS_BLOCKED',
+    ipv4Routes: {
+      code: 0,
+      stderr: '',
+      stdout: 'Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n'
+        + 'eth0 000013AC 00000000 0001 0 0 0 0000FFFF 0 0 0\n',
+    },
+    ipv6Routes: {
+      code: 0,
+      stderr: '',
+      stdout: '00000000000000000000000000000000 00 '
+        + '00000000000000000000000000000000 00 '
+        + '00000000000000000000000000000000 ffffffff 00000001 00000000 00200200 lo\n',
+    },
     service: 'promptly-web',
   };
-  assert.doesNotThrow(() => assertBlockedEgressProbe(valid));
+  assert.doesNotThrow(() => assertNoDefaultInternetRoute(valid));
   assert.throws(
-    () => assertBlockedEgressProbe({ ...valid, canary: { code: 1, stderr: '', stdout: '' } }),
+    () => assertNoDefaultInternetRoute({ ...valid, canary: { code: 1, stderr: '', stdout: '' } }),
     /routed egress canary failed/,
   );
   assert.throws(
-    () => assertBlockedEgressProbe({ ...valid, control: { code: 127, stderr: 'nc: not found', stdout: '' } }),
+    () => assertNoDefaultInternetRoute({
+      ...valid,
+      control: { code: 127, stderr: 'nc: not found', stdout: '' },
+    }),
     /control probe failed/,
   );
   assert.throws(
-    () => assertBlockedEgressProbe({ ...valid, blocked: { code: 1, stderr: '', stdout: '' } }),
-    /exact blocked-network contract/,
+    () => assertNoDefaultInternetRoute({
+      ...valid,
+      ipv4Routes: {
+        code: 0,
+        stderr: '',
+        stdout: valid.ipv4Routes.stdout
+          + 'eth0 00000000 010013AC 0003 0 0 0 00000000 0 0 0\n',
+      },
+    }),
+    /active default IPv4 route/,
   );
   assert.throws(
-    () => assertBlockedEgressProbe({ ...valid, blocked: { code: 86, stderr: 'exec failed', stdout: valid.marker } }),
-    /exact blocked-network contract/,
+    () => assertNoDefaultInternetRoute({
+      ...valid,
+      ipv6Routes: {
+        code: 0,
+        stderr: '',
+        stdout: valid.ipv6Routes.stdout
+          + '00000000000000000000000000000000 00 '
+          + '00000000000000000000000000000000 00 '
+          + 'fe800000000000000000000000000001 00000000 00000000 00000000 00000003 eth0\n',
+      },
+    }),
+    /default IPv6 route/,
+  );
+  assert.throws(
+    () => assertNoDefaultInternetRoute({
+      ...valid,
+      ipv4Routes: {
+        code: 0,
+        stderr: '',
+        stdout: valid.ipv4Routes.stdout.replace('0001', 'not-hex'),
+      },
+    }),
+    /invalid entry/,
   );
 });
 

@@ -118,8 +118,13 @@ export const createArtifactSanitizer = (
       throw new Error(`Compressed artifact exceeds ${maxArchiveBytes} bytes`);
     }
     let expandedBytes = 0;
+    const entryNames = new Set();
     const entries = unzipSync(archive, {
       filter: (entry) => {
+        if (entryNames.has(entry.name)) {
+          throw new Error(`Compressed artifact contains a duplicate entry: ${entry.name}`);
+        }
+        entryNames.add(entry.name);
         expandedBytes += entry.originalSize;
         if (expandedBytes > maxArchiveBytes) {
           throw new Error(`Expanded artifact exceeds ${maxArchiveBytes} bytes`);
@@ -127,6 +132,12 @@ export const createArtifactSanitizer = (
         return true;
       },
     });
+    if (
+      Object.keys(entries).length !== entryNames.size
+      || [...entryNames].some((name) => !Object.hasOwn(entries, name))
+    ) {
+      throw new Error('Compressed artifact entry inventory is not safely representable');
+    }
     return entries;
   };
 
@@ -225,18 +236,68 @@ export const createArtifactSanitizer = (
   };
 };
 
-export const assertBlockedEgressProbe = ({ blocked, canary, control, marker, service }) => {
+export const assertNoDefaultInternetRoute = ({
+  canary,
+  control,
+  ipv4Routes,
+  ipv6Routes,
+  service,
+}) => {
   if (canary.code !== 0) {
     throw new Error(`${service} routed egress canary failed with code ${canary.code}`);
   }
   if (control.code !== 0) {
     throw new Error(`${service} egress control probe failed with code ${control.code}`);
   }
-  if (blocked.code !== 86 || blocked.stdout.trim() !== marker || blocked.stderr.trim() !== '') {
-    throw new Error(
-      `${service} egress probe did not produce the exact blocked-network contract `
-      + `(code=${blocked.code}, stdout=${JSON.stringify(blocked.stdout.trim())}, `
-      + `stderr=${JSON.stringify(blocked.stderr.trim())})`,
-    );
+  if (ipv4Routes.code !== 0 || ipv4Routes.stderr.trim() !== '') {
+    throw new Error(`${service} IPv4 route table could not be read exactly`);
+  }
+  const ipv4Lines = ipv4Routes.stdout.trim().split('\n').filter(Boolean);
+  if (ipv4Lines.length < 2 || !/^Iface\s+Destination\s+Gateway\s+Flags\b/.test(ipv4Lines[0])) {
+    throw new Error(`${service} IPv4 route table has an invalid format`);
+  }
+  const ipv4Entries = ipv4Lines.slice(1).map((line) => line.trim().split(/\s+/));
+  if (ipv4Entries.some((entry) => (
+    entry.length !== 11
+    || !/^[0-9A-Fa-f]{8}$/.test(entry[1])
+    || !/^[0-9A-Fa-f]{8}$/.test(entry[2])
+    || !/^[0-9A-Fa-f]{4}$/.test(entry[3])
+    || !entry.slice(4, 7).every((value) => /^\d+$/.test(value))
+    || !/^[0-9A-Fa-f]{8}$/.test(entry[7])
+    || !entry.slice(8).every((value) => /^\d+$/.test(value))
+  ))) {
+    throw new Error(`${service} IPv4 route table contains an invalid entry`);
+  }
+  if (ipv4Entries.some(([iface, destination, , flags, , , , mask]) => (
+    iface !== 'lo'
+    && destination === '00000000'
+    && mask === '00000000'
+    && (Number.parseInt(flags, 16) & 1) === 1
+  ))) {
+    throw new Error(`${service} has an active default IPv4 route`);
+  }
+
+  if (ipv6Routes.code !== 0 || ipv6Routes.stderr.trim() !== '') {
+    throw new Error(`${service} IPv6 route table could not be read exactly`);
+  }
+  const ipv6Entries = ipv6Routes.stdout.trim().split('\n').filter(Boolean)
+    .map((line) => line.trim().split(/\s+/));
+  if (ipv6Entries.some((entry) => (
+    entry.length !== 10
+    || !/^[0-9A-Fa-f]{32}$/.test(entry[0])
+    || !/^[0-9A-Fa-f]{2}$/.test(entry[1])
+    || !/^[0-9A-Fa-f]{32}$/.test(entry[2])
+    || !/^[0-9A-Fa-f]{2}$/.test(entry[3])
+    || !/^[0-9A-Fa-f]{32}$/.test(entry[4])
+    || !entry.slice(5, 9).every((value) => /^[0-9A-Fa-f]{8}$/.test(value))
+  ))) {
+    throw new Error(`${service} IPv6 route table contains an invalid entry`);
+  }
+  if (ipv6Entries.some((entry) => (
+    entry[0] === '00000000000000000000000000000000'
+    && entry[1] === '00'
+    && entry[9] !== 'lo'
+  ))) {
+    throw new Error(`${service} has a default IPv6 route`);
   }
 };

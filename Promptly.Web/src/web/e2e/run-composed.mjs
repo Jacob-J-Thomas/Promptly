@@ -14,8 +14,9 @@ import {
 import path from 'node:path';
 import {
   assertNoDefaultInternetRoute,
-  createSafeRunMetadata,
   createArtifactSanitizer,
+  createPlaywrightEnvironment,
+  createSafeRunMetadata,
   resolveFixedE2EPaths,
 } from './harness-safety.mjs';
 
@@ -937,13 +938,12 @@ try {
   await writeTopologyAttestation();
   await writeIngressEgressAttestation();
 
-  const playwrightEnvironment = {
-    ...process.env,
+  const playwrightEnvironment = createPlaywrightEnvironment(process.env, {
     CI: process.env.CI ?? 'true',
     PROMPTLY_E2E_API_ORIGIN: apiOrigin,
     PROMPTLY_E2E_JWT_KEY: jwtKey,
     PROMPTLY_E2E_WEB_ORIGIN: webOrigin,
-  };
+  });
 
   browserAttempted = true;
   playwrightCode = -1;

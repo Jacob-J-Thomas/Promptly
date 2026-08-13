@@ -37,6 +37,10 @@ Artifacts are written under `artifacts/test-results/e2e`:
 - sanitized provider requests, Compose logs/state/images, topology and cleanup
   attestations, runner log, and run metadata.
 
+The runner ignores inherited Playwright reporter selection and blob, HTML, JSON,
+JUnit, and last-run output-path overrides so those artifacts cannot be redirected
+outside the fixed repository artifact root.
+
 Upload finalization recursively inspects retained trace ZIP contents and scrubs
 generated bearer tokens/passwords plus per-run Compose secrets before creating the
 `upload-safe.json` marker. Nested, duplicate-entry, or oversized archives fail closed.

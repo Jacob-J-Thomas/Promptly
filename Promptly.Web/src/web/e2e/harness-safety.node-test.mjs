@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { unzipSync, zipSync } from 'fflate';
 import {
   assertNoDefaultInternetRoute,
-  createSafeRunMetadata,
   createArtifactSanitizer,
+  createPlaywrightEnvironment,
+  createSafeRunMetadata,
   resolveFixedE2EPaths,
 } from './harness-safety.mjs';
 
@@ -32,6 +33,48 @@ test('pins E2E artifacts to the repository even when the environment requests a 
     } else {
       process.env.PROMPTLY_E2E_ARTIFACT_DIR = previous;
     }
+  }
+});
+
+test('strips reporter selection and every Playwright output path from the child environment', () => {
+  const redirectedRoot = path.join(path.parse(process.cwd()).root, 'attacker-controlled-artifacts');
+  const reporterOverrides = {
+    PLAYWRIGHT_BLOB_OUTPUT_DIR: redirectedRoot,
+    PLAYWRIGHT_BLOB_OUTPUT_FILE: path.join(redirectedRoot, 'report.zip'),
+    PLAYWRIGHT_BLOB_OUTPUT_NAME: '../report.zip',
+    PLAYWRIGHT_HTML_OUTPUT_DIR: redirectedRoot,
+    PLAYWRIGHT_HTML_OUTPUT_FILE: path.join(redirectedRoot, 'html-file'),
+    PLAYWRIGHT_HTML_OUTPUT_NAME: '../html-name',
+    PLAYWRIGHT_HTML_REPORT: redirectedRoot,
+    PLAYWRIGHT_JSON_OUTPUT_DIR: redirectedRoot,
+    PLAYWRIGHT_JSON_OUTPUT_FILE: path.join(redirectedRoot, 'results.json'),
+    PLAYWRIGHT_JSON_OUTPUT_NAME: '../results.json',
+    PLAYWRIGHT_JUNIT_OUTPUT_DIR: redirectedRoot,
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE: path.join(redirectedRoot, 'junit.xml'),
+    PLAYWRIGHT_JUNIT_OUTPUT_NAME: '../junit.xml',
+    PLAYWRIGHT_LAST_RUN_OUTPUT_FILE: path.join(redirectedRoot, '.last-run.json'),
+    PW_TEST_REPORTER: 'blob',
+  };
+  const environment = createPlaywrightEnvironment(
+    {
+      PATH: '/trusted/bin',
+      PLAYWRIGHT_BROWSERS_PATH: '/trusted/browser-cache',
+      PROMPTLY_E2E_WEB_ORIGIN: 'http://parent.invalid',
+      ...reporterOverrides,
+    },
+    {
+      CI: 'true',
+      PROMPTLY_E2E_API_ORIGIN: 'http://127.0.0.1:41001',
+      PROMPTLY_E2E_JWT_KEY: 'ephemeral-key',
+      PROMPTLY_E2E_WEB_ORIGIN: 'http://127.0.0.1:41002',
+    },
+  );
+
+  assert.equal(environment.PATH, '/trusted/bin');
+  assert.equal(environment.PLAYWRIGHT_BROWSERS_PATH, '/trusted/browser-cache');
+  assert.equal(environment.PROMPTLY_E2E_WEB_ORIGIN, 'http://127.0.0.1:41002');
+  for (const key of Object.keys(reporterOverrides)) {
+    assert.equal(Object.hasOwn(environment, key), false, `${key} reached the child process`);
   }
 });
 

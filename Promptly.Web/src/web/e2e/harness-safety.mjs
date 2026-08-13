@@ -32,6 +32,23 @@ const runErrorCategoryOrder = [
   'artifact verification',
   'artifact safety',
 ];
+const playwrightWritableEnvironmentKeys = new Set([
+  'PLAYWRIGHT_BLOB_OUTPUT_DIR',
+  'PLAYWRIGHT_BLOB_OUTPUT_FILE',
+  'PLAYWRIGHT_BLOB_OUTPUT_NAME',
+  'PLAYWRIGHT_HTML_OUTPUT_DIR',
+  'PLAYWRIGHT_HTML_OUTPUT_FILE',
+  'PLAYWRIGHT_HTML_OUTPUT_NAME',
+  'PLAYWRIGHT_HTML_REPORT',
+  'PLAYWRIGHT_JSON_OUTPUT_DIR',
+  'PLAYWRIGHT_JSON_OUTPUT_FILE',
+  'PLAYWRIGHT_JSON_OUTPUT_NAME',
+  'PLAYWRIGHT_JUNIT_OUTPUT_DIR',
+  'PLAYWRIGHT_JUNIT_OUTPUT_FILE',
+  'PLAYWRIGHT_JUNIT_OUTPUT_NAME',
+  'PLAYWRIGHT_LAST_RUN_OUTPUT_FILE',
+  'PW_TEST_REPORTER',
+]);
 
 export const resolveFixedE2EPaths = (moduleUrl) => {
   const e2eRoot = path.dirname(fileURLToPath(moduleUrl));
@@ -79,6 +96,17 @@ export const createSafeRunMetadata = ({
     errorCount,
     errorCategories: safeCategories,
   };
+};
+
+export const createPlaywrightEnvironment = (parentEnvironment, requiredValues) => {
+  const environment = {
+    ...parentEnvironment,
+    ...requiredValues,
+  };
+  for (const key of playwrightWritableEnvironmentKeys) {
+    delete environment[key];
+  }
+  return environment;
 };
 
 const equalLengthMask = (label, length) => {

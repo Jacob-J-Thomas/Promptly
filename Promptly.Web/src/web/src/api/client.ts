@@ -1,9 +1,19 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+export const resolveApiBaseUrl = (
+  configuredBaseUrl: string | undefined,
+  production: boolean,
+): string => {
+  const normalizedBaseUrl = configuredBaseUrl?.trim().replace(/\/+$/, '');
+  if (normalizedBaseUrl) {
+    return `${normalizedBaseUrl}/api`;
+  }
+
+  return production ? '/api' : 'http://localhost:5000/api';
+};
 
 export const apiClient = axios.create({
-  baseURL: `${baseURL}/api`,
+  baseURL: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL, import.meta.env.PROD),
   headers: {
     'Content-Type': 'application/json',
   },

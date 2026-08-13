@@ -6,7 +6,7 @@ import {
   type InternalAxiosRequestConfig,
 } from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiClient } from './client';
+import { apiClient, resolveApiBaseUrl } from './client';
 
 const originalAdapter = apiClient.defaults.adapter;
 
@@ -52,6 +52,18 @@ describe('apiClient', () => {
     expect(apiClient.defaults.baseURL).toBe('http://localhost:5000/api');
     expect(apiClient.defaults.headers['Content-Type']).toBe('application/json');
   });
+
+  it.each([
+    [undefined, false, 'http://localhost:5000/api'],
+    [undefined, true, '/api'],
+    ['   ', true, '/api'],
+    ['https://promptly.example/', true, 'https://promptly.example/api'],
+  ])(
+    'resolves configured and environment-specific API roots',
+    (configured, production, expected) => {
+      expect(resolveApiBaseUrl(configured, production)).toBe(expected);
+    },
+  );
 
   it('adds the stored bearer token before dispatching a request', async () => {
     localStorage.setItem('auth_token', 'token-1');

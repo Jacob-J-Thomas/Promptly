@@ -1,0 +1,57 @@
+name: E2E verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-verification:
+    name: E2E verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    defaults:
+      run:
+        working-directory: Promptly.Web/src/web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: Promptly.Web/src/web/.node-version
+          cache: npm
+          cache-dependency-path: Promptly.Web/src/web/package-lock.json
+
+      - name: Install locked test dependencies
+        run: npm ci
+
+      - name: Install pinned Chromium runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production-composed browser gate
+        env:
+          CI: "true"
+        run: npm run test:e2e
+
+      - name: Upload browser and Compose evidence
+        if: ${{ !cancelled() && hashFiles('artifacts/test-results/e2e/upload-safe.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-test-results
+          path: artifacts/test-results/e2e
+          if-no-files-found: error
+          retention-days: 14

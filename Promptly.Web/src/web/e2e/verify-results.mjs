@@ -1,13 +1,12 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolveFixedE2EPaths } from './harness-safety.mjs';
 
-const e2eRoot = path.dirname(fileURLToPath(import.meta.url));
-const webRoot = path.dirname(e2eRoot);
-const artifactsRoot = path.resolve(
-  process.env.PROMPTLY_E2E_ARTIFACT_DIR
-    ?? path.join(webRoot, '../../../artifacts/test-results/e2e'),
-);
+const {
+  artifactsRoot,
+  e2eRoot,
+  webRoot,
+} = resolveFixedE2EPaths(import.meta.url);
 const reportPath = path.join(artifactsRoot, 'results.json');
 const verificationPath = path.join(artifactsRoot, 'verification.json');
 const inventoryPath = path.join(e2eRoot, 'required-tests.json');

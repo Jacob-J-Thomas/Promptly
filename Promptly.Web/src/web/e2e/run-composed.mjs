@@ -12,18 +12,20 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   assertBlockedEgressProbe,
+  createSafeRunMetadata,
   createArtifactSanitizer,
+  resolveFixedE2EPaths,
 } from './harness-safety.mjs';
 
-const e2eRoot = path.dirname(fileURLToPath(import.meta.url));
-const webRoot = path.dirname(e2eRoot);
-const repositoryRoot = path.resolve(webRoot, '../../..');
+const {
+  artifactsRoot,
+  e2eRoot,
+  repositoryRoot,
+  webRoot,
+} = resolveFixedE2EPaths(import.meta.url);
 const composeFile = path.join(repositoryRoot, 'docker/docker-compose.e2e.yml');
-const allowedArtifactsRoot = path.join(repositoryRoot, 'artifacts');
-const artifactsRoot = path.join(allowedArtifactsRoot, 'test-results/e2e');
 
 const prepareArtifactsDirectory = async () => {
   let current = repositoryRoot;
@@ -257,6 +259,7 @@ const composeEnvironment = {
 };
 const composeArguments = ['compose', '--file', composeFile, '--project-name', projectName];
 const errors = [];
+const errorCategories = new Set();
 let stackStarted = false;
 let apiOrigin = null;
 let apiPort = null;
@@ -275,6 +278,7 @@ const configureCandidatePorts = () => {
 const recordError = (label, error) => {
   const message = error instanceof Error ? error.message : String(error);
   errors.push(`${label}: ${redact(message)}`);
+  errorCategories.add(label);
 };
 
 const waitForHttp = async (url, attempts = 60) => {
@@ -812,15 +816,16 @@ const writeArtifactManifest = async () => {
 };
 
 const writeRunMetadata = async () => {
-  await writeFile(path.join(artifactsRoot, 'run-metadata.json'), `${JSON.stringify({
-    schema: 1,
-    startedAt: startedAt.toISOString(),
-    completedAt: new Date().toISOString(),
-    status: errors.length === 0 ? 'passed' : 'failed',
-    webOrigin,
-    apiOrigin,
-    errors,
-  }, null, 2)}\n`);
+  const metadata = createSafeRunMetadata({
+    completedAt: new Date(),
+    errorCategories: [...errorCategories],
+    errorCount: errors.length,
+    startedAt,
+  });
+  await writeFile(
+    path.join(artifactsRoot, 'run-metadata.json'),
+    `${JSON.stringify(metadata, null, 2)}\n`,
+  );
 };
 
 let browserAttempted = false;
@@ -903,7 +908,6 @@ try {
     ...process.env,
     CI: process.env.CI ?? 'true',
     PROMPTLY_E2E_API_ORIGIN: apiOrigin,
-    PROMPTLY_E2E_ARTIFACT_DIR: artifactsRoot,
     PROMPTLY_E2E_JWT_KEY: jwtKey,
     PROMPTLY_E2E_WEB_ORIGIN: webOrigin,
   };

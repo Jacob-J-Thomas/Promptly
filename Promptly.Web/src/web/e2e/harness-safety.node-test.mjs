@@ -1,13 +1,55 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { unzipSync, zipSync } from 'fflate';
 import {
   assertBlockedEgressProbe,
+  createSafeRunMetadata,
   createArtifactSanitizer,
+  resolveFixedE2EPaths,
 } from './harness-safety.mjs';
 
 const jwt = `${'eyJhbGciOiJIUzI1NiJ9'}.${'eyJzdWIiOiJ1c2VyLTEifQ'}.${'signature_value_1234567890'}`;
 const password = 'Promptly-12345678-1234-1234-1234-123456789abc-A1';
+
+test('pins E2E artifacts to the repository even when the environment requests a redirect', () => {
+  const previous = process.env.PROMPTLY_E2E_ARTIFACT_DIR;
+  const redirectedRoot = path.join(path.parse(process.cwd()).root, 'attacker-controlled-artifacts');
+  process.env.PROMPTLY_E2E_ARTIFACT_DIR = redirectedRoot;
+  try {
+    const paths = resolveFixedE2EPaths(import.meta.url);
+    const expectedE2ERoot = path.dirname(fileURLToPath(import.meta.url));
+    assert.equal(paths.e2eRoot, expectedE2ERoot);
+    assert.equal(
+      paths.artifactsRoot,
+      path.join(paths.repositoryRoot, 'artifacts/test-results/e2e'),
+    );
+    assert.notEqual(paths.artifactsRoot, redirectedRoot);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PROMPTLY_E2E_ARTIFACT_DIR;
+    } else {
+      process.env.PROMPTLY_E2E_ARTIFACT_DIR = previous;
+    }
+  }
+});
+
+test('persists only allowlisted error categories, never runtime error contents', () => {
+  const networkDerivedSecret = 'upstream said token=network-secret';
+  const metadata = createSafeRunMetadata({
+    completedAt: new Date('2026-08-12T12:01:00.000Z'),
+    errorCategories: ['verification', networkDerivedSecret],
+    errorCount: 2,
+    startedAt: new Date('2026-08-12T12:00:00.000Z'),
+  });
+  const serialized = JSON.stringify(metadata);
+
+  assert.deepEqual(metadata.errorCategories, ['verification', 'unclassified']);
+  assert.equal(metadata.errorCount, 2);
+  assert.equal(metadata.status, 'failed');
+  assert.doesNotMatch(serialized, /network-secret|upstream said|token=/);
+});
 
 test('sanitizes known and derived credentials inside compressed traces', () => {
   const sanitizer = createArtifactSanitizer(['database-secret', 'jwt-signing-key']);

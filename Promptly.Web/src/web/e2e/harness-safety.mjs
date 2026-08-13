@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { unzipSync, zipSync } from 'fflate';
 
 const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -18,6 +20,66 @@ const credentialPatterns = [
 ];
 const htmlArchivePrefix = '<template id="playwrightReportBase64">data:application/zip;base64,';
 const htmlArchiveSuffix = '</template>';
+const runErrorCategoryOrder = [
+  'verification',
+  'diagnostics',
+  'provider diagnostics',
+  'cleanup',
+  'cleanup evidence',
+  'termination',
+  'runner log',
+  'artifact sanitization',
+  'artifact verification',
+  'artifact safety',
+];
+
+export const resolveFixedE2EPaths = (moduleUrl) => {
+  const e2eRoot = path.dirname(fileURLToPath(moduleUrl));
+  const webRoot = path.dirname(e2eRoot);
+  const repositoryRoot = path.resolve(webRoot, '../../..');
+  return Object.freeze({
+    artifactsRoot: path.join(repositoryRoot, 'artifacts/test-results/e2e'),
+    e2eRoot,
+    repositoryRoot,
+    webRoot,
+  });
+};
+
+export const createSafeRunMetadata = ({
+  completedAt,
+  errorCategories,
+  errorCount,
+  startedAt,
+}) => {
+  if (!(startedAt instanceof Date) || Number.isNaN(startedAt.valueOf())) {
+    throw new Error('Run metadata requires a valid start time');
+  }
+  if (!(completedAt instanceof Date) || Number.isNaN(completedAt.valueOf())) {
+    throw new Error('Run metadata requires a valid completion time');
+  }
+  if (!Number.isSafeInteger(errorCount) || errorCount < 0) {
+    throw new Error('Run metadata requires a nonnegative integer error count');
+  }
+
+  const requestedCategories = new Set(
+    Array.isArray(errorCategories) ? errorCategories : [],
+  );
+  const safeCategories = runErrorCategoryOrder.filter((category) => (
+    requestedCategories.has(category)
+  ));
+  if ([...requestedCategories].some((category) => !runErrorCategoryOrder.includes(category))) {
+    safeCategories.push('unclassified');
+  }
+
+  return {
+    schema: 1,
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    status: errorCount === 0 ? 'passed' : 'failed',
+    errorCount,
+    errorCategories: safeCategories,
+  };
+};
 
 const equalLengthMask = (label, length) => {
   const marker = `[REDACTED-${label}]`;

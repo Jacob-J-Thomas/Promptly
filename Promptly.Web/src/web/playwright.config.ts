@@ -3,10 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
-const artifactsRoot = path.resolve(
-  process.env.PROMPTLY_E2E_ARTIFACT_DIR
-    ?? path.join(webRoot, '../../../artifacts/test-results/e2e'),
-);
+const artifactsRoot = path.resolve(webRoot, '../../../artifacts/test-results/e2e');
 const baseURL = process.env.PROMPTLY_E2E_WEB_ORIGIN;
 
 if (!baseURL) {

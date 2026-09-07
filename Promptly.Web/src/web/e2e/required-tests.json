@@ -4,21 +4,25 @@
     {
       "file": "e2e/auth.e2e.ts",
       "project": "chromium",
+      "phase": "proxy",
       "title": "anonymous protected routes redirect to login"
     },
     {
       "file": "e2e/auth.e2e.ts",
       "project": "chromium",
+      "phase": "proxy",
       "title": "registration logout and login traverse the real stack"
     },
     {
       "file": "e2e/auth.e2e.ts",
       "project": "chromium",
+      "phase": "proxy",
       "title": "an expired signed session receives 401 and clears stored authentication"
     },
     {
       "file": "e2e/run-suite.e2e.ts",
       "project": "chromium",
+      "phase": "direct",
       "title": "persisted Run Suite configuration queues a run and loads its result"
     }
   ]

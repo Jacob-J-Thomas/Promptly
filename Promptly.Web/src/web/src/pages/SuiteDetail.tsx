@@ -41,8 +41,8 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { suitesApi, type TestSuite } from '../api/suites';
 import { testsApi, type TestCase } from '../api/tests';
-import { runsApi } from '../api/runs';
 import { Layout } from '../components/Layout';
+import { RunConfigDialog } from '../components/RunConfigDialog';
 import { getApiErrorMessage } from '../api/errors';
 
 export const SuiteDetail: React.FC = () => {
@@ -325,6 +325,7 @@ export const SuiteDetail: React.FC = () => {
           <RunConfigDialog
             open={runDialogOpen}
             onClose={() => setRunDialogOpen(false)}
+            projectId={suite?.projectId ?? ''}
             suiteId={suiteId!}
             onRunStarted={(runId) => navigate(`/runs/${runId}`)}
           />
@@ -345,77 +346,6 @@ export const SuiteDetail: React.FC = () => {
         </Box>
       </Container>
     </Layout>
-  );
-};
-
-// Run Configuration Dialog Component
-interface RunConfigDialogProps {
-  open: boolean;
-  onClose: () => void;
-  suiteId: string;
-  onRunStarted: (runId: string) => void;
-}
-
-const RunConfigDialog: React.FC<RunConfigDialogProps> = ({ open, onClose, suiteId, onRunStarted }) => {
-  const selectedEnv = '';
-  const selectedEndpoint = '';
-  const selectedMapping = '';
-  const [gitCommit, setGitCommit] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // TODO: Load environments, endpoints, and mappings
-
-  const handleStartRun = async () => {
-    try {
-      setLoading(true);
-      const run = await runsApi.queue({
-        suiteId,
-        environmentId: selectedEnv,
-        endpointId: selectedEndpoint,
-        mappingSpecId: selectedMapping,
-        gitCommitHash: gitCommit || undefined,
-      });
-      onRunStarted(run.id);
-      onClose();
-    } catch (err) {
-      console.error('Failed to start run:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Run Test Suite</DialogTitle>
-      <DialogContent>
-        <Box sx={{ pt: 2 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Configure the test run by selecting an environment, endpoint, and mapping spec.
-          </Typography>
-          <Typography variant="body2" color="info.main">
-            Note: Environment/endpoint/mapping selection UI coming soon.
-            This is a placeholder dialog.
-          </Typography>
-          <TextField
-            fullWidth
-            label="Git Commit Hash (optional)"
-            value={gitCommit}
-            onChange={(e) => setGitCommit(e.target.value)}
-            sx={{ mt: 2 }}
-          />
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          onClick={handleStartRun}
-          disabled={loading || !selectedEnv || !selectedEndpoint || !selectedMapping}
-        >
-          Start Run
-        </Button>
-      </DialogActions>
-    </Dialog>
   );
 };
 

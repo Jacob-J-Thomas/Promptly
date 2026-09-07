@@ -41,9 +41,10 @@ repair is verified:
 
 1. Every request that reads or mutates project data is tenant-scoped and
    authenticated through the supported JWT or project API-key path.
-2. Environment headers and other credentials remain protected at rest and
-   never appear in logs, test fixtures, screenshots, issue bodies, or stored
-   raw-response evidence.
+2. Real environment headers and reusable credentials remain protected at rest
+   and never appear in retained logs, test fixtures, screenshots, issue bodies,
+   or raw-response evidence. Inert synthetic placeholders accepted by no real
+   service may be used in isolated tests and clearly identified QA evidence.
 3. A saved mapping specification is the runtime contract. The run path must
    not ask an LLM to guess a response shape on every request.
 4. Deterministic expectations execute in the control plane. Judge and

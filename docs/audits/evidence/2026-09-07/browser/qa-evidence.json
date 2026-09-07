@@ -4,83 +4,134 @@
     "frontend": "http://localhost:3000",
     "mainSha": "849a00b113ae694f3e8997b212e7e8786378ad0c",
     "scope": "UI-only browser probes; fixture-backed authenticated routes; no backend/integration/acceptance claim",
-    "note": "Authenticated routes use browser-intercepted fixtures. Even steps called pass establish UI behavior only; no API persistence or integration acceptance."
+    "note": "Authenticated routes use browser-intercepted fixtures. Even steps called pass establish UI behavior only; no API persistence or integration acceptance.",
+    "capturedUtcWindow": "2026-09-07T21:31:27Z/2026-09-07T21:45:00Z",
+    "runner": "Playwright CLI 0.1.18, headed isolated session promptly-qa",
+    "browserBuild": "Not captured; do not use this discovery run as a release acceptance receipt",
+    "networkEvidence": "Browser connection-refused console lines and route fixture behavior; no HAR retained"
   },
   "steps": [
     {
       "name": "protected-root",
       "result": "pass",
-      "observed": "GET / redirects unauthenticated user to /login"
+      "observed": "GET / redirects unauthenticated user to /login",
+      "artifacts": [
+        "login.png"
+      ]
     },
     {
       "name": "login-unreachable-api",
       "result": "fail",
-      "observed": "POST http://localhost:5000/api/auth/login ERR_CONNECTION_REFUSED; visible alert is generic Login failed. Please check your credentials."
+      "observed": "POST http://localhost:5000/api/auth/login ERR_CONNECTION_REFUSED; visible alert is generic Login failed. Please check your credentials.",
+      "artifacts": [
+        "console-snippets.txt"
+      ]
     },
     {
       "name": "registration-validation",
       "result": "pass",
-      "observed": "Mismatch and under-8 password alerts render client-side"
+      "observed": "Mismatch and under-8 password alerts render client-side",
+      "artifacts": [],
+      "evidenceLimit": "Driver observation recorded here; no separate per-step artifact retained."
     },
     {
       "name": "registration-unreachable-api",
       "result": "fail",
-      "observed": "POST http://localhost:5000/api/auth/register ERR_CONNECTION_REFUSED; visible alert is generic Registration failed. Please try again."
+      "observed": "POST http://localhost:5000/api/auth/register ERR_CONNECTION_REFUSED; visible alert is generic Registration failed. Please try again.",
+      "artifacts": [
+        "console-snippets.txt"
+      ]
     },
     {
       "name": "projects",
       "result": "pass",
-      "observed": "Fixture project list, create dialog and required name validation render"
+      "observed": "Fixture project list, create dialog and required name validation render",
+      "artifacts": [],
+      "evidenceLimit": "Driver observation recorded here; no separate per-step artifact retained."
     },
     {
       "name": "environment-server-dto",
       "result": "fail",
-      "observed": "Fixture actual server shape {hasHeaders:true, headers:{...}} renders No custom headers configured because UI reads headersEncrypted"
+      "observed": "Fixture actual server shape {hasHeaders:true, headers:{...}} renders No custom headers configured because UI reads headersEncrypted",
+      "artifacts": [
+        "environment-detail-loaded.png"
+      ]
     },
     {
       "name": "mapping-wizard",
       "result": "pass",
-      "observed": "Required endpoint/sample validation, proposal, Monaco edit-preview, validate, save/default calls and close all exercised with fixtures"
+      "observed": "Required endpoint/sample validation, proposal, Monaco edit-preview, validate, save/default calls and close all exercised with fixtures",
+      "artifacts": [
+        "wizard-step0.png",
+        "wizard-edit-preview.png",
+        "wizard-save-finalize.png"
+      ]
     },
     {
       "name": "suite-create-test",
       "result": "partial",
-      "observed": "Dialog disables empty Create; valid UI create sends fixed inputSpecJson={messages:[]} and expectationsJson=[] with no editable input/expectation fields"
+      "observed": "Dialog disables empty Create; valid UI create sends fixed inputSpecJson={messages:[]} and expectationsJson=[] with no editable input/expectation fields",
+      "artifacts": [
+        "create-test-dialog-empty.png",
+        "install-fixtures.js"
+      ]
     },
     {
       "name": "suite-edit-test",
       "result": "fail",
-      "observed": "Edit menu item closes with no dialog/navigation; console logs Edit test only (source TODO)"
+      "observed": "Edit menu item closes with no dialog/navigation; console logs Edit test only (source TODO)",
+      "artifacts": [
+        "console-snippets.txt"
+      ]
     },
     {
       "name": "suite-import-export",
       "result": "pass",
-      "observed": "YAML upload POST returned 200 and export downloaded YAML"
+      "observed": "YAML upload POST returned 200 and export downloaded YAML",
+      "artifacts": [
+        "import-fixture.yaml",
+        "exported-tests.yaml"
+      ]
     },
     {
       "name": "run-config",
       "result": "fail",
-      "observed": "Run dialog explicitly placeholder; environment/endpoint/mapping arrays never loaded; Start Run disabled permanently"
+      "observed": "Run dialog explicitly placeholder; environment/endpoint/mapping arrays never loaded; Start Run disabled permanently",
+      "artifacts": [
+        "run-dialog.png"
+      ]
     },
     {
       "name": "run-history-server-enum",
       "result": "fail",
-      "observed": "Actual server enum numeric status=2 crashes RunsList with TypeError status.toLowerCase is not a function"
+      "observed": "Actual server enum numeric status=2 crashes RunsList with TypeError status.toLowerCase is not a function",
+      "artifacts": [
+        "console-snippets.txt"
+      ]
     },
     {
       "name": "run-detail-server-dto",
       "result": "fail",
-      "observed": "Actual numeric statuses render 2 and 0 instead of labels/icons; actual result DTO has metricsJson/failureReasonsJson, while UI expects expectationResultsJson/failureReason; expectations render / NaN"
+      "observed": "Actual numeric statuses render 2 and 0 instead of labels/icons; actual result DTO has metricsJson/failureReasonsJson, while UI expects expectationResultsJson/failureReason; expectations render / NaN",
+      "artifacts": [
+        "run-detail-server-dto.png"
+      ]
     },
     {
       "name": "desktop-layout",
       "result": "fail",
-      "observed": "At viewport 1200x829 body width=1200 but #root width=424.8125; large blank area on right, starter body flex/#root CSS cause"
+      "observed": "At viewport 1200x829 body width=1200 but #root width=424.8125; large blank area on right, starter body flex/#root CSS cause",
+      "artifacts": [
+        "suite-detail.png"
+      ]
     },
     {
       "name": "mobile-keyboard",
       "result": "pass",
-      "observed": "390x844 login fits viewport; tab order email -> password -> submit -> signup; root width=390"
+      "observed": "390x844 login fits viewport; tab order email -> password -> submit -> signup; root width=390",
+      "artifacts": [
+        "login-mobile.png"
+      ]
     }
   ],
   "artifacts": [
@@ -97,7 +148,9 @@
     "login-mobile.png",
     "exported-tests.yaml",
     "import-fixture.yaml",
-    "install-fixtures.js"
+    "install-fixtures.js",
+    "console-snippets.txt",
+    "commands-and-environment.md"
   ],
   "classification": {
     "existingIssueCandidates": [

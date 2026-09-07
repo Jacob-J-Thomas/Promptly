@@ -58,8 +58,11 @@ product issues.
 
 ## Findings and existing ownership
 
-These are deduplicated root-cause groups, not 15 new tickets. Source findings
-are explicitly different from executed reproductions.
+These are grouped observations reconciled with existing issues, not 15 new
+tickets or a claim that each row is one fix. Related mechanisms require
+separate checks before their shared issue can close; none closes here. The
+source JSON separates inherited tracker priority from this audit's assessment.
+Source findings are explicitly different from executed reproductions.
 
 | User impact | Evidence class | Existing issue / candidate |
 | --- | --- | --- |

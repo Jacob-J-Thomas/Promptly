@@ -1,0 +1,29 @@
+Sanitized excerpts from Playwright console session begun 2026-09-07T21:33:13.939Z. Milliseconds are relative to session start. Fixture accounts and resource IDs only; no authenticated live backend traffic.
+
+[   20731ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5000/api/auth/login:0
+[   76649ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5000/api/auth/register:0
+[  200197ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5000/api/projects:0
+[  200197ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5000/api/projects:0
+[  201378ms] [WARNING] MUI Grid: The `item` prop has been removed and is no longer necessary. You can safely remove it.
+[  201378ms] [WARNING] MUI Grid: The `xs` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  201378ms] [WARNING] MUI Grid: The `md` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  201378ms] [WARNING] MUI Grid: The `lg` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  255542ms] [WARNING] Blocked aria-hidden on an element because its descendant retained focus.
+[  307198ms] [WARNING] MUI Grid: The `item` prop has been removed and is no longer necessary. You can safely remove it.
+[  307198ms] [WARNING] MUI Grid: The `xs` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  307198ms] [WARNING] MUI Grid: The `md` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  307198ms] [WARNING] MUI Grid: The `lg` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  381825ms] [WARNING] MUI Grid: The `item` prop has been removed and is no longer necessary. You can safely remove it.
+[  381825ms] [WARNING] MUI Grid: The `xs` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  381825ms] [WARNING] MUI Grid: The `sm` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  402508ms] [WARNING] Blocked aria-hidden on an element because its descendant retained focus.
+[  444871ms] [LOG] Edit test: 66666666-6666-4666-8666-666666666666 @ http://localhost:3000/src/pages/SuiteDetail.tsx:96
+[  646865ms] [WARNING] MUI Grid: The `item` prop has been removed and is no longer necessary. You can safely remove it.
+[  646865ms] [WARNING] MUI Grid: The `xs` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  646866ms] [WARNING] MUI Grid: The `md` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  646866ms] [WARNING] MUI Grid: The `lg` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  655395ms] TypeError: status.toLowerCase is not a function
+[  695238ms] [WARNING] MUI Grid: The `item` prop has been removed and is no longer necessary. You can safely remove it.
+[  695238ms] [WARNING] MUI Grid: The `xs` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  695238ms] [WARNING] MUI Grid: The `md` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.
+[  695238ms] [WARNING] MUI Grid: The `lg` prop has been removed. See https://mui.com/material-ui/migration/upgrade-to-grid-v2/ for migration instructions.

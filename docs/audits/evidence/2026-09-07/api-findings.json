@@ -3,28 +3,258 @@
   "head": "849a00b113ae694f3e8997b212e7e8786378ad0c",
   "scope": "read-only API/application/worker/SDK/CLI QA",
   "findings": [
-    {"id":"worker-entrypoint-empty","status":"confirmed_source","priority":"P0","existing_issue":[25],"evidence":["Promptly.Worker/main.py:0 bytes","Promptly.Worker/Dockerfile:18"]},
-    {"id":"nested-resource-no-tenant-scope","status":"confirmed_source","priority":"P0","existing_issue":[26],"evidence":["Promptly.Server/Controllers/EnvironmentsController.cs:52-75","Promptly.Application/Services/EnvironmentService.cs:27-135","Promptly.Application/Services/EndpointService.cs:20-97","Promptly.Application/Services/MappingService.cs:441-514","Promptly.Application/Services/TestSuiteService.cs:39-82","Promptly.Application/Services/TestCaseService.cs:49-102"]},
-    {"id":"run-graph-unvalidated","status":"confirmed_source","priority":"P0","existing_issue":[27],"evidence":["Promptly.Application/Services/TestRunService.cs:21-45"]},
-    {"id":"endpoint-ssrf","status":"confirmed_source","priority":"P0","existing_issue":[28],"evidence":["Promptly.Application/Services/EndpointExecutor.cs:63-104"]},
-    {"id":"api-key-path-unusable","status":"confirmed_source","priority":"P0","existing_issue":[37,40],"evidence":["Promptly.Server/Program.cs:72-92","Promptly.Infrastructure/Security/ApiKeyAuthenticationHandler.cs:15-30","Promptly.Sdk.DotNet/PromptlyClient.cs:30","no API-key controller found"]},
-    {"id":"endpoint-method-contract-drift","status":"confirmed_source","priority":"P0","existing_issue":[37],"evidence":["Promptly.Web/src/web/src/components/MappingWizard.tsx:129-134","Promptly.Server/Models/EndpointModels.cs:5-30","Promptly.Web/src/web/src/api/endpoints.ts:3-19"]},
-    {"id":"sdk-cli-base-path-drift","status":"confirmed_source","priority":"P0","existing_issue":[37,40],"evidence":["Promptly.Sdk.DotNet/PromptlyClient.cs:14-17,60-68","README.md:287-298"]},
-    {"id":"queue-claim-race","status":"confirmed_source","priority":"P1","existing_issue":[38],"evidence":["Promptly.Application/Services/TestRunService.cs:82-117","Promptly.Server/Services/TestRunWorkerService.cs:42-64"]},
-    {"id":"vacuous-and-error-evaluation","status":"confirmed_source","priority":"P1","existing_issue":[41],"evidence":["Promptly.Application/Services/TestRunProcessor.cs:224-237","Promptly.Worker/routers/evaluation.py:148-153,175-179,228-233","Promptly.Application/Services/ExpectationEvaluator.cs:253-291"]},
-    {"id":"summary-metrics-zero","status":"confirmed_source","priority":"P1","existing_issue":[42],"evidence":["Promptly.Application/Services/TestRunProcessor.cs:98-115,221-222"]},
-    {"id":"weak-test-yaml-validation","status":"confirmed_source","priority":"P1","existing_issue":[44],"evidence":["Promptly.Server/Models/TestModels.cs:27-43","Promptly.Server/Controllers/TestsController.cs:30-68","Promptly.Infrastructure/Services/YamlService.cs:28-31"]},
-    {"id":"mapping-silent-empty-and-case-drift","status":"confirmed_source","priority":"P1","existing_issue":[41,44],"evidence":["Promptly.Application/Services/MappingService.cs:35-105","README.md:246-274"]},
-    {"id":"regex-no-timeout","status":"confirmed_source","priority":"P1","existing_issue":[31],"evidence":["Promptly.Application/Services/ExpectationEvaluator.cs:120-157,183-227"]},
-    {"id":"http-method-semantics-ambiguous","status":"confirmed_source","priority":"P2","existing_issue":[43],"evidence":["Promptly.Application/Services/EndpointExecutor.cs:89-104","Promptly.Server/Models/EndpointModels.cs:5-30"]},
-    {"id":"display-name-not-persisted","status":"confirmed_source","priority":"P2","existing_issue":[45],"evidence":["Promptly.Server/Controllers/AuthController.cs:48-70,104-115","Promptly.Domain/Entities/User.cs:5-11"]}
+    {
+      "id": "worker-entrypoint-empty",
+      "status": "confirmed_source",
+      "priority": "P0",
+      "existing_issue": [
+        25
+      ],
+      "evidence": [
+        "Promptly.Worker/main.py:0 bytes",
+        "Promptly.Worker/Dockerfile:18"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "nested-resource-no-tenant-scope",
+      "status": "confirmed_source",
+      "priority": "P0",
+      "existing_issue": [
+        26
+      ],
+      "evidence": [
+        "Promptly.Server/Controllers/EnvironmentsController.cs:52-75",
+        "Promptly.Application/Services/EnvironmentService.cs:27-135",
+        "Promptly.Application/Services/EndpointService.cs:20-97",
+        "Promptly.Application/Services/MappingService.cs:441-514",
+        "Promptly.Application/Services/TestSuiteService.cs:39-82",
+        "Promptly.Application/Services/TestCaseService.cs:49-102"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "run-graph-unvalidated",
+      "status": "confirmed_source",
+      "priority": "P0",
+      "existing_issue": [
+        27
+      ],
+      "evidence": [
+        "Promptly.Application/Services/TestRunService.cs:21-45"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "endpoint-ssrf",
+      "status": "confirmed_source",
+      "priority": "P0",
+      "existing_issue": [
+        28
+      ],
+      "evidence": [
+        "Promptly.Application/Services/EndpointExecutor.cs:63-104"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "api-key-path-unusable",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        37,
+        40
+      ],
+      "evidence": [
+        "Promptly.Server/Program.cs:72-92",
+        "Promptly.Infrastructure/Security/ApiKeyAuthenticationHandler.cs:15-30",
+        "Promptly.Sdk.DotNet/PromptlyClient.cs:30",
+        "no API-key controller found"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "endpoint-method-contract-drift",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        37
+      ],
+      "evidence": [
+        "Promptly.Web/src/web/src/components/MappingWizard.tsx:129-134",
+        "Promptly.Server/Models/EndpointModels.cs:5-30",
+        "Promptly.Web/src/web/src/api/endpoints.ts:3-19"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "sdk-cli-base-path-drift",
+      "status": "confirmed_source",
+      "priority": "P2",
+      "existing_issue": [
+        37,
+        40
+      ],
+      "evidence": [
+        "Promptly.Sdk.DotNet/PromptlyClient.cs:14-17,60-68",
+        "README.md:287-298"
+      ],
+      "trackerPriority": "P0"
+    },
+    {
+      "id": "queue-claim-race",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        38
+      ],
+      "evidence": [
+        "Promptly.Application/Services/TestRunService.cs:82-117",
+        "Promptly.Server/Services/TestRunWorkerService.cs:42-64"
+      ],
+      "trackerPriority": "P1"
+    },
+    {
+      "id": "vacuous-and-error-evaluation",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        41
+      ],
+      "evidence": [
+        "Promptly.Application/Services/TestRunProcessor.cs:224-237",
+        "Promptly.Worker/routers/evaluation.py:148-153,175-179,228-233",
+        "Promptly.Application/Services/ExpectationEvaluator.cs:253-291"
+      ],
+      "trackerPriority": "P1",
+      "mechanisms": [
+        "Zero expectations can pass",
+        "Provider errors returned as scores",
+        "Missing grounding evidence treated as success",
+        "Exact sequence flag ignored by prefix comparison"
+      ]
+    },
+    {
+      "id": "summary-metrics-zero",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        42
+      ],
+      "evidence": [
+        "Promptly.Application/Services/TestRunProcessor.cs:98-115,221-222"
+      ],
+      "trackerPriority": "P1",
+      "mechanisms": [
+        "Stored trace and aggregate key casing disagree",
+        "Actual endpoint latency not captured for aggregation"
+      ]
+    },
+    {
+      "id": "weak-test-yaml-validation",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        44
+      ],
+      "evidence": [
+        "Promptly.Application/Models/TestModels.cs:27-43",
+        "Promptly.Server/Controllers/TestsController.cs:30-68",
+        "Promptly.Infrastructure/Services/YamlService.cs:28-31"
+      ],
+      "trackerPriority": "P1",
+      "mechanisms": [
+        "Malformed/missing input and expectation fields accepted",
+        "Duplicate ExternalId constraint failures lack actionable import errors"
+      ]
+    },
+    {
+      "id": "mapping-silent-empty-and-case-drift",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        1,
+        37
+      ],
+      "evidence": [
+        "Promptly.Application/Services/MappingService.cs:35-105",
+        "README.md:246-274"
+      ],
+      "trackerPriority": "P1",
+      "mechanisms": [
+        "Case-sensitive mapping deserialization can omit camelCase sections",
+        "Unmatched messages path returns before fallback",
+        "Invalid paths can yield a successful empty trace"
+      ]
+    },
+    {
+      "id": "regex-no-timeout",
+      "status": "confirmed_source",
+      "priority": "P1",
+      "existing_issue": [
+        31
+      ],
+      "evidence": [
+        "Promptly.Application/Services/ExpectationEvaluator.cs:120-157,183-227"
+      ],
+      "trackerPriority": "P1"
+    },
+    {
+      "id": "http-method-semantics-ambiguous",
+      "status": "confirmed_source",
+      "priority": "P2",
+      "existing_issue": [
+        43
+      ],
+      "evidence": [
+        "Promptly.Application/Services/EndpointExecutor.cs:89-104",
+        "Promptly.Server/Models/EndpointModels.cs:5-30"
+      ],
+      "trackerPriority": "P2"
+    },
+    {
+      "id": "display-name-not-persisted",
+      "status": "confirmed_source",
+      "priority": "P2",
+      "existing_issue": [
+        37
+      ],
+      "evidence": [
+        "Promptly.Server/Controllers/AuthController.cs:48-70,104-115",
+        "Promptly.Domain/Entities/User.cs:5-11"
+      ],
+      "trackerPriority": "P2"
+    }
   ],
   "probes": [
-    {"command":"git rev-parse HEAD","result":"849a00b113ae694f3e8997b212e7e8786378ad0c","status":"passed"},
-    {"command":"git diff --check","status":"passed"},
-    {"command":"PYTHONPYCACHEPREFIX=/private/tmp/promptly-audit-20260907/api/pycache python3 -m compileall -q Promptly.Worker","status":"passed_syntax_only"},
-    {"command":"dotnet build Promptly.Server/Promptly.Server.csproj --configuration Release --no-restore --no-incremental --warnaserror","status":"blocked_missing_assets","detail":"NETSDK1004 Promptly.Server/obj/project.assets.json absent"},
-    {"command":"cd Promptly.Web/src/web && npm run lint","status":"blocked_missing_tool","detail":"eslint: command not found"},
-    {"command":"gh issue list -R Jacob-J-Thomas/Promptly","status":"blocked_network","detail":"api.github.com unreachable; used parent issue snapshot"}
-  ]
+    {
+      "command": "git rev-parse HEAD",
+      "result": "849a00b113ae694f3e8997b212e7e8786378ad0c",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/private/tmp/promptly-audit-20260907/api/pycache python3 -m compileall -q Promptly.Worker",
+      "status": "passed_syntax_only"
+    },
+    {
+      "command": "dotnet build Promptly.Server/Promptly.Server.csproj --configuration Release --no-restore --no-incremental --warnaserror",
+      "status": "blocked_missing_assets",
+      "detail": "NETSDK1004 Promptly.Server/obj/project.assets.json absent"
+    },
+    {
+      "command": "cd Promptly.Web/src/web && npm run lint",
+      "status": "blocked_missing_tool",
+      "detail": "eslint: command not found"
+    },
+    {
+      "command": "gh issue list -R Jacob-J-Thomas/Promptly",
+      "status": "blocked_network",
+      "detail": "api.github.com unreachable; used parent issue snapshot"
+    }
+  ],
+  "priorityNote": "trackerPriority preserves the existing issue priority; priority is this audit observation assessment. Grouped mechanisms share issue ownership but require separate verification and do not imply one fix or issue closure."
 }

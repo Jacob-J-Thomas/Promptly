@@ -17,6 +17,14 @@ import aidlc_preflight  # noqa: E402
 
 
 class AidlcPreflightTests(unittest.TestCase):
+    def test_remote_credentials_do_not_enter_evidence(self) -> None:
+        self.assertEqual(
+            aidlc_preflight.redact_remote("https://user:secret@github.com/owner/repo.git?token=secret#secret"),
+            "https://github.com/owner/repo.git",
+        )
+        self.assertEqual(aidlc_preflight.redact_remote("git@github.com:owner/repo.git"), "github.com:owner/repo.git")
+        self.assertEqual(aidlc_preflight.redact_remote("https://[invalid"), "<invalid remote redacted>")
+
     def test_baseline_surfaces_missing_acceptance_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

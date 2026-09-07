@@ -1,3 +1,5 @@
+// Discovery fixture for playwright-cli run-code, AFTER navigating to http://localhost:3000/login.
+// Inert synthetic auth/header strings are not credentials accepted by any backend. API calls are intercepted.
 async page => {
   const ids = {
     project: '11111111-1111-4111-8111-111111111111',

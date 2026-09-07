@@ -16,6 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 SCHEMA_VERSION = 1
 REQUIRED_FILES = (
@@ -73,9 +74,13 @@ def discover(files: list[str], patterns: tuple[str, ...]) -> list[str]:
 
 
 def redact_remote(value: str) -> str:
-    """Remove credentials from HTTPS and scp-style Git remote strings."""
+    """Remove URL userinfo/query/fragment and scp-style remote userinfo."""
     if "://" in value:
-        return re.sub(r"(://)[^/@]+@", r"\1", value)
+        try:
+            parsed = urlsplit(value)
+            return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", ""))
+        except ValueError:
+            return "<invalid remote redacted>"
     if "@" in value and ":" in value.split("@", 1)[1]:
         return value.split("@", 1)[1]
     return value

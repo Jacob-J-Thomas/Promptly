@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ExpectationListEditor } from './ExpectationListEditor';
 import type { ExpectationDraft } from './expectationSpec';
@@ -142,7 +142,7 @@ describe('ExpectationListEditor', () => {
 
     expect(screen.getByRole('button', { name: 'Add expectation' })).toBeDisabled();
     const firstExpectation = screen.getByRole('group', { name: 'Expectation 1' });
-    expect(firstExpectation.getByRole('combobox')).toHaveAttribute('aria-disabled', 'true');
+    expect(within(firstExpectation).getByRole('combobox')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByLabelText('Text for expectation 1')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete expectation 1' })).toBeDisabled();
   });

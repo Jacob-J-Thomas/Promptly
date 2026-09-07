@@ -43,6 +43,7 @@
     "vitest": "4.1.10"
   },
   "overrides": {
+    "@humanfs/node": "0.16.8",
     "dompurify": "3.4.13"
   }
 }

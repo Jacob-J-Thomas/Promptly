@@ -43,6 +43,7 @@ public sealed class TenantOwnedQueriesTests
         var mixedRun = new TestRun
         {
             Id = Guid.NewGuid(),
+            ProjectId = graphs.OwnerPrimary.ProjectId,
             SuiteId = graphs.OwnerPrimary.TestSuiteId,
             EnvironmentId = graphs.OwnerSibling.EnvironmentId,
             EndpointId = graphs.OwnerSibling.EndpointId,
@@ -53,6 +54,7 @@ public sealed class TenantOwnedQueriesTests
         var foreignCreatorRun = new TestRun
         {
             Id = Guid.NewGuid(),
+            ProjectId = graphs.OwnerPrimary.ProjectId,
             SuiteId = graphs.OwnerPrimary.TestSuiteId,
             EnvironmentId = graphs.OwnerPrimary.EnvironmentId,
             EndpointId = graphs.OwnerPrimary.EndpointId,
@@ -265,6 +267,7 @@ public sealed class TenantOwnedQueriesTests
         var testRun = new TestRun
         {
             Id = Guid.NewGuid(),
+            ProjectId = project.Id,
             SuiteId = testSuite.Id,
             Suite = testSuite,
             EnvironmentId = environment.Id,

@@ -3,12 +3,15 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 
 namespace Promptly.Application.Services;
 
 public class EndpointExecutor : IEndpointExecutor
 {
+    public const string HttpClientName = "Promptly.EndpointExecutor";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IEncryptionService _encryptionService;
     private readonly ILogger<EndpointExecutor> _logger;
@@ -34,6 +37,20 @@ public class EndpointExecutor : IEndpointExecutor
 
         try
         {
+            if (!EndpointTargetPolicy.TryResolve(
+                    environment.BaseUrl,
+                    endpoint.Path,
+                    out var resolvedTarget,
+                    out var targetValidationError))
+            {
+                return new ExecutionResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Unsafe endpoint target: {targetValidationError}",
+                    LatencyMs = stopwatch.ElapsedMilliseconds
+                };
+            }
+
             // Parse test input
             var input = JsonSerializer.Deserialize<Dictionary<string, object>>(testCase.InputSpecJson);
             if (input == null)
@@ -61,8 +78,7 @@ public class EndpointExecutor : IEndpointExecutor
             var requestJson = JsonSerializer.Serialize(payload);
 
             // Create HTTP client
-            var httpClient = _httpClientFactory.CreateClient();
-            httpClient.BaseAddress = new Uri(environment.BaseUrl);
+            var httpClient = _httpClientFactory.CreateClient(HttpClientName);
             httpClient.Timeout = TimeSpan.FromSeconds(endpoint.TimeoutSeconds);
 
             // Add headers (decrypt first)
@@ -98,12 +114,12 @@ public class EndpointExecutor : IEndpointExecutor
                 _ => HttpMethod.Post
             };
 
-            var request = new HttpRequestMessage(httpMethod, endpoint.Path)
+            using var request = new HttpRequestMessage(httpMethod, resolvedTarget)
             {
                 Content = content
             };
 
-            var response = await httpClient.SendAsync(request, cancellationToken);
+            using var response = await httpClient.SendAsync(request, cancellationToken);
             stopwatch.Stop();
 
             var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);

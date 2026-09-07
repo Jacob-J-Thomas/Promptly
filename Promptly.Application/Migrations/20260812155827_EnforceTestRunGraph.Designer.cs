@@ -2,18 +2,21 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Promptly.Application.Data;
 
 #nullable disable
 
-namespace Promptly.Infrastructure.Migrations
+namespace Promptly.Application.Migrations
 {
     [DbContext(typeof(PromptlyDbContext))]
-    partial class PromptlyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260812155827_EnforceTestRunGraph")]
+    partial class EnforceTestRunGraph
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

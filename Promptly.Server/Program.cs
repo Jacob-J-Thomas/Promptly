@@ -130,6 +130,11 @@ builder.Services.AddScoped<IYamlService, YamlService>();
 builder.Services.AddScoped<ITestRunService, TestRunService>();
 builder.Services.AddScoped<ITestRunWorkerStore, TestRunWorkerStore>();
 builder.Services.AddScoped<IEndpointExecutor, EndpointExecutor>();
+builder.Services.AddHttpClient(EndpointExecutor.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    });
 builder.Services.AddSingleton<IBoundedRegexMatcher, BoundedRegexMatcher>();
 builder.Services.AddScoped<IExpectationEvaluator, ExpectationEvaluator>();
 builder.Services.AddScoped<ITestRunProcessor, TestRunProcessor>();

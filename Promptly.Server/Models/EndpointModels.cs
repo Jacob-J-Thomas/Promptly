@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Promptly.Application.Models;
 
 namespace Promptly.Server.Models;
 
@@ -8,6 +9,7 @@ public record CreateEndpointRequest
     public required string Name { get; init; }
 
     [Required]
+    [EndpointTarget]
     public required string Path { get; init; }
 
     public string HttpMethod { get; init; } = "POST";
@@ -22,6 +24,7 @@ public record UpdateEndpointRequest
     public required string Name { get; init; }
 
     [Required]
+    [EndpointTarget]
     public required string Path { get; init; }
 
     public string HttpMethod { get; init; } = "POST";

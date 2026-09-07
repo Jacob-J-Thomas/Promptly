@@ -45,16 +45,32 @@ public class TestRunProcessor : ITestRunProcessor
             cancellationToken.ThrowIfCancellationRequested();
             _logger.LogInformation("Starting processing for run {RunId}", runId);
 
-            // Load run details
-            var run = await _testRunWorkerStore.GetRunByIdAsync(runId);
-            if (run == null)
+            var loadResult = await _testRunWorkerStore.LoadRunForProcessingAsync(
+                runId,
+                cancellationToken);
+            if (loadResult.Status == WorkerRunLoadStatus.NotFound)
             {
                 _logger.LogError("Run {RunId} not found", runId);
                 return;
             }
 
+            if (loadResult.Status is WorkerRunLoadStatus.InvalidGraph
+                or WorkerRunLoadStatus.UnsafeEndpointTarget)
+            {
+                _logger.LogWarning(
+                    "Run {RunId} failed process-time {ValidationStatus} validation",
+                    runId,
+                    loadResult.Status);
+                return;
+            }
+
+            var run = loadResult.Run
+                ?? throw new InvalidOperationException(
+                    $"Worker run load for {runId} was ready without run data");
+
             // Load test cases
             var testCases = await _dbContext.TestCases
+                .AsNoTracking()
                 .Where(tc => tc.SuiteId == run.SuiteId)
                 .ToListAsync(cancellationToken);
 
@@ -87,7 +103,8 @@ public class TestRunProcessor : ITestRunProcessor
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var result = await ProcessTestCaseAsync(run, testCase, cancellationToken);
+                    var processedCase = await ProcessTestCaseAsync(run, testCase, cancellationToken);
+                    var result = processedCase.Result;
                     results.Add(result);
 
                     if (result.Status == TestResultStatus.Pass)
@@ -97,30 +114,12 @@ public class TestRunProcessor : ITestRunProcessor
                     else
                         totalErrors++;
 
-                    // Aggregate metrics
-                    if (!string.IsNullOrWhiteSpace(result.TraceJson))
+                    // Aggregate the typed mapping output rather than reparsing persisted JSON.
+                    if (processedCase.Usage is { } usage)
                     {
-                        try
-                        {
-                            var trace = JsonSerializer.Deserialize<Dictionary<string, object>>(result.TraceJson);
-                            if (trace != null && trace.ContainsKey("usage"))
-                            {
-                                var usage = JsonSerializer.Deserialize<Dictionary<string, object>>(trace["usage"].ToString() ?? "{}");
-                                if (usage != null)
-                                {
-                                    if (usage.ContainsKey("totalTokens") && int.TryParse(usage["totalTokens"].ToString(), out var tokens))
-                                        totalTokens += tokens;
-                                    if (usage.ContainsKey("cost") && double.TryParse(usage["cost"].ToString(), out var cost))
-                                        totalCost += cost;
-                                    if (usage.ContainsKey("latencyMs") && long.TryParse(usage["latencyMs"].ToString(), out var latency))
-                                        totalLatency += latency;
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            // Ignore parsing errors
-                        }
+                        totalTokens += usage.TotalTokens ?? 0;
+                        totalCost += (double)(usage.Cost ?? 0m);
+                        totalLatency += usage.LatencyMs ?? 0;
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -207,7 +206,7 @@ public class TestRunProcessor : ITestRunProcessor
         }
     }
 
-    private async Task<TestRunResult> ProcessTestCaseAsync(
+    private async Task<ProcessedTestCase> ProcessTestCaseAsync(
         TestRun run,
         TestCase testCase,
         CancellationToken cancellationToken)
@@ -224,16 +223,18 @@ public class TestRunProcessor : ITestRunProcessor
 
             if (!executionResult.Success || string.IsNullOrWhiteSpace(executionResult.ResponseJson))
             {
-                return new TestRunResult
-                {
-                    Id = Guid.NewGuid(),
-                    RunId = run.Id,
-                    TestCaseId = testCase.Id,
-                    Status = TestResultStatus.Error,
-                    TraceJson = "{}",
-                    FailureReasonsJson = JsonSerializer.Serialize(new[] { executionResult.ErrorMessage ?? "No response from endpoint" }),
-                    CreatedAt = DateTime.UtcNow
-                };
+                return new ProcessedTestCase(
+                    new TestRunResult
+                    {
+                        Id = Guid.NewGuid(),
+                        RunId = run.Id,
+                        TestCaseId = testCase.Id,
+                        Status = TestResultStatus.Error,
+                        TraceJson = "{}",
+                        FailureReasonsJson = JsonSerializer.Serialize(new[] { executionResult.ErrorMessage ?? "No response from endpoint" }),
+                        CreatedAt = DateTime.UtcNow
+                    },
+                    Usage: null);
             }
 
             // Step 2: Apply mapping to get CanonicalTrace
@@ -243,16 +244,18 @@ public class TestRunProcessor : ITestRunProcessor
 
             if (!mappingResult.Success || mappingResult.Trace == null)
             {
-                return new TestRunResult
-                {
-                    Id = Guid.NewGuid(),
-                    RunId = run.Id,
-                    TestCaseId = testCase.Id,
-                    Status = TestResultStatus.Error,
-                    TraceJson = "{}",
-                    FailureReasonsJson = JsonSerializer.Serialize(new[] { $"Mapping failed: {mappingResult.ErrorMessage}" }),
-                    CreatedAt = DateTime.UtcNow
-                };
+                return new ProcessedTestCase(
+                    new TestRunResult
+                    {
+                        Id = Guid.NewGuid(),
+                        RunId = run.Id,
+                        TestCaseId = testCase.Id,
+                        Status = TestResultStatus.Error,
+                        TraceJson = "{}",
+                        FailureReasonsJson = JsonSerializer.Serialize(new[] { $"Mapping failed: {mappingResult.ErrorMessage}" }),
+                        CreatedAt = DateTime.UtcNow
+                    },
+                    Usage: null);
             }
 
             var trace = mappingResult.Trace;
@@ -262,16 +265,18 @@ public class TestRunProcessor : ITestRunProcessor
             var expectations = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(testCase.ExpectationsJson);
             if (expectations == null || expectations.Count == 0)
             {
-                return new TestRunResult
-                {
-                    Id = Guid.NewGuid(),
-                    RunId = run.Id,
-                    TestCaseId = testCase.Id,
-                    Status = TestResultStatus.Pass,
-                    TraceJson = traceJson,
-                    MetricsJson = JsonSerializer.Serialize(new { passed = 0, failed = 0 }),
-                    CreatedAt = DateTime.UtcNow
-                };
+                return new ProcessedTestCase(
+                    new TestRunResult
+                    {
+                        Id = Guid.NewGuid(),
+                        RunId = run.Id,
+                        TestCaseId = testCase.Id,
+                        Status = TestResultStatus.Pass,
+                        TraceJson = traceJson,
+                        MetricsJson = JsonSerializer.Serialize(new { passed = 0, failed = 0 }),
+                        CreatedAt = DateTime.UtcNow
+                    },
+                    trace.Usage);
             }
 
             var expectationResults = new List<ExpectationResult>();
@@ -339,21 +344,23 @@ public class TestRunProcessor : ITestRunProcessor
                 expectationResults
             });
 
-            return new TestRunResult
-            {
-                Id = Guid.NewGuid(),
-                RunId = run.Id,
-                TestCaseId = testCase.Id,
-                Status = errors > 0
-                    ? TestResultStatus.Error
-                    : failed > 0
-                        ? TestResultStatus.Fail
-                        : TestResultStatus.Pass,
-                TraceJson = traceJson,
-                MetricsJson = metricsJson,
-                FailureReasonsJson = failureReasons.Count > 0 ? JsonSerializer.Serialize(failureReasons) : null,
-                CreatedAt = DateTime.UtcNow
-            };
+            return new ProcessedTestCase(
+                new TestRunResult
+                {
+                    Id = Guid.NewGuid(),
+                    RunId = run.Id,
+                    TestCaseId = testCase.Id,
+                    Status = errors > 0
+                        ? TestResultStatus.Error
+                        : failed > 0
+                            ? TestResultStatus.Fail
+                            : TestResultStatus.Pass,
+                    TraceJson = traceJson,
+                    MetricsJson = metricsJson,
+                    FailureReasonsJson = failureReasons.Count > 0 ? JsonSerializer.Serialize(failureReasons) : null,
+                    CreatedAt = DateTime.UtcNow
+                },
+                trace.Usage);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -362,18 +369,22 @@ public class TestRunProcessor : ITestRunProcessor
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing test case {TestCaseId}", testCase.Id);
-            return new TestRunResult
-            {
-                Id = Guid.NewGuid(),
-                RunId = run.Id,
-                TestCaseId = testCase.Id,
-                Status = TestResultStatus.Error,
-                TraceJson = "{}",
-                FailureReasonsJson = JsonSerializer.Serialize(new[] { $"Processing error: {ex.Message}" }),
-                CreatedAt = DateTime.UtcNow
-            };
+            return new ProcessedTestCase(
+                new TestRunResult
+                {
+                    Id = Guid.NewGuid(),
+                    RunId = run.Id,
+                    TestCaseId = testCase.Id,
+                    Status = TestResultStatus.Error,
+                    TraceJson = "{}",
+                    FailureReasonsJson = JsonSerializer.Serialize(new[] { $"Processing error: {ex.Message}" }),
+                    CreatedAt = DateTime.UtcNow
+                },
+                Usage: null);
         }
     }
+
+    private sealed record ProcessedTestCase(TestRunResult Result, Usage? Usage);
 
     private async Task<ExpectationResult> EvaluateLlmJudgeAsync(
         Dictionary<string, object> exp,

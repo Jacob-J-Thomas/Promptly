@@ -165,14 +165,18 @@ jobs:
           }
 
           $expectedApplicationSources = @(
+            "Promptly.Application/Data/ExecutableRunQueries.cs"
             "Promptly.Application/Data/TenantOwnedQueries.cs"
+            "Promptly.Application/Models/EndpointTargetPolicy.cs"
             "Promptly.Application/Services/BoundedRegexMatcher.cs"
+            "Promptly.Application/Services/EndpointExecutor.cs"
             "Promptly.Application/Services/EndpointService.cs"
             "Promptly.Application/Services/EnvironmentService.cs"
             "Promptly.Application/Services/ExpectationEvaluator.cs"
             "Promptly.Application/Services/MappingService.cs"
             "Promptly.Application/Services/ProjectService.cs"
             "Promptly.Application/Services/TestCaseService.cs"
+            "Promptly.Application/Services/TestRunProcessor.cs"
             "Promptly.Application/Services/TestRunService.cs"
             "Promptly.Application/Services/TestRunWorkerStore.cs"
             "Promptly.Application/Services/TestSuiteService.cs"
@@ -202,6 +206,7 @@ jobs:
             "Promptly.Server/Security/HttpContextTenantAccessScopeAccessor.cs"
             "Promptly.Server/Security/TenantAccessScopeFactory.cs"
             "Promptly.Server/Security/TenantAuthenticationSchemeSelector.cs"
+            "Promptly.Server/Services/TestRunWorkerService.cs"
           ) | Sort-Object
           $serverPackage = $packages |
             Where-Object { $_.name -eq "Promptly.Server" } |
@@ -231,8 +236,13 @@ jobs:
           }
 
           $requiredApplicationClasses = @(
+            "Promptly.Application.Data.ExecutableRunQueries"
             "Promptly.Application.Data.TenantOwnedQueries"
+            "Promptly.Application.Models.EndpointTargetAttribute"
+            "Promptly.Application.Models.EndpointTargetPolicy"
+            "Promptly.Application.Models.EndpointTargetValidationException"
             "Promptly.Application.Services.BoundedRegexMatcher"
+            "Promptly.Application.Services.EndpointExecutor"
             "Promptly.Application.Services.EndpointService"
             "Promptly.Application.Services.EnvironmentService"
             "Promptly.Application.Services.ExpectationEvaluator"
@@ -240,6 +250,7 @@ jobs:
             "Promptly.Application.Services.MappingSpecValidationException"
             "Promptly.Application.Services.ProjectService"
             "Promptly.Application.Services.TestCaseService"
+            "Promptly.Application.Services.TestRunProcessor"
             "Promptly.Application.Services.TestRunService"
             "Promptly.Application.Services.TestRunWorkerStore"
             "Promptly.Application.Services.TestSuiteService"
@@ -283,6 +294,7 @@ jobs:
             "Promptly.Server.Security.HttpContextTenantAccessScopeAccessor"
             "Promptly.Server.Security.TenantAccessScopeFactory"
             "Promptly.Server.Security.TenantAuthenticationSchemeSelector"
+            "Promptly.Server.Services.TestRunWorkerService"
           ) | Sort-Object
           $actualTopLevelServerClasses = @(
             $serverPackage.classes.class |

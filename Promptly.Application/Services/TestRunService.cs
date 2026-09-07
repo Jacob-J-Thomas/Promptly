@@ -28,7 +28,7 @@ public class TestRunService : ITestRunService
         string? configSnapshotJson,
         TenantAccessScope scope)
     {
-        var graphIsAuthorized = await (
+        var graph = await (
             from suite in _dbContext.TestSuites.ForTenant(scope)
             join environment in _dbContext.Environments
                 on suite.ProjectId equals environment.ProjectId
@@ -40,10 +40,23 @@ public class TestRunService : ITestRunService
                 && environment.Id == environmentId
                 && endpoint.Id == endpointId
                 && mappingSpec.Id == mappingSpecId
-            select suite.Id)
-            .AnyAsync();
+            select new
+            {
+                suite.ProjectId,
+                environment.BaseUrl,
+                endpoint.Path
+            })
+            .SingleOrDefaultAsync();
 
-        if (!graphIsAuthorized)
+        // The same query that proves ownership and graph coherence supplies the
+        // denormalized project key and the exact target pair. This rejects
+        // unsafe legacy endpoint rows before a run is persisted.
+        if (graph == null
+            || !EndpointTargetPolicy.TryResolve(
+                graph.BaseUrl,
+                graph.Path,
+                out _,
+                out _))
         {
             return null;
         }
@@ -51,6 +64,7 @@ public class TestRunService : ITestRunService
         var testRun = new TestRun
         {
             Id = Guid.NewGuid(),
+            ProjectId = graph.ProjectId,
             SuiteId = suiteId,
             EnvironmentId = environmentId,
             EndpointId = endpointId,

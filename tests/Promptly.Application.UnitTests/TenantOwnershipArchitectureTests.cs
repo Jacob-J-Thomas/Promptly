@@ -3,11 +3,14 @@ using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Promptly.Application.Data;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using Promptly.Server.Security;
+using Promptly.Server.Services;
 
 namespace Promptly.Application.UnitTests;
 
@@ -115,6 +118,51 @@ public sealed class TenantOwnershipArchitectureTests
         }
     }
 
+    [Fact]
+    public void Worker_claim_and_process_load_share_all_execution_invariants()
+    {
+        var invariant = typeof(ExecutableRunQueries).GetMethod(
+            nameof(ExecutableRunQueries.WhereExecutionGraphIsValid))!;
+        var targetPolicy = typeof(EndpointTargetPolicy).GetMethod(
+            nameof(EndpointTargetPolicy.TryResolve))!;
+        var claim = typeof(TestRunWorkerStore).GetMethod(
+            nameof(TestRunWorkerStore.ClaimNextQueuedRunAsync))!;
+        var processLoad = typeof(TestRunWorkerStore).GetMethod(
+            nameof(TestRunWorkerStore.LoadRunForProcessingAsync))!;
+        var sharedValidation = typeof(TestRunWorkerStore).GetMethod(
+            "ValidateRunForExecutionAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        AssertCallsMethod(claim, sharedValidation);
+        AssertCallsMethod(processLoad, sharedValidation);
+        AssertCallsMethod(sharedValidation, invariant);
+        AssertCallsMethod(sharedValidation, targetPolicy);
+    }
+
+    [Fact]
+    public void Executable_run_query_rejects_a_null_source()
+    {
+        IQueryable<TestRun> source = null!;
+
+        Assert.Throws<ArgumentNullException>(() =>
+            ExecutableRunQueries.WhereExecutionGraphIsValid(source));
+    }
+
+    [Fact]
+    public void Worker_uses_distinct_processor_and_claim_scopes()
+    {
+        var processNextRun = typeof(TestRunWorkerService).GetMethod(
+            "ProcessNextRunAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var createScope = typeof(ServiceProviderServiceExtensions)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Single(method => method.Name == nameof(ServiceProviderServiceExtensions.CreateScope)
+                && method.GetParameters() is [{ ParameterType: var parameterType }]
+                && parameterType == typeof(IServiceProvider));
+
+        Assert.Equal(2, CountCalls(processNextRun, createScope));
+    }
+
     private static List<Type> GetTenantControllers() =>
         typeof(Program).Assembly
             .GetTypes()
@@ -180,22 +228,58 @@ public sealed class TenantOwnershipArchitectureTests
 
     private static void AssertCallsScopeAccessor(MethodInfo action)
     {
-        var stateMachineType = action.GetCustomAttribute<AsyncStateMachineAttribute>()
-            ?.StateMachineType;
-        var implementation = stateMachineType?.GetMethod(
-            nameof(IAsyncStateMachine.MoveNext),
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            ?? action;
-        var il = implementation.GetMethodBody()?.GetILAsByteArray() ?? [];
-        var tokenBytes = BitConverter.GetBytes(ScopeAccessorMethod.MetadataToken);
-        var callsAccessor = Enumerable
-            .Range(0, Math.Max(0, il.Length - tokenBytes.Length))
-            .Any(index => (il[index] == 0x28 || il[index] == 0x6f)
-                && il.AsSpan(index + 1, tokenBytes.Length).SequenceEqual(tokenBytes));
+        var callsAccessor = CountCalls(action, ScopeAccessorMethod) > 0;
 
         Assert.True(
             callsAccessor,
             $"Tenant action {action.DeclaringType?.FullName}.{action.Name} does not call " +
             $"{nameof(ITenantAccessScopeAccessor.TryGetScope)}.");
+    }
+
+    private static void AssertCallsMethod(MethodInfo caller, MethodInfo callee)
+    {
+        Assert.True(
+            CountCalls(caller, callee) > 0,
+            $"{caller.DeclaringType?.FullName}.{caller.Name} does not call " +
+            $"{callee.DeclaringType?.FullName}.{callee.Name}.");
+    }
+
+    private static int CountCalls(MethodInfo caller, MethodInfo callee)
+    {
+        var stateMachineType = caller.GetCustomAttribute<AsyncStateMachineAttribute>()
+            ?.StateMachineType;
+        var implementation = stateMachineType?.GetMethod(
+            nameof(IAsyncStateMachine.MoveNext),
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?? caller;
+        var il = implementation.GetMethodBody()?.GetILAsByteArray() ?? [];
+        return Enumerable
+            .Range(0, Math.Max(0, il.Length - sizeof(int)))
+            .Count(index => IsCallTo(implementation, il, index, callee));
+    }
+
+    private static bool IsCallTo(
+        MethodInfo implementation,
+        byte[] il,
+        int index,
+        MethodInfo expected)
+    {
+        if (il[index] is not (0x28 or 0x6f))
+        {
+            return false;
+        }
+
+        try
+        {
+            var token = BitConverter.ToInt32(il, index + 1);
+            var called = implementation.Module.ResolveMethod(token);
+            return called is not null
+                && called.DeclaringType == expected.DeclaringType
+                && called.Name == expected.Name;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 }

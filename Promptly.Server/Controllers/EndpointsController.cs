@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Server.Models;
 using Promptly.Server.Security;
 
@@ -110,13 +111,21 @@ public class EndpointsController : ControllerBase
             return Unauthorized();
         }
 
-        var endpoint = await _endpointService.CreateEndpointAsync(
-            environmentId,
-            request.Name,
-            request.Path,
-            request.HttpMethod,
-            request.TimeoutSeconds,
-            scope);
+        Promptly.Domain.Entities.Endpoint? endpoint;
+        try
+        {
+            endpoint = await _endpointService.CreateEndpointAsync(
+                environmentId,
+                request.Name,
+                request.Path,
+                request.HttpMethod,
+                request.TimeoutSeconds,
+                scope);
+        }
+        catch (EndpointTargetValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
 
         if (endpoint == null)
         {
@@ -141,6 +150,7 @@ public class EndpointsController : ControllerBase
     /// </summary>
     [HttpPut("endpoints/{endpointId}")]
     [ProducesResponseType(typeof(EndpointResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateEndpoint(Guid endpointId, [FromBody] UpdateEndpointRequest request)
     {
@@ -154,13 +164,21 @@ public class EndpointsController : ControllerBase
             return Unauthorized();
         }
 
-        var endpoint = await _endpointService.UpdateEndpointAsync(
-            endpointId,
-            request.Name,
-            request.Path,
-            request.HttpMethod,
-            request.TimeoutSeconds,
-            scope);
+        Promptly.Domain.Entities.Endpoint? endpoint;
+        try
+        {
+            endpoint = await _endpointService.UpdateEndpointAsync(
+                endpointId,
+                request.Name,
+                request.Path,
+                request.HttpMethod,
+                request.TimeoutSeconds,
+                scope);
+        }
+        catch (EndpointTargetValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
 
         if (endpoint == null)
         {

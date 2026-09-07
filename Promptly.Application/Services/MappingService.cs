@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Promptly.Application.Data;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 using Promptly.Domain.ValueObjects;
 
@@ -900,8 +901,17 @@ public class MappingService : IMappingService
     }
 
     // MappingSpec CRUD operations
-    public async Task<MappingSpec> SaveMappingSpecAsync(Guid endpointId, string name, string specJson)
+    public async Task<MappingSpec?> SaveMappingSpecAsync(
+        Guid endpointId,
+        string name,
+        string specJson,
+        TenantAccessScope scope)
     {
+        if (!await IsOwnedEndpointAsync(endpointId, scope))
+        {
+            return null;
+        }
+
         DeserializeAndValidateMappingSpec(specJson);
         var mappingSpec = new MappingSpec
         {
@@ -920,34 +930,54 @@ public class MappingService : IMappingService
         return mappingSpec;
     }
 
-    public async Task<List<MappingSpec>> GetMappingSpecsByEndpointAsync(Guid endpointId)
+    public async Task<List<MappingSpec>?> GetMappingSpecsByEndpointAsync(
+        Guid endpointId,
+        TenantAccessScope scope)
     {
+        if (!await IsOwnedEndpointAsync(endpointId, scope))
+        {
+            return null;
+        }
+
         return await _dbContext.MappingSpecs
+            .ForTenant(scope)
             .Where(m => m.EndpointId == endpointId)
             .OrderByDescending(m => m.IsDefault)
             .ThenByDescending(m => m.CreatedAt)
             .ToListAsync();
     }
 
-    public async Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id)
-    {
-        return await _dbContext.MappingSpecs.FindAsync(id);
-    }
-
-    public async Task<MappingSpec?> GetDefaultMappingAsync(Guid endpointId)
+    public async Task<MappingSpec?> GetMappingSpecByIdAsync(
+        Guid id,
+        TenantAccessScope scope)
     {
         return await _dbContext.MappingSpecs
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(mappingSpec => mappingSpec.Id == id);
+    }
+
+    public async Task<MappingSpec?> GetDefaultMappingAsync(
+        Guid endpointId,
+        TenantAccessScope scope)
+    {
+        return await _dbContext.MappingSpecs
+            .ForTenant(scope)
             .Where(m => m.EndpointId == endpointId && m.IsDefault)
             .FirstOrDefaultAsync();
     }
 
-    public async Task<MappingSpec> UpdateMappingSpecAsync(Guid id, string name, string specJson)
+    public async Task<MappingSpec?> UpdateMappingSpecAsync(
+        Guid id,
+        string name,
+        string specJson,
+        TenantAccessScope scope)
     {
-        var mappingSpec = await _dbContext.MappingSpecs.FindAsync(id);
+        var mappingSpec = await GetMappingSpecByIdAsync(id, scope);
         if (mappingSpec == null)
         {
-            throw new InvalidOperationException($"MappingSpec with ID {id} not found");
+            return null;
         }
+
         DeserializeAndValidateMappingSpec(specJson);
 
         mappingSpec.Name = name;
@@ -959,16 +989,19 @@ public class MappingService : IMappingService
         return mappingSpec;
     }
 
-    public async Task SetDefaultMappingAsync(Guid id)
+    public async Task<bool> SetDefaultMappingAsync(
+        Guid id,
+        TenantAccessScope scope)
     {
-        var mappingSpec = await _dbContext.MappingSpecs.FindAsync(id);
+        var mappingSpec = await GetMappingSpecByIdAsync(id, scope);
         if (mappingSpec == null)
         {
-            throw new InvalidOperationException($"MappingSpec with ID {id} not found");
+            return false;
         }
 
         // Clear any existing default for this endpoint
         var existingDefaults = await _dbContext.MappingSpecs
+            .ForTenant(scope)
             .Where(m => m.EndpointId == mappingSpec.EndpointId && m.IsDefault)
             .ToListAsync();
 
@@ -982,19 +1015,30 @@ public class MappingService : IMappingService
         mappingSpec.UpdatedAt = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync();
+        return true;
     }
 
-    public async Task DeleteMappingSpecAsync(Guid id)
+    public async Task<bool> DeleteMappingSpecAsync(
+        Guid id,
+        TenantAccessScope scope)
     {
-        var mappingSpec = await _dbContext.MappingSpecs.FindAsync(id);
+        var mappingSpec = await GetMappingSpecByIdAsync(id, scope);
         if (mappingSpec == null)
         {
-            throw new InvalidOperationException($"MappingSpec with ID {id} not found");
+            return false;
         }
 
         _dbContext.MappingSpecs.Remove(mappingSpec);
         await _dbContext.SaveChangesAsync();
+        return true;
     }
+
+    private async Task<bool> IsOwnedEndpointAsync(
+        Guid endpointId,
+        TenantAccessScope scope) =>
+        await _dbContext.Endpoints
+            .ForTenant(scope)
+            .AnyAsync(endpoint => endpoint.Id == endpointId);
 }
 
 public sealed class MappingSpecValidationException : Exception

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -10,6 +11,7 @@ using Promptly.Domain.Entities;
 using Promptly.Domain.ValueObjects;
 using Promptly.Infrastructure.Clients;
 using Promptly.Server.Controllers;
+using Promptly.Server.Security;
 
 namespace Promptly.Application.UnitTests;
 
@@ -37,6 +39,7 @@ public sealed class MappingControllerWorkerFailureTests
             CreatePythonClient(new FixedResponseHandler(() => JsonResponse(
                 (HttpStatusCode)workerStatusCode,
                 """{"detail":{"error":{"message":"safe worker failure"}}}"""))),
+            new StubTenantAccessScopeAccessor(),
             NullLogger<MappingController>.Instance);
 
         var action = await controller.ProposeMapping(
@@ -77,6 +80,7 @@ public sealed class MappingControllerWorkerFailureTests
             CreatePythonClient(new FixedResponseHandler(() => JsonResponse(
                 (HttpStatusCode)workerStatusCode,
                 """{"detail":{"error":{"message":"downstream failure"}}}"""))),
+            new StubTenantAccessScopeAccessor(),
             NullLogger<MappingController>.Instance);
 
         var action = await controller.ProposeMapping(
@@ -107,6 +111,7 @@ public sealed class MappingControllerWorkerFailureTests
             new StubEndpointService(endpoint),
             CreatePythonClient(new FixedResponseHandler(
                 () => throw new HttpRequestException("secret transport detail"))),
+            new StubTenantAccessScopeAccessor(),
             NullLogger<MappingController>.Instance);
 
         var action = await controller.ProposeMapping(
@@ -124,6 +129,30 @@ public sealed class MappingControllerWorkerFailureTests
             "secret transport detail",
             body.RootElement.GetProperty("message").GetString(),
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProposeMapping_does_not_call_the_worker_for_an_inaccessible_endpoint()
+    {
+        var workerCallCount = 0;
+        var controller = new MappingController(
+            new UnusedMappingService(),
+            new StubEndpointService(endpoint: null),
+            CreatePythonClient(new FixedResponseHandler(() =>
+            {
+                workerCallCount++;
+                return JsonResponse(HttpStatusCode.OK, """{"mappingSpecJson":"{}"}""");
+            })),
+            new StubTenantAccessScopeAccessor(),
+            NullLogger<MappingController>.Instance);
+
+        var action = await controller.ProposeMapping(
+            Guid.NewGuid(),
+            new ProposeMappingRequest { SampleResponseJson = "{}" },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundObjectResult>(action);
+        Assert.Equal(0, workerCallCount);
     }
 
     private static PythonEvalClient CreatePythonClient(HttpMessageHandler handler)
@@ -144,29 +173,45 @@ public sealed class MappingControllerWorkerFailureTests
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-    private sealed class StubEndpointService(Endpoint endpoint) : IEndpointService
+    private sealed class StubEndpointService(Endpoint? endpoint) : IEndpointService
     {
-        public Task<Endpoint?> GetEndpointByIdAsync(Guid endpointId) =>
-            Task.FromResult<Endpoint?>(endpointId == endpoint.Id ? endpoint : null);
+        public Task<Endpoint?> GetEndpointByIdAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
+            Task.FromResult(endpoint != null && endpointId == endpoint.Id ? endpoint : null);
 
-        public Task<IEnumerable<Endpoint>> GetEndpointsByEnvironmentAsync(Guid environmentId) =>
+        public Task<IReadOnlyList<Endpoint>?> GetEndpointsByEnvironmentAsync(
+            Guid environmentId,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<Endpoint> CreateEndpointAsync(
+        public Task<Endpoint?> CreateEndpointAsync(
             Guid environmentId,
             string name,
             string path,
             string httpMethod,
-            int timeoutSeconds) => throw new NotSupportedException();
+            int timeoutSeconds,
+            TenantAccessScope scope) => throw new NotSupportedException();
 
         public Task<Endpoint?> UpdateEndpointAsync(
             Guid endpointId,
             string name,
             string path,
             string httpMethod,
-            int timeoutSeconds) => throw new NotSupportedException();
+            int timeoutSeconds,
+            TenantAccessScope scope) => throw new NotSupportedException();
 
-        public Task<bool> DeleteEndpointAsync(Guid endpointId) => throw new NotSupportedException();
+        public Task<bool> DeleteEndpointAsync(Guid endpointId, TenantAccessScope scope) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class StubTenantAccessScopeAccessor : ITenantAccessScopeAccessor
+    {
+        public bool TryGetScope([NotNullWhen(true)] out TenantAccessScope? scope)
+        {
+            scope = new TenantAccessScope("owner", ProjectId: null);
+            return true;
+        }
     }
 
     private sealed class FixedResponseHandler(Func<HttpResponseMessage> responseFactory)
@@ -186,26 +231,35 @@ public sealed class MappingControllerWorkerFailureTests
             string mappingSpecJson,
             string sampleResponseJson) => throw new NotSupportedException();
 
-        public Task<MappingSpec> SaveMappingSpecAsync(
+        public Task<MappingSpec?> SaveMappingSpecAsync(
             Guid endpointId,
             string name,
-            string specJson) => throw new NotSupportedException();
+            string specJson,
+            TenantAccessScope scope) => throw new NotSupportedException();
 
-        public Task<List<MappingSpec>> GetMappingSpecsByEndpointAsync(Guid endpointId) =>
+        public Task<List<MappingSpec>?> GetMappingSpecsByEndpointAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id) => throw new NotSupportedException();
-
-        public Task<MappingSpec?> GetDefaultMappingAsync(Guid endpointId) =>
+        public Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id, TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<MappingSpec> UpdateMappingSpecAsync(
+        public Task<MappingSpec?> GetDefaultMappingAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
+            throw new NotSupportedException();
+
+        public Task<MappingSpec?> UpdateMappingSpecAsync(
             Guid id,
             string name,
-            string specJson) => throw new NotSupportedException();
+            string specJson,
+            TenantAccessScope scope) => throw new NotSupportedException();
 
-        public Task SetDefaultMappingAsync(Guid id) => throw new NotSupportedException();
+        public Task<bool> SetDefaultMappingAsync(Guid id, TenantAccessScope scope) =>
+            throw new NotSupportedException();
 
-        public Task DeleteMappingSpecAsync(Guid id) => throw new NotSupportedException();
+        public Task<bool> DeleteMappingSpecAsync(Guid id, TenantAccessScope scope) =>
+            throw new NotSupportedException();
     }
 }

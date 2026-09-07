@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
 using Promptly.Application.Services;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -14,17 +15,20 @@ public class MappingController : ControllerBase
     private readonly IMappingService _mappingService;
     private readonly IEndpointService _endpointService;
     private readonly IPythonEvalClient _pythonEvalClient;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<MappingController> _logger;
 
     public MappingController(
         IMappingService mappingService,
         IEndpointService endpointService,
         IPythonEvalClient pythonEvalClient,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
         ILogger<MappingController> logger)
     {
         _mappingService = mappingService;
         _endpointService = endpointService;
         _pythonEvalClient = pythonEvalClient;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
 
@@ -39,8 +43,12 @@ public class MappingController : ControllerBase
     {
         try
         {
-            // Verify endpoint exists
-            var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId, scope);
             if (endpoint == null)
             {
                 return NotFound(new { message = "Endpoint not found" });
@@ -95,8 +103,12 @@ public class MappingController : ControllerBase
     {
         try
         {
-            // Verify endpoint exists
-            var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId, scope);
             if (endpoint == null)
             {
                 return NotFound(new { message = "Endpoint not found" });
@@ -130,18 +142,20 @@ public class MappingController : ControllerBase
     {
         try
         {
-            // Verify endpoint exists
-            var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId);
-            if (endpoint == null)
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
             {
-                return NotFound(new { message = "Endpoint not found" });
+                return Unauthorized();
             }
 
-            // Save mapping spec
             var mappingSpec = await _mappingService.SaveMappingSpecAsync(
                 endpointId,
                 request.Name,
-                request.SpecJson);
+                request.SpecJson,
+                scope);
+            if (mappingSpec == null)
+            {
+                return NotFound(new { message = "Endpoint not found" });
+            }
 
             var response = new MappingSpecResponse
             {
@@ -175,14 +189,18 @@ public class MappingController : ControllerBase
     {
         try
         {
-            // Verify endpoint exists
-            var endpoint = await _endpointService.GetEndpointByIdAsync(endpointId);
-            if (endpoint == null)
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var mappingSpecs = await _mappingService.GetMappingSpecsByEndpointAsync(
+                endpointId,
+                scope);
+            if (mappingSpecs == null)
             {
                 return NotFound(new { message = "Endpoint not found" });
             }
-
-            var mappingSpecs = await _mappingService.GetMappingSpecsByEndpointAsync(endpointId);
 
             var responses = mappingSpecs.Select(m => new MappingSpecResponse
             {
@@ -212,7 +230,12 @@ public class MappingController : ControllerBase
     {
         try
         {
-            var mappingSpec = await _mappingService.GetMappingSpecByIdAsync(id);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var mappingSpec = await _mappingService.GetMappingSpecByIdAsync(id, scope);
             if (mappingSpec == null)
             {
                 return NotFound(new { message = "Mapping spec not found" });
@@ -246,10 +269,20 @@ public class MappingController : ControllerBase
     {
         try
         {
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
             var mappingSpec = await _mappingService.UpdateMappingSpecAsync(
                 id,
                 request.Name,
-                request.SpecJson);
+                request.SpecJson,
+                scope);
+            if (mappingSpec == null)
+            {
+                return NotFound(new { message = "Mapping spec not found" });
+            }
 
             var response = new MappingSpecResponse
             {
@@ -268,10 +301,6 @@ public class MappingController : ControllerBase
         {
             return BadRequest(new { message = ex.Message, errorPath = ex.Path });
         }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update mapping spec {Id}", id);
@@ -287,12 +316,14 @@ public class MappingController : ControllerBase
     {
         try
         {
-            await _mappingService.SetDefaultMappingAsync(id);
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            return await _mappingService.SetDefaultMappingAsync(id, scope)
+                ? NoContent()
+                : NotFound(new { message = "Mapping spec not found" });
         }
         catch (Exception ex)
         {
@@ -309,12 +340,14 @@ public class MappingController : ControllerBase
     {
         try
         {
-            await _mappingService.DeleteMappingSpecAsync(id);
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            return await _mappingService.DeleteMappingSpecAsync(id, scope)
+                ? NoContent()
+                : NotFound(new { message = "Mapping spec not found" });
         }
         catch (Exception ex)
         {

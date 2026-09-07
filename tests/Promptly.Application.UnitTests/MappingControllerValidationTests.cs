@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,6 +8,7 @@ using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using Promptly.Domain.ValueObjects;
 using Promptly.Server.Controllers;
+using Promptly.Server.Security;
 
 namespace Promptly.Application.UnitTests;
 
@@ -81,51 +83,81 @@ public sealed class MappingControllerValidationTests
         Assert.Equal("messages.itemsPath", response.ErrorPath);
     }
 
+    [Fact]
+    public async Task Validate_route_does_not_evaluate_a_mapping_for_an_inaccessible_endpoint()
+    {
+        var mappingService = new ValidationMappingService();
+        var controller = CreateController(endpoint: null, mappingService);
+
+        var action = await controller.ValidateMapping(
+            Guid.NewGuid(),
+            new ValidateMappingRequest
+            {
+                MappingSpecJson = "{}",
+                SampleResponseJson = "{}"
+            });
+
+        Assert.IsType<NotFoundObjectResult>(action);
+        Assert.Equal(0, mappingService.ValidationCallCount);
+    }
+
     private static MappingController CreateController(
-        Endpoint endpoint,
+        Endpoint? endpoint,
         IMappingService mappingService) =>
         new(
             mappingService,
             new StubEndpointService(endpoint),
             new UnusedPythonEvalClient(),
+            new StubTenantAccessScopeAccessor(),
             NullLogger<MappingController>.Instance);
 
     private sealed class ValidationMappingService(MappingResult? validationResult = null)
         : IMappingService
     {
+        public int ValidationCallCount { get; private set; }
+
         public Task<MappingResult> ValidateMappingAsync(
             string mappingSpecJson,
-            string sampleResponseJson) =>
-            Task.FromResult(validationResult ?? new MappingResult { Success = true });
+            string sampleResponseJson)
+        {
+            ValidationCallCount++;
+            return Task.FromResult(validationResult ?? new MappingResult { Success = true });
+        }
 
-        public Task<MappingSpec> SaveMappingSpecAsync(
+        public Task<MappingSpec?> SaveMappingSpecAsync(
             Guid endpointId,
             string name,
-            string specJson) =>
+            string specJson,
+            TenantAccessScope scope) =>
             throw InvalidSpec();
 
-        public Task<MappingSpec> UpdateMappingSpecAsync(
+        public Task<MappingSpec?> UpdateMappingSpecAsync(
             Guid id,
             string name,
-            string specJson) =>
+            string specJson,
+            TenantAccessScope scope) =>
             throw InvalidSpec();
 
         public Task<MappingResult> ApplyMappingAsync(string mappingSpecJson, string responseJson) =>
             throw new NotSupportedException();
 
-        public Task<List<MappingSpec>> GetMappingSpecsByEndpointAsync(Guid endpointId) =>
+        public Task<List<MappingSpec>?> GetMappingSpecsByEndpointAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id) =>
+        public Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id, TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<MappingSpec?> GetDefaultMappingAsync(Guid endpointId) =>
+        public Task<MappingSpec?> GetDefaultMappingAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task SetDefaultMappingAsync(Guid id) =>
+        public Task<bool> SetDefaultMappingAsync(Guid id, TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task DeleteMappingSpecAsync(Guid id) =>
+        public Task<bool> DeleteMappingSpecAsync(Guid id, TenantAccessScope scope) =>
             throw new NotSupportedException();
 
         private static MappingSpecValidationException InvalidSpec() =>
@@ -134,20 +166,25 @@ public sealed class MappingControllerValidationTests
                 "a non-empty JSONPath is required");
     }
 
-    private sealed class StubEndpointService(Endpoint endpoint) : IEndpointService
+    private sealed class StubEndpointService(Endpoint? endpoint) : IEndpointService
     {
-        public Task<Endpoint?> GetEndpointByIdAsync(Guid endpointId) =>
-            Task.FromResult<Endpoint?>(endpointId == endpoint.Id ? endpoint : null);
+        public Task<Endpoint?> GetEndpointByIdAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
+            Task.FromResult(endpoint != null && endpointId == endpoint.Id ? endpoint : null);
 
-        public Task<IEnumerable<Endpoint>> GetEndpointsByEnvironmentAsync(Guid environmentId) =>
+        public Task<IReadOnlyList<Endpoint>?> GetEndpointsByEnvironmentAsync(
+            Guid environmentId,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<Endpoint> CreateEndpointAsync(
+        public Task<Endpoint?> CreateEndpointAsync(
             Guid environmentId,
             string name,
             string path,
             string httpMethod,
-            int timeoutSeconds) =>
+            int timeoutSeconds,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
         public Task<Endpoint?> UpdateEndpointAsync(
@@ -155,11 +192,21 @@ public sealed class MappingControllerValidationTests
             string name,
             string path,
             string httpMethod,
-            int timeoutSeconds) =>
+            int timeoutSeconds,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<bool> DeleteEndpointAsync(Guid endpointId) =>
+        public Task<bool> DeleteEndpointAsync(Guid endpointId, TenantAccessScope scope) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class StubTenantAccessScopeAccessor : ITenantAccessScopeAccessor
+    {
+        public bool TryGetScope([NotNullWhen(true)] out TenantAccessScope? scope)
+        {
+            scope = new TenantAccessScope("owner", ProjectId: null);
+            return true;
+        }
     }
 
     private sealed class UnusedPythonEvalClient : IPythonEvalClient

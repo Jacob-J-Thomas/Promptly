@@ -1,8 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Promptly.Application.Interfaces;
-using Promptly.Domain.Entities;
 using Promptly.Application.Data;
+using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
+using Promptly.Domain.Entities;
 
 namespace Promptly.Application.Services;
 
@@ -17,27 +18,44 @@ public class EndpointService : IEndpointService
         _logger = logger;
     }
 
-    public async Task<IEnumerable<Endpoint>> GetEndpointsByEnvironmentAsync(Guid environmentId)
+    public async Task<IReadOnlyList<Endpoint>?> GetEndpointsByEnvironmentAsync(
+        Guid environmentId,
+        TenantAccessScope scope)
     {
+        if (!await IsOwnedEnvironmentAsync(environmentId, scope))
+        {
+            return null;
+        }
+
         return await _dbContext.Endpoints
-            .Where(e => e.EnvironmentId == environmentId)
-            .OrderBy(e => e.Name)
+            .ForTenant(scope)
+            .Where(endpoint => endpoint.EnvironmentId == environmentId)
+            .OrderBy(endpoint => endpoint.Name)
             .ToListAsync();
     }
 
-    public async Task<Endpoint?> GetEndpointByIdAsync(Guid endpointId)
+    public async Task<Endpoint?> GetEndpointByIdAsync(
+        Guid endpointId,
+        TenantAccessScope scope)
     {
         return await _dbContext.Endpoints
-            .FirstOrDefaultAsync(e => e.Id == endpointId);
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(endpoint => endpoint.Id == endpointId);
     }
 
-    public async Task<Endpoint> CreateEndpointAsync(
+    public async Task<Endpoint?> CreateEndpointAsync(
         Guid environmentId,
         string name,
         string path,
         string httpMethod,
-        int timeoutSeconds)
+        int timeoutSeconds,
+        TenantAccessScope scope)
     {
+        if (!await IsOwnedEnvironmentAsync(environmentId, scope))
+        {
+            return null;
+        }
+
         var endpoint = new Endpoint
         {
             Id = Guid.NewGuid(),
@@ -61,9 +79,10 @@ public class EndpointService : IEndpointService
         string name,
         string path,
         string httpMethod,
-        int timeoutSeconds)
+        int timeoutSeconds,
+        TenantAccessScope scope)
     {
-        var endpoint = await GetEndpointByIdAsync(endpointId);
+        var endpoint = await GetEndpointByIdAsync(endpointId, scope);
         if (endpoint == null)
         {
             return null;
@@ -81,9 +100,9 @@ public class EndpointService : IEndpointService
         return endpoint;
     }
 
-    public async Task<bool> DeleteEndpointAsync(Guid endpointId)
+    public async Task<bool> DeleteEndpointAsync(Guid endpointId, TenantAccessScope scope)
     {
-        var endpoint = await GetEndpointByIdAsync(endpointId);
+        var endpoint = await GetEndpointByIdAsync(endpointId, scope);
         if (endpoint == null)
         {
             return false;
@@ -96,4 +115,11 @@ public class EndpointService : IEndpointService
 
         return true;
     }
+
+    private async Task<bool> IsOwnedEnvironmentAsync(
+        Guid environmentId,
+        TenantAccessScope scope) =>
+        await _dbContext.Environments
+            .ForTenant(scope)
+            .AnyAsync(environment => environment.Id == environmentId);
 }

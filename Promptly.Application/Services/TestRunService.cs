@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Promptly.Application.Data;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 using Promptly.Domain.Enums;
-using Promptly.Application.Data;
 
 namespace Promptly.Application.Services;
 
@@ -18,15 +19,35 @@ public class TestRunService : ITestRunService
         _logger = logger;
     }
 
-    public async Task<TestRun> QueueRunAsync(
+    public async Task<TestRun?> QueueRunAsync(
         Guid suiteId,
         Guid environmentId,
         Guid endpointId,
         Guid mappingSpecId,
-        string createdByUserId,
-        string? gitCommitHash = null,
-        string? configSnapshotJson = null)
+        string? gitCommitHash,
+        string? configSnapshotJson,
+        TenantAccessScope scope)
     {
+        var graphIsAuthorized = await (
+            from suite in _dbContext.TestSuites.ForTenant(scope)
+            join environment in _dbContext.Environments
+                on suite.ProjectId equals environment.ProjectId
+            join endpoint in _dbContext.Endpoints
+                on environment.Id equals endpoint.EnvironmentId
+            join mappingSpec in _dbContext.MappingSpecs
+                on endpoint.Id equals mappingSpec.EndpointId
+            where suite.Id == suiteId
+                && environment.Id == environmentId
+                && endpoint.Id == endpointId
+                && mappingSpec.Id == mappingSpecId
+            select suite.Id)
+            .AnyAsync();
+
+        if (!graphIsAuthorized)
+        {
+            return null;
+        }
+
         var testRun = new TestRun
         {
             Id = Guid.NewGuid(),
@@ -34,7 +55,7 @@ public class TestRunService : ITestRunService
             EnvironmentId = environmentId,
             EndpointId = endpointId,
             MappingSpecId = mappingSpecId,
-            CreatedByUserId = createdByUserId,
+            CreatedByUserId = scope.OwnerUserId,
             Status = TestRunStatus.Queued,
             GitCommitHash = gitCommitHash,
             ConfigSnapshotJson = configSnapshotJson,
@@ -49,9 +70,10 @@ public class TestRunService : ITestRunService
         return testRun;
     }
 
-    public async Task<TestRun?> GetRunByIdAsync(Guid runId)
+    public async Task<TestRun?> GetRunByIdAsync(Guid runId, TenantAccessScope scope)
     {
         return await _dbContext.TestRuns
+            .ForTenant(scope)
             .Include(r => r.Suite)
             .Include(r => r.Environment)
             .Include(r => r.Endpoint)
@@ -59,9 +81,22 @@ public class TestRunService : ITestRunService
             .FirstOrDefaultAsync(r => r.Id == runId);
     }
 
-    public async Task<List<TestRun>> GetRunsBySuiteAsync(Guid suiteId, TestRunStatus? status = null, int? limit = null)
+    public async Task<List<TestRun>?> GetRunsBySuiteAsync(
+        Guid suiteId,
+        TestRunStatus? status,
+        int? limit,
+        TenantAccessScope scope)
     {
+        var ownsSuite = await _dbContext.TestSuites
+            .ForTenant(scope)
+            .AnyAsync(suite => suite.Id == suiteId);
+        if (!ownsSuite)
+        {
+            return null;
+        }
+
         var query = _dbContext.TestRuns
+            .ForTenant(scope)
             .Where(r => r.SuiteId == suiteId);
 
         if (status.HasValue)
@@ -79,63 +114,36 @@ public class TestRunService : ITestRunService
         return await query.ToListAsync();
     }
 
-    public async Task<TestRun?> ClaimNextQueuedRunAsync()
+    public async Task<List<TestRunResult>?> GetRunResultsAsync(
+        Guid runId,
+        TenantAccessScope scope)
     {
-        // Use a transaction to ensure atomicity
-        using var transaction = await _dbContext.Database.BeginTransactionAsync();
-
-        try
+        var ownsRun = await _dbContext.TestRuns
+            .ForTenant(scope)
+            .AnyAsync(run => run.Id == runId);
+        if (!ownsRun)
         {
-            // Find the oldest queued run
-            var run = await _dbContext.TestRuns
-                .Where(r => r.Status == TestRunStatus.Queued)
-                .OrderBy(r => r.CreatedAt)
-                .FirstOrDefaultAsync();
-
-            if (run == null)
-            {
-                await transaction.CommitAsync();
-                return null;
-            }
-
-            // Mark as Running
-            run.Status = TestRunStatus.Running;
-            run.StartedAt = DateTime.UtcNow;
-
-            await _dbContext.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            _logger.LogInformation("Claimed test run {RunId} for processing", run.Id);
-
-            return run;
+            return null;
         }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            _logger.LogError(ex, "Failed to claim queued run");
-            throw;
-        }
+
+        return await _dbContext.TestRunResults
+            .ForTenant(scope)
+            .Include(result => result.TestCase)
+            .Where(result => result.RunId == runId)
+            .OrderBy(result => result.Status == TestResultStatus.Error ? 0
+                : result.Status == TestResultStatus.Fail ? 1 : 2)
+            .ThenBy(result => result.TestCase!.ExternalId)
+            .ToListAsync();
     }
 
-    public async Task UpdateRunStatusAsync(Guid runId, TestRunStatus status, string? summaryJson = null, string? errorMessage = null)
+    public async Task<TestRunResult?> GetRunResultAsync(
+        Guid runId,
+        Guid resultId,
+        TenantAccessScope scope)
     {
-        var run = await _dbContext.TestRuns.FindAsync(runId);
-        if (run == null)
-        {
-            throw new InvalidOperationException($"Test run with ID {runId} not found");
-        }
-
-        run.Status = status;
-        run.SummaryJson = summaryJson;
-        run.ErrorMessage = errorMessage;
-
-        if (status == TestRunStatus.Completed || status == TestRunStatus.Failed)
-        {
-            run.CompletedAt = DateTime.UtcNow;
-        }
-
-        await _dbContext.SaveChangesAsync();
-
-        _logger.LogInformation("Updated test run {RunId} status to {Status}", runId, status);
+        return await _dbContext.TestRunResults
+            .ForTenant(scope)
+            .Include(result => result.TestCase)
+            .FirstOrDefaultAsync(result => result.Id == resultId && result.RunId == runId);
     }
 }

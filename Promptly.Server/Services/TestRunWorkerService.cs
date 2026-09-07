@@ -77,13 +77,13 @@ public class TestRunWorkerService : BackgroundService
     private async Task ProcessNextRunAsync(CancellationToken stoppingToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        var testRunService = scope.ServiceProvider.GetRequiredService<ITestRunService>();
+        var testRunWorkerStore = scope.ServiceProvider.GetRequiredService<ITestRunWorkerStore>();
         var testRunProcessor = scope.ServiceProvider.GetRequiredService<ITestRunProcessor>();
 
         try
         {
             // Claim next queued run
-            var run = await testRunService.ClaimNextQueuedRunAsync();
+            var run = await testRunWorkerStore.ClaimNextQueuedRunAsync();
 
             if (run == null)
             {

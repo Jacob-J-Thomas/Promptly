@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Server.Models;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -11,16 +12,16 @@ namespace Promptly.Server.Controllers;
 public class EnvironmentsController : ControllerBase
 {
     private readonly IEnvironmentService _environmentService;
-    private readonly IProjectService _projectService;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<EnvironmentsController> _logger;
 
     public EnvironmentsController(
         IEnvironmentService environmentService,
-        IProjectService projectService,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
         ILogger<EnvironmentsController> logger)
     {
         _environmentService = environmentService;
-        _projectService = projectService;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
 
@@ -31,7 +32,19 @@ public class EnvironmentsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<EnvironmentResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetEnvironments(Guid projectId)
     {
-        var environments = await _environmentService.GetEnvironmentsByProjectAsync(projectId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var environments = await _environmentService.GetEnvironmentsByProjectAsync(
+            projectId,
+            scope);
+
+        if (environments == null)
+        {
+            return NotFound(new { message = "Project not found" });
+        }
 
         var response = environments.Select(e => new EnvironmentResponse
         {
@@ -54,14 +67,19 @@ public class EnvironmentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetEnvironment(Guid environmentId)
     {
-        var environment = await _environmentService.GetEnvironmentByIdAsync(environmentId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var environment = await _environmentService.GetEnvironmentByIdAsync(environmentId, scope);
 
         if (environment == null)
         {
             return NotFound(new { message = "Environment not found" });
         }
 
-        var headers = await _environmentService.GetDecryptedHeadersAsync(environmentId);
+        var headers = await _environmentService.GetDecryptedHeadersAsync(environmentId, scope);
 
         var response = new EnvironmentDetailResponse
         {
@@ -90,11 +108,22 @@ public class EnvironmentsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
         var environment = await _environmentService.CreateEnvironmentAsync(
             projectId,
             request.Name,
             request.BaseUrl,
-            request.Headers);
+            request.Headers,
+            scope);
+
+        if (environment == null)
+        {
+            return NotFound(new { message = "Project not found" });
+        }
 
         var response = new EnvironmentResponse
         {
@@ -122,11 +151,17 @@ public class EnvironmentsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
         var environment = await _environmentService.UpdateEnvironmentAsync(
             environmentId,
             request.Name,
             request.BaseUrl,
-            request.Headers);
+            request.Headers,
+            scope);
 
         if (environment == null)
         {
@@ -154,7 +189,12 @@ public class EnvironmentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteEnvironment(Guid environmentId)
     {
-        var deleted = await _environmentService.DeleteEnvironmentAsync(environmentId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var deleted = await _environmentService.DeleteEnvironmentAsync(environmentId, scope);
 
         if (!deleted)
         {

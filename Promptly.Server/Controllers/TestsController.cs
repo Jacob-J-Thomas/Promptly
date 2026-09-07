@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -11,16 +12,16 @@ namespace Promptly.Server.Controllers;
 public class TestsController : ControllerBase
 {
     private readonly ITestCaseService _testCaseService;
-    private readonly ITestSuiteService _testSuiteService;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<TestsController> _logger;
 
     public TestsController(
         ITestCaseService testCaseService,
-        ITestSuiteService testSuiteService,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
         ILogger<TestsController> logger)
     {
         _testCaseService = testCaseService;
-        _testSuiteService = testSuiteService;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
 
@@ -32,11 +33,9 @@ public class TestsController : ControllerBase
     {
         try
         {
-            // Verify suite exists
-            var suite = await _testSuiteService.GetTestSuiteByIdAsync(suiteId);
-            if (suite == null)
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
             {
-                return NotFound(new { message = "Test suite not found" });
+                return Unauthorized();
             }
 
             var testCase = await _testCaseService.CreateTestCaseAsync(
@@ -45,7 +44,12 @@ public class TestsController : ControllerBase
                 request.Name,
                 request.Description,
                 request.InputSpecJson,
-                request.ExpectationsJson);
+                request.ExpectationsJson,
+                scope);
+            if (testCase == null)
+            {
+                return NotFound(new { message = "Test suite not found" });
+            }
 
             var response = new TestCaseResponse
             {
@@ -76,7 +80,16 @@ public class TestsController : ControllerBase
     {
         try
         {
-            var testCases = await _testCaseService.GetTestCasesBySuiteAsync(suiteId);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var testCases = await _testCaseService.GetTestCasesBySuiteAsync(suiteId, scope);
+            if (testCases == null)
+            {
+                return NotFound(new { message = "Test suite not found" });
+            }
 
             var responses = testCases.Select(t => new TestCaseResponse
             {
@@ -107,7 +120,12 @@ public class TestsController : ControllerBase
     {
         try
         {
-            var testCase = await _testCaseService.GetTestCaseByIdAsync(id);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var testCase = await _testCaseService.GetTestCaseByIdAsync(id, scope);
             if (testCase == null)
             {
                 return NotFound(new { message = "Test case not found" });
@@ -142,13 +160,23 @@ public class TestsController : ControllerBase
     {
         try
         {
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
             var testCase = await _testCaseService.UpdateTestCaseAsync(
                 id,
                 request.ExternalId,
                 request.Name,
                 request.Description,
                 request.InputSpecJson,
-                request.ExpectationsJson);
+                request.ExpectationsJson,
+                scope);
+            if (testCase == null)
+            {
+                return NotFound(new { message = "Test case not found" });
+            }
 
             var response = new TestCaseResponse
             {
@@ -163,10 +191,6 @@ public class TestsController : ControllerBase
             };
 
             return Ok(response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -183,12 +207,14 @@ public class TestsController : ControllerBase
     {
         try
         {
-            await _testCaseService.DeleteTestCaseAsync(id);
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            return await _testCaseService.DeleteTestCaseAsync(id, scope)
+                ? NoContent()
+                : NotFound(new { message = "Test case not found" });
         }
         catch (Exception ex)
         {

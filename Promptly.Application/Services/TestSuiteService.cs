@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 using Promptly.Application.Data;
 
@@ -17,8 +18,20 @@ public class TestSuiteService : ITestSuiteService
         _logger = logger;
     }
 
-    public async Task<TestSuite> CreateTestSuiteAsync(Guid projectId, string name, string? description = null)
+    public async Task<TestSuite?> CreateTestSuiteAsync(
+        Guid projectId,
+        string name,
+        string? description,
+        TenantAccessScope scope)
     {
+        var ownsProject = await _dbContext.Projects
+            .ForTenant(scope)
+            .AnyAsync(project => project.Id == projectId);
+        if (!ownsProject)
+        {
+            return null;
+        }
+
         var testSuite = new TestSuite
         {
             Id = Guid.NewGuid(),
@@ -36,27 +49,47 @@ public class TestSuiteService : ITestSuiteService
         return testSuite;
     }
 
-    public async Task<List<TestSuite>> GetTestSuitesByProjectAsync(Guid projectId)
+    public async Task<IReadOnlyList<TestSuite>?> GetTestSuitesByProjectAsync(
+        Guid projectId,
+        TenantAccessScope scope)
     {
+        var ownsProject = await _dbContext.Projects
+            .ForTenant(scope)
+            .AnyAsync(project => project.Id == projectId);
+        if (!ownsProject)
+        {
+            return null;
+        }
+
         return await _dbContext.TestSuites
+            .ForTenant(scope)
             .Where(s => s.ProjectId == projectId)
+            .Include(s => s.TestCases)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
     }
 
-    public async Task<TestSuite?> GetTestSuiteByIdAsync(Guid id)
+    public async Task<TestSuite?> GetTestSuiteByIdAsync(Guid id, TenantAccessScope scope)
     {
         return await _dbContext.TestSuites
+            .ForTenant(scope)
             .Include(s => s.TestCases)
             .FirstOrDefaultAsync(s => s.Id == id);
     }
 
-    public async Task<TestSuite> UpdateTestSuiteAsync(Guid id, string name, string? description)
+    public async Task<TestSuite?> UpdateTestSuiteAsync(
+        Guid id,
+        string name,
+        string? description,
+        TenantAccessScope scope)
     {
-        var testSuite = await _dbContext.TestSuites.FindAsync(id);
+        var testSuite = await _dbContext.TestSuites
+            .ForTenant(scope)
+            .Include(s => s.TestCases)
+            .FirstOrDefaultAsync(s => s.Id == id);
         if (testSuite == null)
         {
-            throw new InvalidOperationException($"Test suite with ID {id} not found");
+            return null;
         }
 
         testSuite.Name = name;
@@ -69,17 +102,20 @@ public class TestSuiteService : ITestSuiteService
         return testSuite;
     }
 
-    public async Task DeleteTestSuiteAsync(Guid id)
+    public async Task<bool> DeleteTestSuiteAsync(Guid id, TenantAccessScope scope)
     {
-        var testSuite = await _dbContext.TestSuites.FindAsync(id);
+        var testSuite = await _dbContext.TestSuites
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(s => s.Id == id);
         if (testSuite == null)
         {
-            throw new InvalidOperationException($"Test suite with ID {id} not found");
+            return false;
         }
 
         _dbContext.TestSuites.Remove(testSuite);
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("Deleted test suite {SuiteId}", id);
+        return true;
     }
 }

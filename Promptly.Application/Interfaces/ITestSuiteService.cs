@@ -1,12 +1,23 @@
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 
 namespace Promptly.Application.Interfaces;
 
 public interface ITestSuiteService
 {
-    Task<TestSuite> CreateTestSuiteAsync(Guid projectId, string name, string? description = null);
-    Task<List<TestSuite>> GetTestSuitesByProjectAsync(Guid projectId);
-    Task<TestSuite?> GetTestSuiteByIdAsync(Guid id);
-    Task<TestSuite> UpdateTestSuiteAsync(Guid id, string name, string? description);
-    Task DeleteTestSuiteAsync(Guid id);
+    Task<TestSuite?> CreateTestSuiteAsync(
+        Guid projectId,
+        string name,
+        string? description,
+        TenantAccessScope scope);
+    Task<IReadOnlyList<TestSuite>?> GetTestSuitesByProjectAsync(
+        Guid projectId,
+        TenantAccessScope scope);
+    Task<TestSuite?> GetTestSuiteByIdAsync(Guid id, TenantAccessScope scope);
+    Task<TestSuite?> UpdateTestSuiteAsync(
+        Guid id,
+        string name,
+        string? description,
+        TenantAccessScope scope);
+    Task<bool> DeleteTestSuiteAsync(Guid id, TenantAccessScope scope);
 }

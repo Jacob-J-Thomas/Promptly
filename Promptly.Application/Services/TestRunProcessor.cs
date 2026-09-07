@@ -13,7 +13,7 @@ namespace Promptly.Application.Services;
 public class TestRunProcessor : ITestRunProcessor
 {
     private readonly PromptlyDbContext _dbContext;
-    private readonly ITestRunService _testRunService;
+    private readonly ITestRunWorkerStore _testRunWorkerStore;
     private readonly IEndpointExecutor _endpointExecutor;
     private readonly IMappingService _mappingService;
     private readonly IExpectationEvaluator _expectationEvaluator;
@@ -22,7 +22,7 @@ public class TestRunProcessor : ITestRunProcessor
 
     public TestRunProcessor(
         PromptlyDbContext dbContext,
-        ITestRunService testRunService,
+        ITestRunWorkerStore testRunWorkerStore,
         IEndpointExecutor endpointExecutor,
         IMappingService mappingService,
         IExpectationEvaluator expectationEvaluator,
@@ -30,7 +30,7 @@ public class TestRunProcessor : ITestRunProcessor
         ILogger<TestRunProcessor> logger)
     {
         _dbContext = dbContext;
-        _testRunService = testRunService;
+        _testRunWorkerStore = testRunWorkerStore;
         _endpointExecutor = endpointExecutor;
         _mappingService = mappingService;
         _expectationEvaluator = expectationEvaluator;
@@ -46,7 +46,7 @@ public class TestRunProcessor : ITestRunProcessor
             _logger.LogInformation("Starting processing for run {RunId}", runId);
 
             // Load run details
-            var run = await _testRunService.GetRunByIdAsync(runId);
+            var run = await _testRunWorkerStore.GetRunByIdAsync(runId);
             if (run == null)
             {
                 _logger.LogError("Run {RunId} not found", runId);
@@ -60,7 +60,7 @@ public class TestRunProcessor : ITestRunProcessor
 
             if (testCases.Count == 0)
             {
-                await _testRunService.UpdateRunStatusAsync(
+                await _testRunWorkerStore.UpdateRunStatusAsync(
                     runId,
                     TestRunStatus.Failed,
                     errorMessage: "No test cases found in suite");
@@ -70,7 +70,7 @@ public class TestRunProcessor : ITestRunProcessor
             // Update status to Running (if not already)
             if (run.Status != TestRunStatus.Running)
             {
-                await _testRunService.UpdateRunStatusAsync(runId, TestRunStatus.Running);
+                await _testRunWorkerStore.UpdateRunStatusAsync(runId, TestRunStatus.Running);
             }
 
             // Process each test case
@@ -168,7 +168,10 @@ public class TestRunProcessor : ITestRunProcessor
             var summaryJson = JsonSerializer.Serialize(summary);
 
             // Update run status
-            await _testRunService.UpdateRunStatusAsync(runId, TestRunStatus.Completed, summaryJson);
+            await _testRunWorkerStore.UpdateRunStatusAsync(
+                runId,
+                TestRunStatus.Completed,
+                summaryJson);
 
             _logger.LogInformation(
                 "Completed run {RunId}: {Passed}/{Total} passed, {Failed} failed, {Errors} errors",
@@ -179,7 +182,7 @@ public class TestRunProcessor : ITestRunProcessor
             _logger.LogInformation("Run {RunId} was cancelled before completion", runId);
             try
             {
-                await _testRunService.UpdateRunStatusAsync(
+                await _testRunWorkerStore.UpdateRunStatusAsync(
                     runId,
                     TestRunStatus.Failed,
                     errorMessage: "Run processing was cancelled before completion");
@@ -197,7 +200,7 @@ public class TestRunProcessor : ITestRunProcessor
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fatal error processing run {RunId}", runId);
-            await _testRunService.UpdateRunStatusAsync(
+            await _testRunWorkerStore.UpdateRunStatusAsync(
                 runId,
                 TestRunStatus.Failed,
                 errorMessage: $"Fatal processing error: {ex.Message}");

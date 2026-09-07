@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Data;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using Promptly.Domain.Enums;
@@ -33,10 +34,10 @@ public sealed class TestRunProcessorTests
         dbContext.TestCases.Add(testCase);
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var processor = CreateProcessor(
             dbContext,
-            runService,
+            runStore,
             new StubExpectationEvaluator(new ExpectationResult
             {
                 ExpectationType = "regex_match",
@@ -63,7 +64,7 @@ public sealed class TestRunProcessorTests
                 .GetProperty("ErrorCode")
                 .GetString());
         Assert.Contains("regex_timeout", storedResult.FailureReasonsJson, StringComparison.Ordinal);
-        Assert.Equal(TestRunStatus.Completed, runService.StatusUpdates[^1].Status);
+        Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
     }
 
     [Fact]
@@ -87,10 +88,10 @@ public sealed class TestRunProcessorTests
     {
         await using var dbContext = CreateDbContext();
         var runId = Guid.NewGuid();
-        var runService = new StubTestRunService(CreateRun(runId, Guid.NewGuid()));
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, Guid.NewGuid()));
         var processor = CreateProcessor(
             dbContext,
-            runService,
+            runStore,
             new StubExpectationEvaluator(new ExpectationResult
             {
                 ExpectationType = "contains_text",
@@ -104,7 +105,7 @@ public sealed class TestRunProcessorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             ProcessWithCancellationAsync(processor, runId, cancellation.Token));
 
-        var update = Assert.Single(runService.StatusUpdates);
+        var update = Assert.Single(runStore.StatusUpdates);
         Assert.Equal(TestRunStatus.Failed, update.Status);
         Assert.Contains("cancelled", update.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
@@ -117,11 +118,11 @@ public sealed class TestRunProcessorTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(suiteId, "[]"));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var endpointExecutor = new BlockingEndpointExecutor();
         var processor = CreateProcessor(
             dbContext,
-            runService,
+            runStore,
             new StubExpectationEvaluator(UnusedExpectationResult()),
             endpointExecutor: endpointExecutor);
         using var cancellation = new CancellationTokenSource();
@@ -132,7 +133,7 @@ public sealed class TestRunProcessorTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
         Assert.Equal(cancellation.Token, endpointExecutor.ObservedCancellationToken);
-        Assert.Equal(TestRunStatus.Failed, Assert.Single(runService.StatusUpdates).Status);
+        Assert.Equal(TestRunStatus.Failed, Assert.Single(runStore.StatusUpdates).Status);
     }
 
     [Theory]
@@ -148,11 +149,11 @@ public sealed class TestRunProcessorTests
             suiteId,
             JsonSerializer.Serialize(new[] { new { type = expectationType } })));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var pythonEvalClient = new BlockingPythonEvalClient(expectationType);
         var processor = CreateProcessor(
             dbContext,
-            runService,
+            runStore,
             new StubExpectationEvaluator(UnusedExpectationResult()),
             pythonEvalClient: pythonEvalClient);
         using var cancellation = new CancellationTokenSource();
@@ -163,7 +164,7 @@ public sealed class TestRunProcessorTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
         Assert.Equal(cancellation.Token, pythonEvalClient.ObservedCancellationToken);
-        Assert.Equal(TestRunStatus.Failed, Assert.Single(runService.StatusUpdates).Status);
+        Assert.Equal(TestRunStatus.Failed, Assert.Single(runStore.StatusUpdates).Status);
     }
 
     [Theory]
@@ -179,10 +180,10 @@ public sealed class TestRunProcessorTests
             suiteId,
             JsonSerializer.Serialize(new[] { new { type = expectationType } })));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var runService = new StubTestRunService(CreateRun(runId, suiteId));
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var processor = CreateProcessor(
             dbContext,
-            runService,
+            runStore,
             new StubExpectationEvaluator(UnusedExpectationResult()),
             pythonEvalClient: new FailingPythonEvalClient(
                 expectationType,
@@ -224,14 +225,14 @@ public sealed class TestRunProcessorTests
 
     private static TestRunProcessor CreateProcessor(
         PromptlyDbContext dbContext,
-        ITestRunService testRunService,
+        ITestRunWorkerStore testRunWorkerStore,
         IExpectationEvaluator expectationEvaluator,
         IEndpointExecutor? endpointExecutor = null,
         IPythonEvalClient? pythonEvalClient = null)
     {
         return new TestRunProcessor(
             dbContext,
-            testRunService,
+            testRunWorkerStore,
             endpointExecutor ?? new StubEndpointExecutor(),
             new StubMappingService(),
             expectationEvaluator,
@@ -310,7 +311,7 @@ public sealed class TestRunProcessorTests
         return processor.ProcessRunAsync(runId, cancellationToken);
     }
 
-    private sealed class StubTestRunService(TestRun run) : ITestRunService
+    private sealed class StubTestRunWorkerStore(TestRun run) : ITestRunWorkerStore
     {
         public List<(TestRunStatus Status, string? ErrorMessage)> StatusUpdates { get; } = [];
 
@@ -325,20 +326,6 @@ public sealed class TestRunProcessorTests
             StatusUpdates.Add((status, errorMessage));
             return Task.CompletedTask;
         }
-
-        public Task<TestRun> QueueRunAsync(
-            Guid suiteId,
-            Guid environmentId,
-            Guid endpointId,
-            Guid mappingSpecId,
-            string createdByUserId,
-            string? gitCommitHash = null,
-            string? configSnapshotJson = null) => throw new NotSupportedException();
-
-        public Task<List<TestRun>> GetRunsBySuiteAsync(
-            Guid suiteId,
-            TestRunStatus? status = null,
-            int? limit = null) => throw new NotSupportedException();
 
         public Task<TestRun?> ClaimNextQueuedRunAsync() => throw new NotSupportedException();
     }
@@ -392,27 +379,36 @@ public sealed class TestRunProcessorTests
             string mappingSpecJson,
             string sampleResponseJson) => throw new NotSupportedException();
 
-        public Task<MappingSpec> SaveMappingSpecAsync(
+        public Task<MappingSpec?> SaveMappingSpecAsync(
             Guid endpointId,
             string name,
-            string specJson) => throw new NotSupportedException();
+            string specJson,
+            TenantAccessScope scope) => throw new NotSupportedException();
 
-        public Task<List<MappingSpec>> GetMappingSpecsByEndpointAsync(Guid endpointId) =>
+        public Task<List<MappingSpec>?> GetMappingSpecsByEndpointAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id) => throw new NotSupportedException();
-
-        public Task<MappingSpec?> GetDefaultMappingAsync(Guid endpointId) =>
+        public Task<MappingSpec?> GetMappingSpecByIdAsync(Guid id, TenantAccessScope scope) =>
             throw new NotSupportedException();
 
-        public Task<MappingSpec> UpdateMappingSpecAsync(
+        public Task<MappingSpec?> GetDefaultMappingAsync(
+            Guid endpointId,
+            TenantAccessScope scope) =>
+            throw new NotSupportedException();
+
+        public Task<MappingSpec?> UpdateMappingSpecAsync(
             Guid id,
             string name,
-            string specJson) => throw new NotSupportedException();
+            string specJson,
+            TenantAccessScope scope) => throw new NotSupportedException();
 
-        public Task SetDefaultMappingAsync(Guid id) => throw new NotSupportedException();
+        public Task<bool> SetDefaultMappingAsync(Guid id, TenantAccessScope scope) =>
+            throw new NotSupportedException();
 
-        public Task DeleteMappingSpecAsync(Guid id) => throw new NotSupportedException();
+        public Task<bool> DeleteMappingSpecAsync(Guid id, TenantAccessScope scope) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StubExpectationEvaluator(ExpectationResult result) : IExpectationEvaluator

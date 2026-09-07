@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Domain.Entities;
 using Promptly.Application.Data;
 
@@ -17,14 +18,23 @@ public class TestCaseService : ITestCaseService
         _logger = logger;
     }
 
-    public async Task<TestCase> CreateTestCaseAsync(
+    public async Task<TestCase?> CreateTestCaseAsync(
         Guid suiteId,
         string externalId,
         string name,
         string? description,
         string inputSpecJson,
-        string expectationsJson)
+        string expectationsJson,
+        TenantAccessScope scope)
     {
+        var ownsSuite = await _dbContext.TestSuites
+            .ForTenant(scope)
+            .AnyAsync(suite => suite.Id == suiteId);
+        if (!ownsSuite)
+        {
+            return null;
+        }
+
         var testCase = new TestCase
         {
             Id = Guid.NewGuid(),
@@ -46,31 +56,47 @@ public class TestCaseService : ITestCaseService
         return testCase;
     }
 
-    public async Task<List<TestCase>> GetTestCasesBySuiteAsync(Guid suiteId)
+    public async Task<IReadOnlyList<TestCase>?> GetTestCasesBySuiteAsync(
+        Guid suiteId,
+        TenantAccessScope scope)
     {
+        var ownsSuite = await _dbContext.TestSuites
+            .ForTenant(scope)
+            .AnyAsync(suite => suite.Id == suiteId);
+        if (!ownsSuite)
+        {
+            return null;
+        }
+
         return await _dbContext.TestCases
+            .ForTenant(scope)
             .Where(t => t.SuiteId == suiteId)
             .OrderBy(t => t.ExternalId)
             .ToListAsync();
     }
 
-    public async Task<TestCase?> GetTestCaseByIdAsync(Guid id)
+    public async Task<TestCase?> GetTestCaseByIdAsync(Guid id, TenantAccessScope scope)
     {
-        return await _dbContext.TestCases.FindAsync(id);
+        return await _dbContext.TestCases
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(testCase => testCase.Id == id);
     }
 
-    public async Task<TestCase> UpdateTestCaseAsync(
+    public async Task<TestCase?> UpdateTestCaseAsync(
         Guid id,
         string externalId,
         string name,
         string? description,
         string inputSpecJson,
-        string expectationsJson)
+        string expectationsJson,
+        TenantAccessScope scope)
     {
-        var testCase = await _dbContext.TestCases.FindAsync(id);
+        var testCase = await _dbContext.TestCases
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(testCase => testCase.Id == id);
         if (testCase == null)
         {
-            throw new InvalidOperationException($"Test case with ID {id} not found");
+            return null;
         }
 
         testCase.ExternalId = externalId;
@@ -87,22 +113,36 @@ public class TestCaseService : ITestCaseService
         return testCase;
     }
 
-    public async Task DeleteTestCaseAsync(Guid id)
+    public async Task<bool> DeleteTestCaseAsync(Guid id, TenantAccessScope scope)
     {
-        var testCase = await _dbContext.TestCases.FindAsync(id);
+        var testCase = await _dbContext.TestCases
+            .ForTenant(scope)
+            .FirstOrDefaultAsync(testCase => testCase.Id == id);
         if (testCase == null)
         {
-            throw new InvalidOperationException($"Test case with ID {id} not found");
+            return false;
         }
 
         _dbContext.TestCases.Remove(testCase);
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("Deleted test case {TestCaseId}", id);
+        return true;
     }
 
-    public async Task<List<TestCase>> BulkCreateTestsAsync(Guid suiteId, List<TestCase> testCases)
+    public async Task<IReadOnlyList<TestCase>?> BulkCreateTestsAsync(
+        Guid suiteId,
+        List<TestCase> testCases,
+        TenantAccessScope scope)
     {
+        var ownsSuite = await _dbContext.TestSuites
+            .ForTenant(scope)
+            .AnyAsync(suite => suite.Id == suiteId);
+        if (!ownsSuite)
+        {
+            return null;
+        }
+
         // Ensure all test cases have the correct suite ID
         foreach (var testCase in testCases)
         {

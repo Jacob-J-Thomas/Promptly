@@ -1,8 +1,8 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Server.Models;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -12,15 +12,18 @@ namespace Promptly.Server.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly IProjectService _projectService;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<ProjectsController> _logger;
 
-    public ProjectsController(IProjectService projectService, ILogger<ProjectsController> logger)
+    public ProjectsController(
+        IProjectService projectService,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
+        ILogger<ProjectsController> logger)
     {
         _projectService = projectService;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
-
-    private string GetUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
     /// <summary>
     /// Get all projects for the authenticated user
@@ -29,8 +32,12 @@ public class ProjectsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<ProjectResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProjects()
     {
-        var userId = GetUserId();
-        var projects = await _projectService.GetProjectsByUserAsync(userId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var projects = await _projectService.GetProjectsAsync(scope);
 
         var response = projects.Select(p => new ProjectResponse
         {
@@ -52,8 +59,12 @@ public class ProjectsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProject(Guid projectId)
     {
-        var userId = GetUserId();
-        var project = await _projectService.GetProjectByIdAsync(projectId, userId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var project = await _projectService.GetProjectByIdAsync(projectId, scope);
 
         if (project == null)
         {
@@ -80,13 +91,29 @@ public class ProjectsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateProject([FromBody] CreateProjectRequest request)
     {
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        if (scope.ProjectId is not null)
+        {
+            return Forbid();
+        }
+
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
 
-        var userId = GetUserId();
-        var project = await _projectService.CreateProjectAsync(userId, request.Name, request.Description);
+        var project = await _projectService.CreateProjectAsync(
+            request.Name,
+            request.Description,
+            scope);
+        if (project == null)
+        {
+            return Forbid();
+        }
 
         var response = new ProjectResponse
         {
@@ -113,8 +140,16 @@ public class ProjectsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var userId = GetUserId();
-        var project = await _projectService.UpdateProjectAsync(projectId, userId, request.Name, request.Description);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var project = await _projectService.UpdateProjectAsync(
+            projectId,
+            request.Name,
+            request.Description,
+            scope);
 
         if (project == null)
         {
@@ -141,8 +176,12 @@ public class ProjectsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteProject(Guid projectId)
     {
-        var userId = GetUserId();
-        var deleted = await _projectService.DeleteProjectAsync(projectId, userId);
+        if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+        {
+            return Unauthorized();
+        }
+
+        var deleted = await _projectService.DeleteProjectAsync(projectId, scope);
 
         if (!deleted)
         {

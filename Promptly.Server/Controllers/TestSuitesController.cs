@@ -1,9 +1,9 @@
-using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -15,20 +15,20 @@ public class TestSuitesController : ControllerBase
     private readonly ITestSuiteService _testSuiteService;
     private readonly ITestCaseService _testCaseService;
     private readonly IYamlService _yamlService;
-    private readonly IProjectService _projectService;
+    private readonly ITenantAccessScopeAccessor _tenantAccessScopeAccessor;
     private readonly ILogger<TestSuitesController> _logger;
 
     public TestSuitesController(
         ITestSuiteService testSuiteService,
         ITestCaseService testCaseService,
         IYamlService yamlService,
-        IProjectService projectService,
+        ITenantAccessScopeAccessor tenantAccessScopeAccessor,
         ILogger<TestSuitesController> logger)
     {
         _testSuiteService = testSuiteService;
         _testCaseService = testCaseService;
         _yamlService = yamlService;
-        _projectService = projectService;
+        _tenantAccessScopeAccessor = tenantAccessScopeAccessor;
         _logger = logger;
     }
 
@@ -40,19 +40,20 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-
-            // Verify project exists (implicitly checks ownership via ProjectService)
-            var project = await _projectService.GetProjectByIdAsync(projectId, userId);
-            if (project == null)
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
             {
-                return NotFound(new { message = "Project not found" });
+                return Unauthorized();
             }
 
             var testSuite = await _testSuiteService.CreateTestSuiteAsync(
                 projectId,
                 request.Name,
-                request.Description);
+                request.Description,
+                scope);
+            if (testSuite == null)
+            {
+                return NotFound(new { message = "Project not found" });
+            }
 
             var response = new TestSuiteResponse
             {
@@ -81,23 +82,26 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
-            var testSuites = await _testSuiteService.GetTestSuitesByProjectAsync(projectId);
-
-            var responses = new List<TestSuiteResponse>();
-            foreach (var suite in testSuites)
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
             {
-                var testCases = await _testCaseService.GetTestCasesBySuiteAsync(suite.Id);
-
-                responses.Add(new TestSuiteResponse
-                {
-                    Id = suite.Id,
-                    ProjectId = suite.ProjectId,
-                    Name = suite.Name,
-                    Description = suite.Description,
-                    CreatedAt = suite.CreatedAt,
-                    TestCaseCount = testCases.Count
-                });
+                return Unauthorized();
             }
+
+            var testSuites = await _testSuiteService.GetTestSuitesByProjectAsync(projectId, scope);
+            if (testSuites == null)
+            {
+                return NotFound(new { message = "Project not found" });
+            }
+
+            var responses = testSuites.Select(suite => new TestSuiteResponse
+            {
+                Id = suite.Id,
+                ProjectId = suite.ProjectId,
+                Name = suite.Name,
+                Description = suite.Description,
+                CreatedAt = suite.CreatedAt,
+                TestCaseCount = suite.TestCases.Count
+            }).ToList();
 
             return Ok(responses);
         }
@@ -116,13 +120,16 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
-            var testSuite = await _testSuiteService.GetTestSuiteByIdAsync(id);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var testSuite = await _testSuiteService.GetTestSuiteByIdAsync(id, scope);
             if (testSuite == null)
             {
                 return NotFound(new { message = "Test suite not found" });
             }
-
-            var testCases = await _testCaseService.GetTestCasesBySuiteAsync(id);
 
             var response = new TestSuiteResponse
             {
@@ -131,7 +138,7 @@ public class TestSuitesController : ControllerBase
                 Name = testSuite.Name,
                 Description = testSuite.Description,
                 CreatedAt = testSuite.CreatedAt,
-                TestCaseCount = testCases.Count
+                TestCaseCount = testSuite.TestCases.Count
             };
 
             return Ok(response);
@@ -151,12 +158,20 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
             var testSuite = await _testSuiteService.UpdateTestSuiteAsync(
                 id,
                 request.Name,
-                request.Description);
-
-            var testCases = await _testCaseService.GetTestCasesBySuiteAsync(id);
+                request.Description,
+                scope);
+            if (testSuite == null)
+            {
+                return NotFound(new { message = "Test suite not found" });
+            }
 
             var response = new TestSuiteResponse
             {
@@ -165,14 +180,10 @@ public class TestSuitesController : ControllerBase
                 Name = testSuite.Name,
                 Description = testSuite.Description,
                 CreatedAt = testSuite.CreatedAt,
-                TestCaseCount = testCases.Count
+                TestCaseCount = testSuite.TestCases.Count
             };
 
             return Ok(response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -189,12 +200,14 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
-            await _testSuiteService.DeleteTestSuiteAsync(id);
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { message = ex.Message });
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            return await _testSuiteService.DeleteTestSuiteAsync(id, scope)
+                ? NoContent()
+                : NotFound(new { message = "Test suite not found" });
         }
         catch (Exception ex)
         {
@@ -211,16 +224,20 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
-            if (file == null || file.Length == 0)
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
             {
-                return BadRequest(new { message = "No file provided" });
+                return Unauthorized();
             }
 
-            // Verify suite exists
-            var suite = await _testSuiteService.GetTestSuiteByIdAsync(id);
+            var suite = await _testSuiteService.GetTestSuiteByIdAsync(id, scope);
             if (suite == null)
             {
                 return NotFound(new { message = "Test suite not found" });
+            }
+
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file provided" });
             }
 
             // Read YAML content
@@ -232,7 +249,11 @@ public class TestSuitesController : ControllerBase
 
             // Deserialize and create tests
             var testCases = _yamlService.DeserializeTests(yamlContent, id);
-            var createdTests = await _testCaseService.BulkCreateTestsAsync(id, testCases);
+            var createdTests = await _testCaseService.BulkCreateTestsAsync(id, testCases, scope);
+            if (createdTests == null)
+            {
+                return NotFound(new { message = "Test suite not found" });
+            }
 
             var response = new ImportTestsResponse
             {
@@ -261,15 +282,19 @@ public class TestSuitesController : ControllerBase
     {
         try
         {
-            // Verify suite exists
-            var suite = await _testSuiteService.GetTestSuiteByIdAsync(id);
+            if (!_tenantAccessScopeAccessor.TryGetScope(out var scope))
+            {
+                return Unauthorized();
+            }
+
+            var suite = await _testSuiteService.GetTestSuiteByIdAsync(id, scope);
             if (suite == null)
             {
                 return NotFound(new { message = "Test suite not found" });
             }
 
-            var testCases = await _testCaseService.GetTestCasesBySuiteAsync(id);
-            var yaml = _yamlService.SerializeTests(testCases);
+            var testCases = await _testCaseService.GetTestCasesBySuiteAsync(id, scope) ?? [];
+            var yaml = _yamlService.SerializeTests([.. testCases]);
 
             var fileName = $"{suite.Name.Replace(" ", "_")}_tests.yaml";
             var bytes = Encoding.UTF8.GetBytes(yaml);

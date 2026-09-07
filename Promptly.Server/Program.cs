@@ -13,6 +13,7 @@ using Promptly.Infrastructure.Configuration;
 using Promptly.Application.Data;
 using Promptly.Infrastructure.Security;
 using Promptly.Infrastructure.Services;
+using Promptly.Server.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -76,13 +77,19 @@ builder.Services.AddScoped<IJwtService, JwtService>();
 // Configure Authentication
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultScheme = TenantAuthenticationSchemes.Policy;
+    options.DefaultAuthenticateScheme = TenantAuthenticationSchemes.Policy;
+    options.DefaultChallengeScheme = TenantAuthenticationSchemes.Policy;
 })
+.AddPolicyScheme(
+    TenantAuthenticationSchemes.Policy,
+    TenantAuthenticationSchemes.Policy,
+    options => options.ForwardDefaultSelector = TenantAuthenticationSchemeSelector.Select)
 .AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {
+        AuthenticationType = TenantAuthenticationSchemes.JwtBearer,
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
@@ -95,10 +102,14 @@ builder.Services.AddAuthentication(options =>
         }
     };
 })
-.AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>("ApiKey", null);
+.AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+    TenantAuthenticationSchemes.ApiKey,
+    null);
 
 // Configure Authorization
 builder.Services.AddAuthorization();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantAccessScopeAccessor, HttpContextTenantAccessScopeAccessor>();
 
 // Configure Data Protection
 var dataProtectionPath = builder.Configuration["DATA_PROTECTION_PATH"] ?? "./dataprotection-keys";
@@ -117,6 +128,7 @@ builder.Services.AddScoped<ITestSuiteService, TestSuiteService>();
 builder.Services.AddScoped<ITestCaseService, TestCaseService>();
 builder.Services.AddScoped<IYamlService, YamlService>();
 builder.Services.AddScoped<ITestRunService, TestRunService>();
+builder.Services.AddScoped<ITestRunWorkerStore, TestRunWorkerStore>();
 builder.Services.AddScoped<IEndpointExecutor, EndpointExecutor>();
 builder.Services.AddSingleton<IBoundedRegexMatcher, BoundedRegexMatcher>();
 builder.Services.AddScoped<IExpectationEvaluator, ExpectationEvaluator>();

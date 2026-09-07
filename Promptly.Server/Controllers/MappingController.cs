@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Application.Services;
 
 namespace Promptly.Server.Controllers;
 
@@ -110,7 +111,8 @@ public class MappingController : ControllerBase
             {
                 Success = result.Success,
                 PreviewTrace = result.Trace,
-                ErrorMessage = result.ErrorMessage
+                ErrorMessage = result.ErrorMessage,
+                ErrorPath = result.ErrorPath
             });
         }
         catch (Exception ex)
@@ -153,6 +155,10 @@ public class MappingController : ControllerBase
             };
 
             return CreatedAtAction(nameof(GetMappingSpec), new { id = mappingSpec.Id }, response);
+        }
+        catch (MappingSpecValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message, errorPath = ex.Path });
         }
         catch (Exception ex)
         {
@@ -257,6 +263,10 @@ public class MappingController : ControllerBase
             };
 
             return Ok(response);
+        }
+        catch (MappingSpecValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message, errorPath = ex.Path });
         }
         catch (InvalidOperationException ex)
         {

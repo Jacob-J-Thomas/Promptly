@@ -30,6 +30,7 @@ interface ValidateMappingResponse {
   success: boolean;
   previewTrace?: CanonicalTrace | null;
   errorMessage?: string;
+  errorPath?: string;
 }
 
 interface CanonicalTrace {

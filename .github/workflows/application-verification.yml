@@ -111,6 +111,96 @@ jobs:
           --logger "trx;LogFileName=Promptly.Application.UnitTests.trx"
           --results-directory artifacts/test-results/csharp
 
+      - name: Require complete measured C# cohort
+        shell: pwsh
+        run: |
+          [xml]$coverage = Get-Content artifacts/test-results/csharp/coverage/coverage.cobertura.xml -Raw
+          $packages = @($coverage.coverage.packages.package)
+          $actualAssemblies = @(
+            $packages |
+              Where-Object { @($_.classes.class).Count -gt 0 } |
+              ForEach-Object { [string]$_.name }
+          ) | Sort-Object
+          $expectedAssemblies = @("Promptly.Application")
+          $assemblyDifference = Compare-Object $expectedAssemblies $actualAssemblies
+          if ($assemblyDifference) {
+            throw "Unexpected measured C# assembly cohort: $($assemblyDifference | Out-String)"
+          }
+
+          function Get-RepositoryRelativePath([string]$path) {
+            $fullPath = if ([IO.Path]::IsPathRooted($path)) {
+              [IO.Path]::GetFullPath($path)
+            }
+            else {
+              [IO.Path]::GetFullPath((Join-Path (Get-Location).Path $path))
+            }
+            return [IO.Path]::GetRelativePath((Get-Location).Path, $fullPath).Replace('\', '/')
+          }
+
+          $applicationPackage = $packages |
+            Where-Object { $_.name -eq "Promptly.Application" } |
+            Select-Object -First 1
+          $actualApplicationSources = @(
+            $applicationPackage.classes.class |
+              ForEach-Object { Get-RepositoryRelativePath ([string]$_.filename) }
+          ) | Sort-Object -Unique
+          $expectedApplicationSources = @(
+            "Promptly.Application/Services/BoundedRegexMatcher.cs"
+            "Promptly.Application/Services/ExpectationEvaluator.cs"
+            "Promptly.Application/Services/MappingService.cs"
+          ) | Sort-Object
+          $applicationDifference = Compare-Object `
+            $expectedApplicationSources `
+            $actualApplicationSources
+          if ($applicationDifference) {
+            throw "Unexpected scoped Application coverage cohort: $($applicationDifference | Out-String)"
+          }
+
+          $lineRate = [double]::Parse(
+            [string]$applicationPackage.'line-rate',
+            [Globalization.CultureInfo]::InvariantCulture)
+          $branchRate = [double]::Parse(
+            [string]$applicationPackage.'branch-rate',
+            [Globalization.CultureInfo]::InvariantCulture)
+          if ($lineRate -lt 0.90 -or $branchRate -lt 0.90) {
+            throw "Application cohort coverage is below 90%: line=$lineRate branch=$branchRate"
+          }
+          Write-Host "Promptly.Application: line=$('{0:P2}' -f $lineRate) branch=$('{0:P2}' -f $branchRate)"
+
+          $requiredClasses = @(
+            "Promptly.Application.Services.BoundedRegexMatcher"
+            "Promptly.Application.Services.ExpectationEvaluator"
+            "Promptly.Application.Services.MappingService"
+            "Promptly.Application.Services.MappingSpecValidationException"
+          ) | Sort-Object
+          $actualTopLevelClasses = @(
+            $applicationPackage.classes.class |
+              Where-Object { ([string]$_.name) -notmatch '/' } |
+              ForEach-Object { [string]$_.name }
+          ) | Sort-Object -Unique
+          $classDifference = Compare-Object $requiredClasses $actualTopLevelClasses
+          if ($classDifference) {
+            throw "Unexpected top-level Application coverage class cohort: $($classDifference | Out-String)"
+          }
+          foreach ($className in $requiredClasses) {
+            $class = @($applicationPackage.classes.class) |
+              Where-Object { $_.name -eq $className } |
+              Select-Object -First 1
+            if (-not $class) {
+              throw "Required covered class is missing: $className"
+            }
+            $classLineRate = [double]::Parse(
+              [string]$class.'line-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            $classBranchRate = [double]::Parse(
+              [string]$class.'branch-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            if ($classLineRate -lt 0.90 -or $classBranchRate -lt 0.90) {
+              throw "Coverage for $className is below 90%: line=$classLineRate branch=$classBranchRate"
+            }
+            Write-Host "${className}: line=$('{0:P2}' -f $classLineRate) branch=$('{0:P2}' -f $classBranchRate)"
+          }
+
       - name: Require test and coverage artifacts
         shell: pwsh
         run: |

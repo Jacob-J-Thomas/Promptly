@@ -23,4 +23,5 @@ public record MappingResult
     public bool Success { get; init; }
     public CanonicalTrace? Trace { get; init; }
     public string? ErrorMessage { get; init; }
+    public string? ErrorPath { get; init; }
 }

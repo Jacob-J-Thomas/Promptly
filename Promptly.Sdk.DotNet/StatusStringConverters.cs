@@ -9,11 +9,18 @@ namespace Promptly.Sdk.DotNet;
 /// </summary>
 public sealed class TestRunStatusStringConverter : JsonConverter<string>
 {
+    public override bool HandleNull => true;
+
     public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.String)
         {
-            return reader.GetString() ?? throw new JsonException("Run status cannot be null.");
+            var status = reader.GetString();
+            return status switch
+            {
+                "Queued" or "Running" or "Completed" or "Failed" => status,
+                _ => throw new JsonException("Unknown run status name.")
+            };
         }
 
         if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var value))
@@ -41,11 +48,18 @@ public sealed class TestRunStatusStringConverter : JsonConverter<string>
 /// </summary>
 public sealed class TestResultStatusStringConverter : JsonConverter<string>
 {
+    public override bool HandleNull => true;
+
     public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.String)
         {
-            return reader.GetString() ?? throw new JsonException("Result status cannot be null.");
+            var status = reader.GetString();
+            return status switch
+            {
+                "Pass" or "Fail" or "Error" => status,
+                _ => throw new JsonException("Unknown result status name.")
+            };
         }
 
         if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var value))

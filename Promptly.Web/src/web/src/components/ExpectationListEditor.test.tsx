@@ -141,7 +141,8 @@ describe('ExpectationListEditor', () => {
     renderEditor(allTypes, vi.fn(), true);
 
     expect(screen.getByRole('button', { name: 'Add expectation' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Expectation type 1' })).toBeDisabled();
+    const firstExpectation = screen.getByRole('group', { name: 'Expectation 1' });
+    expect(firstExpectation.getByRole('combobox')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByLabelText('Text for expectation 1')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete expectation 1' })).toBeDisabled();
   });

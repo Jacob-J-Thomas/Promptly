@@ -131,6 +131,10 @@ const validateScore = (
   path: string,
   errors: ExpectationSpecIssue[],
 ) => {
+  if (typeof value === 'string' && value.trim().length === 0) {
+    errors.push(issue('required', path, 'Score is required.'));
+    return;
+  }
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
     errors.push(issue('invalid_score', path, 'Score must be a finite number between 0 and 1.'));
   }

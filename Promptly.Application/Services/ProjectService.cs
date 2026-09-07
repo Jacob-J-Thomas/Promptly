@@ -56,9 +56,8 @@ public class ProjectService : IProjectService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation(
-            "Project {ProjectId} created by user {UserId}",
-            project.Id,
-            scope.OwnerUserId);
+            "Project {ProjectId} created",
+            project.Id);
 
         return project;
     }
@@ -81,9 +80,8 @@ public class ProjectService : IProjectService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation(
-            "Project {ProjectId} updated by user {UserId}",
-            projectId,
-            scope.OwnerUserId);
+            "Project {ProjectId} updated",
+            projectId);
 
         return project;
     }
@@ -100,9 +98,8 @@ public class ProjectService : IProjectService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation(
-            "Project {ProjectId} deleted by user {UserId}",
-            projectId,
-            scope.OwnerUserId);
+            "Project {ProjectId} deleted",
+            projectId);
 
         return true;
     }

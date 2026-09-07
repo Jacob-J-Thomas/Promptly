@@ -99,7 +99,8 @@ public sealed class ExpectationDslValidatorTests
 
         var contains = await evaluator.EvaluateAsync(
             new Dictionary<string, object> { ["type"] = "contains_text", ["text"] = "hello" },
-            trace);
+            trace,
+            TestContext.Current.CancellationToken);
         var subsequence = await evaluator.EvaluateAsync(
             new Dictionary<string, object>
             {
@@ -107,14 +108,16 @@ public sealed class ExpectationDslValidatorTests
                 ["sequence"] = new List<string> { "search", "summarize" },
                 ["exact_sequence"] = false
             },
-            trace);
+            trace,
+            TestContext.Current.CancellationToken);
         var exact = await evaluator.EvaluateAsync(
             new Dictionary<string, object>
             {
                 ["type"] = "tool_sequence",
                 ["sequence"] = new List<string> { "search", "summarize" }
             },
-            trace);
+            trace,
+            TestContext.Current.CancellationToken);
 
         Assert.True(contains.Passed);
         Assert.True(subsequence.Passed);

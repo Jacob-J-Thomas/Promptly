@@ -82,7 +82,7 @@ public sealed class ExpectationDslValidator : IExpectationValidator
                     else
                     {
                         issues.AddRange(ValidateExpectation(dictionary).Issues.Select(issue =>
-                            issue with { Path = $"$[{index}].{issue.Path.TrimStart('.') }" }));
+                            issue with { Path = $"$[{index}].{issue.Path.TrimStart('.')}" }));
                     }
                 }
 

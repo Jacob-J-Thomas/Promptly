@@ -2,28 +2,6 @@ using System.CommandLine;
 using System.Text.Json;
 using Promptly.Sdk.DotNet;
 
-const int AssertionFailureExitCode = 1;
-const int InfrastructureErrorExitCode = 2;
-
-static int GetResultExitCode(
-    IReadOnlyCollection<TestRunResultResponse> results,
-    TestRunResponse run)
-{
-    if (run.Status == "Failed" || !string.IsNullOrWhiteSpace(run.ErrorMessage))
-    {
-        return InfrastructureErrorExitCode;
-    }
-
-    if (results.Any(result => result.Status == "Error"))
-    {
-        return InfrastructureErrorExitCode;
-    }
-
-    return results.Any(result => result.Status == "Fail")
-        ? AssertionFailureExitCode
-        : 0;
-}
-
 var rootCommand = new RootCommand("Promptly CLI - LLM Black-Box Test Harness");
 
 // Trigger command
@@ -161,17 +139,17 @@ triggerCommand.SetHandler(async (context) =>
                 {
                     Console.WriteLine($"  - {result.TestCaseExternalId} ({result.TestCaseName}): {result.Status}");
                 }
-                context.ExitCode = GetResultExitCode(results, completedRun);
+                context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, completedRun);
                 return;
             }
 
-            context.ExitCode = GetResultExitCode(results, completedRun);
+            context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, completedRun);
         }
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        context.ExitCode = InfrastructureErrorExitCode;
+        context.ExitCode = Promptly.Cli.RunExitCodePolicy.InfrastructureError;
     }
 });
 
@@ -249,16 +227,16 @@ waitCommand.SetHandler(async (context) =>
             {
                 Console.WriteLine($"  - {result.TestCaseExternalId} ({result.TestCaseName}): {result.Status}");
             }
-            context.ExitCode = GetResultExitCode(results, run);
+            context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, run);
             return;
         }
 
-        context.ExitCode = GetResultExitCode(results, run);
+        context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, run);
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        context.ExitCode = InfrastructureErrorExitCode;
+        context.ExitCode = Promptly.Cli.RunExitCodePolicy.InfrastructureError;
     }
 });
 

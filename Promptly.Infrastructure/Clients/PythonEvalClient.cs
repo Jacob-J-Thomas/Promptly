@@ -25,8 +25,10 @@ public class PythonEvalClient : IPythonEvalClient
     public async Task<MappingProposalResult> ProposeMappingAsync(
         string sampleResponse,
         string? sampleRequest = null,
-        Dictionary<string, object>? hints = null)
+        Dictionary<string, object>? hints = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             var request = new
@@ -37,32 +39,38 @@ public class PythonEvalClient : IPythonEvalClient
             };
 
             var json = JsonSerializer.Serialize(request);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/mapping/propose", content);
+            using var response = await _httpClient.PostAsync(
+                "/mapping/propose",
+                content,
+                cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
-                var error = await response.Content.ReadAsStringAsync();
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
                 return new MappingProposalResult
                 {
                     Success = false,
-                    ErrorMessage = $"Python worker returned {response.StatusCode}: {error}"
+                    ErrorMessage = GetSafeWorkerErrorMessage((int)response.StatusCode, error),
+                    ErrorCode = PythonWorkerErrorCodes.FromStatusCode((int)response.StatusCode),
+                    WorkerStatusCode = (int)response.StatusCode
                 };
             }
 
-            var responseJson = await response.Content.ReadAsStringAsync();
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
             var result = JsonSerializer.Deserialize<MappingProposalResponse>(responseJson, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
 
-            if (result == null)
+            if (result?.MappingSpec == null)
             {
                 return new MappingProposalResult
                 {
                     Success = false,
-                    ErrorMessage = "Failed to parse response from Python worker"
+                    ErrorMessage = "Python worker returned an invalid response",
+                    ErrorCode = PythonWorkerErrorCodes.InvalidResponse
                 };
             }
 
@@ -73,13 +81,18 @@ public class PythonEvalClient : IPythonEvalClient
                 Reason = result.Reason
             };
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to call Python worker for mapping proposal");
             return new MappingProposalResult
             {
                 Success = false,
-                ErrorMessage = $"Failed to call Python worker: {ex.Message}"
+                ErrorMessage = GetSafeExceptionMessage(ex),
+                ErrorCode = GetExceptionErrorCode(ex)
             };
         }
     }
@@ -108,9 +121,12 @@ public class PythonEvalClient : IPythonEvalClient
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/eval/llm-judge", content, cancellationToken);
+            using var response = await _httpClient.PostAsync(
+                "/eval/llm-judge",
+                content,
+                cancellationToken);
             var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -119,7 +135,9 @@ public class PythonEvalClient : IPythonEvalClient
                 {
                     Success = false,
                     Score = 0.0,
-                    ErrorMessage = $"Python worker returned {response.StatusCode}: {responseJson}"
+                    ErrorMessage = GetSafeWorkerErrorMessage((int)response.StatusCode, responseJson),
+                    ErrorCode = PythonWorkerErrorCodes.FromStatusCode((int)response.StatusCode),
+                    WorkerStatusCode = (int)response.StatusCode
                 };
             }
 
@@ -128,20 +146,21 @@ public class PythonEvalClient : IPythonEvalClient
                 PropertyNameCaseInsensitive = true
             });
 
-            if (result == null)
+            if (result?.Score is not double score || result.Reason == null || score is < 0.0 or > 1.0)
             {
                 return new EvaluationResult
                 {
                     Success = false,
                     Score = 0.0,
-                    ErrorMessage = "Failed to parse response from Python worker"
+                    ErrorMessage = "Python worker returned an invalid response",
+                    ErrorCode = PythonWorkerErrorCodes.InvalidResponse
                 };
             }
 
             return new EvaluationResult
             {
                 Success = true,
-                Score = result.Score,
+                Score = score,
                 Reason = result.Reason
             };
         }
@@ -156,7 +175,8 @@ public class PythonEvalClient : IPythonEvalClient
             {
                 Success = false,
                 Score = 0.0,
-                ErrorMessage = $"Failed to call Python worker: {ex.Message}"
+                ErrorMessage = GetSafeExceptionMessage(ex),
+                ErrorCode = GetExceptionErrorCode(ex)
             };
         }
     }
@@ -185,9 +205,12 @@ public class PythonEvalClient : IPythonEvalClient
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/eval/groundedness", content, cancellationToken);
+            using var response = await _httpClient.PostAsync(
+                "/eval/groundedness",
+                content,
+                cancellationToken);
             var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -196,7 +219,9 @@ public class PythonEvalClient : IPythonEvalClient
                 {
                     Success = false,
                     Score = 0.0,
-                    ErrorMessage = $"Python worker returned {response.StatusCode}: {responseJson}"
+                    ErrorMessage = GetSafeWorkerErrorMessage((int)response.StatusCode, responseJson),
+                    ErrorCode = PythonWorkerErrorCodes.FromStatusCode((int)response.StatusCode),
+                    WorkerStatusCode = (int)response.StatusCode
                 };
             }
 
@@ -205,20 +230,21 @@ public class PythonEvalClient : IPythonEvalClient
                 PropertyNameCaseInsensitive = true
             });
 
-            if (result == null)
+            if (result?.Score is not double score || result.Reason == null || score is < 0.0 or > 1.0)
             {
                 return new EvaluationResult
                 {
                     Success = false,
                     Score = 0.0,
-                    ErrorMessage = "Failed to parse response from Python worker"
+                    ErrorMessage = "Python worker returned an invalid response",
+                    ErrorCode = PythonWorkerErrorCodes.InvalidResponse
                 };
             }
 
             return new EvaluationResult
             {
                 Success = true,
-                Score = result.Score,
+                Score = score,
                 Reason = result.Reason
             };
         }
@@ -233,9 +259,63 @@ public class PythonEvalClient : IPythonEvalClient
             {
                 Success = false,
                 Score = 0.0,
-                ErrorMessage = $"Failed to call Python worker: {ex.Message}"
+                ErrorMessage = GetSafeExceptionMessage(ex),
+                ErrorCode = GetExceptionErrorCode(ex)
             };
         }
+    }
+
+    private static string GetExceptionErrorCode(Exception exception) => exception switch
+    {
+        TaskCanceledException => PythonWorkerErrorCodes.Timeout,
+        HttpRequestException => PythonWorkerErrorCodes.TransportError,
+        JsonException => PythonWorkerErrorCodes.InvalidResponse,
+        _ => PythonWorkerErrorCodes.ClientError
+    };
+
+    private static string GetSafeExceptionMessage(Exception exception) => exception switch
+    {
+        TaskCanceledException => "Python worker request timed out",
+        HttpRequestException => "Python worker could not be reached",
+        JsonException => "Python worker returned an invalid response",
+        _ => "Python worker request failed"
+    };
+
+    private static string GetSafeWorkerErrorMessage(int statusCode, string responseJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseJson);
+            if (document.RootElement.TryGetProperty("detail", out var detail))
+            {
+                if (detail.ValueKind == JsonValueKind.String)
+                {
+                    return detail.GetString()!;
+                }
+
+                if (detail.ValueKind == JsonValueKind.Object
+                    && detail.TryGetProperty("error", out var error)
+                    && error.ValueKind == JsonValueKind.Object
+                    && error.TryGetProperty("message", out var message)
+                    && message.ValueKind == JsonValueKind.String)
+                {
+                    return message.GetString()!;
+                }
+
+                if (detail.ValueKind == JsonValueKind.Object
+                    && detail.TryGetProperty("message", out var detailMessage)
+                    && detailMessage.ValueKind == JsonValueKind.String)
+                {
+                    return detailMessage.GetString()!;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Non-contract bodies (for example a proxy HTML response) are never echoed.
+        }
+
+        return $"Python worker returned HTTP {statusCode}";
     }
 
     // Helper classes for deserialization
@@ -247,7 +327,7 @@ public class PythonEvalClient : IPythonEvalClient
 
     private class EvaluationResponse
     {
-        public double Score { get; set; }
+        public double? Score { get; set; }
         public string? Reason { get; set; }
     }
 }

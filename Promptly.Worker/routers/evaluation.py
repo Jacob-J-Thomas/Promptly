@@ -1,233 +1,221 @@
+"""LLM judge and groundedness evaluation endpoints."""
+
+from __future__ import annotations
+
 import json
 import os
-from typing import Optional, Dict, Any, List
+from contextlib import suppress
+from typing import Any, Never
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from openai import OpenAI, AzureOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+from openai.types.shared_params import ResponseFormatJSONObject
+from pydantic import BaseModel, ConfigDict, Field
+
+from llm import (
+    LlmClient,
+    LlmConfigurationError,
+    UnsupportedProviderError,
+)
+from llm import (
+    get_llm_client as create_llm_client,
+)
 
 router = APIRouter()
 
-# Pydantic models
+
 class Message(BaseModel):
     role: str
     content: str
 
+
 class ToolCall(BaseModel):
     name: str
-    argumentsJson: str
+    arguments_json: str = Field(alias="argumentsJson")
+
 
 class Usage(BaseModel):
-    promptTokens: Optional[int] = None
-    completionTokens: Optional[int] = None
-    totalTokens: Optional[int] = None
-    cost: Optional[float] = None
-    latencyMs: Optional[int] = None
+    prompt_tokens: int | None = Field(default=None, alias="promptTokens")
+    completion_tokens: int | None = Field(default=None, alias="completionTokens")
+    total_tokens: int | None = Field(default=None, alias="totalTokens")
+    cost: float | None = None
+    latency_ms: int | None = Field(default=None, alias="latencyMs")
+
 
 class RetrievedDoc(BaseModel):
-    id: Optional[str] = None
-    title: Optional[str] = None
+    id: str | None = None
+    title: str | None = None
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
+
 
 class CanonicalTrace(BaseModel):
-    messages: List[Message]
-    toolCalls: List[ToolCall] = []
-    usage: Optional[Usage] = None
-    retrievedDocs: List[RetrievedDoc] = []
-    rawResponse: Optional[str] = None
+    messages: list[Message] = Field(default_factory=list)
+    tool_calls: list[ToolCall] = Field(default_factory=list, alias="toolCalls")
+    usage: Usage | None = None
+    retrieved_docs: list[RetrievedDoc] = Field(default_factory=list, alias="retrievedDocs")
+    raw_response: str | None = Field(default=None, alias="rawResponse")
+
 
 class LlmJudgeRequest(BaseModel):
     rubric: str
-    min_score: float
+    min_score: float = Field(ge=0.0, le=1.0)
     trace: CanonicalTrace
-    model: Optional[str] = None
-    provider: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    model: str | None = None
+    provider: str | None = None
+    metadata: dict[str, Any] | None = None
+
 
 class GroundednessRequest(BaseModel):
-    min_score: float
+    min_score: float = Field(ge=0.0, le=1.0)
     trace: CanonicalTrace
-    docs: List[RetrievedDoc]
-    model: Optional[str] = None
-    provider: Optional[str] = None
+    docs: list[RetrievedDoc] = Field(default_factory=list)
+    model: str | None = None
+    provider: str | None = None
+
 
 class EvaluationResponse(BaseModel):
-    score: float
+    model_config = ConfigDict(extra="forbid")
+
+    score: float = Field(ge=0.0, le=1.0)
     reason: str
 
-class ErrorResponse(BaseModel):
-    error: Dict[str, str]
 
-def get_llm_client(provider: Optional[str] = None):
-    """Get the configured LLM client"""
-    provider = provider or os.getenv("PROMPTLY_LLM_PROVIDER", "azureopenai").lower()
-    api_key = os.getenv("PROMPTLY_LLM_API_KEY")
+def get_llm_client(provider: str | None = None) -> LlmClient:
+    """Router-level client seam for deterministic tests."""
 
-    if not api_key:
-        raise ValueError("PROMPTLY_LLM_API_KEY environment variable is not set")
+    return create_llm_client(provider)
 
-    if provider == "azureopenai":
-        azure_endpoint = os.getenv("PROMPTLY_LLM_AZURE_ENDPOINT")
-        api_version = os.getenv("PROMPTLY_LLM_API_VERSION", "2024-08-01-preview")
 
-        if not azure_endpoint:
-            raise ValueError("PROMPTLY_LLM_AZURE_ENDPOINT is required for Azure OpenAI (e.g., https://your-resource.openai.azure.com)")
+def _assistant_content(trace: CanonicalTrace) -> str:
+    return "\n\n".join(message.content for message in trace.messages if message.role == "assistant")
 
-        return AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=azure_endpoint,
-            api_version=api_version
+
+def _call_evaluator(
+    *,
+    provider: str | None,
+    model: str | None,
+    system_prompt: str,
+    user_prompt: str,
+) -> EvaluationResponse:
+    client = get_llm_client(provider)
+    try:
+        selected_model = model or os.getenv("PROMPTLY_LLM_MODEL_DEFAULT") or "gpt-4o-mini"
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        response_format: ResponseFormatJSONObject = {"type": "json_object"}
+        response = client.chat.completions.create(
+            model=selected_model,
+            messages=messages,
+            response_format=response_format,
+            temperature=0.1,
         )
-    else:
-        base_url = os.getenv("PROMPTLY_LLM_BASE_URL", "https://api.openai.com/v1")
-        return OpenAI(api_key=api_key, base_url=base_url)
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("empty provider response")
+        return EvaluationResponse.model_validate(json.loads(content))
+    finally:
+        with suppress(Exception):
+            client.close()
+
+
+def _raise_safe_evaluation_error(exc: Exception, *, provider_was_overridden: bool) -> Never:
+    if isinstance(exc, UnsupportedProviderError) and provider_was_overridden:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "Unsupported LLM provider"}},
+        ) from exc
+    if isinstance(exc, LlmConfigurationError):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Evaluation service is not configured",
+                    "details": str(exc),
+                }
+            },
+        ) from exc
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "error": {
+                "message": "Evaluation could not be completed",
+                "details": "The LLM provider returned an invalid response",
+            }
+        },
+    ) from exc
+
 
 @router.post("/llm-judge", response_model=EvaluationResponse)
-async def evaluate_llm_judge(request: LlmJudgeRequest):
-    """
-    Evaluate assistant's response against a rubric using an LLM judge.
-    Returns a score between 0 and 1.
-    """
-    try:
-        client = get_llm_client(request.provider)
-        model = request.model or os.getenv("PROMPTLY_LLM_MODEL_DEFAULT", "gpt-4o-mini")
+def evaluate_llm_judge(request: LlmJudgeRequest) -> EvaluationResponse:
+    """Evaluate an assistant response against a caller-supplied rubric."""
 
-        # Extract assistant messages and tool calls
-        assistant_messages = [m for m in request.trace.messages if m.role == "assistant"]
-        assistant_content = "\n\n".join([m.content for m in assistant_messages])
-
-        tool_calls_summary = ""
-        if request.trace.toolCalls:
-            tool_calls_summary = "\n\nTool Calls:\n" + "\n".join(
-                [f"- {tc.name}: {tc.argumentsJson}" for tc in request.trace.toolCalls]
-            )
-
-        # Build evaluation prompt
-        system_prompt = """You are an expert evaluator. Your task is to score an AI assistant's response against a specific rubric.
-
-You must return a JSON object with exactly two fields:
-- "score": a float between 0.0 and 1.0 (where 1.0 is perfect)
-- "reason": a brief explanation of your scoring
-
-Be objective and consistent in your evaluation."""
-
-        user_prompt = f"""Rubric:
+    tool_calls = ""
+    if request.trace.tool_calls:
+        tool_calls = "\n\nTool Calls:\n" + "\n".join(
+            f"- {tool_call.name}: {tool_call.arguments_json}"
+            for tool_call in request.trace.tool_calls
+        )
+    system_prompt = """You are an objective evaluator. Return only a JSON object
+with exactly two fields: score (a float from 0.0 through 1.0) and reason (a
+concise explanation)."""
+    user_prompt = f"""Rubric:
 {request.rubric}
 
-Assistant's Response:
-{assistant_content}
-{tool_calls_summary}
+Required minimum score: {request.min_score}
 
-Evaluate this response against the rubric. Return a JSON object with "score" (0.0-1.0) and "reason"."""
+Assistant response:
+{_assistant_content(request.trace)}{tool_calls}
 
-        # Call LLM judge
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.1
+Evaluate the response against the rubric."""
+
+    try:
+        return _call_evaluator(
+            provider=request.provider,
+            model=request.model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         )
+    except Exception as exc:
+        _raise_safe_evaluation_error(exc, provider_was_overridden=request.provider is not None)
 
-        # Parse response
-        result_text = response.choices[0].message.content
-        if not result_text:
-            raise ValueError("LLM judge returned empty response")
-
-        result = json.loads(result_text)
-        score = float(result.get("score", 0.0))
-        reason = result.get("reason", "No reason provided")
-
-        # Clamp score to [0, 1]
-        score = max(0.0, min(1.0, score))
-
-        return EvaluationResponse(score=score, reason=reason)
-
-    except Exception as e:
-        # Return error response instead of crashing
-        return EvaluationResponse(
-            score=0.0,
-            reason=f"Evaluation failed: {str(e)}"
-        )
 
 @router.post("/groundedness", response_model=EvaluationResponse)
-async def evaluate_groundedness(request: GroundednessRequest):
-    """
-    Evaluate if assistant's response is grounded in the retrieved documents.
-    Returns a score between 0 and 1.
-    """
-    try:
-        client = get_llm_client(request.provider)
-        model = request.model or os.getenv("PROMPTLY_LLM_MODEL_DEFAULT", "gpt-4o-mini")
+def evaluate_groundedness(request: GroundednessRequest) -> EvaluationResponse:
+    """Score whether the assistant response is supported by supplied documents."""
 
-        # Extract assistant messages
-        assistant_messages = [m for m in request.trace.messages if m.role == "assistant"]
-        assistant_content = "\n\n".join([m.content for m in assistant_messages])
-
-        # Format retrieved documents
-        docs_content = "\n\n".join([
-            f"Document {i+1}:\n{doc.content}"
-            for i, doc in enumerate(request.docs or request.trace.retrievedDocs)
-        ])
-
-        if not docs_content:
-            return EvaluationResponse(
-                score=1.0,
-                reason="No retrieved documents to check groundedness against"
-            )
-
-        # Build evaluation prompt
-        system_prompt = """You are an expert at evaluating whether AI responses are grounded in source documents.
-
-Your task is to determine if the assistant's response is supported by the retrieved documents.
-
-Return a JSON object with:
-- "score": 1.0 if fully grounded, 0.5 if partially grounded, 0.0 if not grounded or hallucinated
-- "reason": explanation of your assessment
-
-Consider:
-- Are claims in the response supported by the documents?
-- Are there any hallucinated facts not present in the documents?
-- Is the response faithful to the source material?"""
-
-        user_prompt = f"""Retrieved Documents:
-{docs_content}
-
-Assistant's Response:
-{assistant_content}
-
-Evaluate if the response is grounded in the retrieved documents. Return JSON with "score" (0.0-1.0) and "reason"."""
-
-        # Call LLM judge
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.1
-        )
-
-        # Parse response
-        result_text = response.choices[0].message.content
-        if not result_text:
-            raise ValueError("LLM judge returned empty response")
-
-        result = json.loads(result_text)
-        score = float(result.get("score", 0.0))
-        reason = result.get("reason", "No reason provided")
-
-        # Clamp score to [0, 1]
-        score = max(0.0, min(1.0, score))
-
-        return EvaluationResponse(score=score, reason=reason)
-
-    except Exception as e:
-        # Return error response instead of crashing
+    documents = request.docs or request.trace.retrieved_docs
+    if not documents:
         return EvaluationResponse(
             score=0.0,
-            reason=f"Evaluation failed: {str(e)}"
+            reason="No retrieved documents were available for groundedness evaluation",
         )
+
+    docs_content = "\n\n".join(
+        f"Document {index}:\n{document.content}"
+        for index, document in enumerate(documents, start=1)
+    )
+    system_prompt = """Evaluate whether the assistant response is supported by
+the supplied documents. Return only a JSON object with exactly two fields:
+score (a float from 0.0 through 1.0) and reason (a concise explanation)."""
+    user_prompt = f"""Retrieved documents:
+{docs_content}
+
+Assistant response:
+{_assistant_content(request.trace)}
+
+Required minimum score: {request.min_score}
+
+Evaluate groundedness, penalizing unsupported claims."""
+
+    try:
+        return _call_evaluator(
+            provider=request.provider,
+            model=request.model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+    except Exception as exc:
+        _raise_safe_evaluation_error(exc, provider_was_overridden=request.provider is not None)

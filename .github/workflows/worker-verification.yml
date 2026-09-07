@@ -1,0 +1,105 @@
+name: Worker verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker-verification:
+    name: Worker verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    defaults:
+      run:
+        working-directory: Promptly.Worker
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version-file: Promptly.Worker/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.3"
+          enable-cache: true
+          cache-dependency-glob: Promptly.Worker/uv.lock
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore locked .NET contract-test dependencies
+        working-directory: ${{ github.workspace }}
+        run: >-
+          dotnet restore
+          tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj
+          --locked-mode
+
+      - name: Run the authoritative worker verifier
+        run: uv run --frozen --all-groups python scripts/verify.py
+
+      - name: Run live C# to FastAPI worker contracts
+        working-directory: ${{ github.workspace }}
+        env:
+          PROMPTLY_RUN_WORKER_CONTRACT_TESTS: "1"
+          PROMPTLY_UV_EXECUTABLE: uv
+        run: >-
+          dotnet test
+          tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj
+          --configuration Release
+          --no-restore
+          -p:CollectCoverage=false
+          --filter FullyQualifiedName~PythonWorkerLiveContractTests
+          --logger "trx;LogFileName=worker-live-contract.trx"
+          --results-directory artifacts/test-results/python/contracts
+
+      - name: Require executed live contracts and TRX artifact
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $path = "artifacts/test-results/python/contracts/worker-live-contract.trx"
+          if (!(Test-Path $path) -or (Get-Item $path).Length -eq 0) {
+            throw "Live worker contract TRX is missing or empty"
+          }
+          [xml]$report = Get-Content $path -Raw
+          $counters = $report.TestRun.ResultSummary.Counters
+          if ([int]$counters.total -lt 2) {
+            throw "Expected at least 2 live worker contracts, found $($counters.total)"
+          }
+          if ([int]$counters.executed -ne [int]$counters.total -or [int]$counters.notExecuted -ne 0) {
+            throw "Live worker contracts were skipped or not executed"
+          }
+          if ([int]$counters.passed -ne [int]$counters.total -or [int]$counters.failed -ne 0) {
+            throw "Live worker contract TRX contains failures"
+          }
+
+      - name: Upload test, coverage, and dependency-audit artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worker-test-results
+          path: artifacts/test-results/python
+          if-no-files-found: error
+          retention-days: 14

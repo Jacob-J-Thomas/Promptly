@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -43,7 +41,7 @@ services:
       postgres:
         condition: service_healthy
       promptly-eval:
-        condition: service_started
+        condition: service_healthy
     networks:
       - promptly-network
     restart: unless-stopped
@@ -59,8 +57,16 @@ services:
       - PROMPTLY_LLM_AZURE_ENDPOINT=${PROMPTLY_LLM_AZURE_ENDPOINT:-}
       - PROMPTLY_LLM_API_VERSION=${PROMPTLY_LLM_API_VERSION:-2024-08-01-preview}
       - PROMPTLY_LLM_MODEL_DEFAULT=${PROMPTLY_LLM_MODEL_DEFAULT:-gpt-4o}
-    ports:
-      - "8000:8000"
+      - PROMPTLY_LLM_TIMEOUT_SECONDS=${PROMPTLY_LLM_TIMEOUT_SECONDS:-90}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=7)"]
+      interval: 60s
+      start_interval: 5s
+      timeout: 8s
+      start_period: 15s
+      retries: 3
     networks:
       - promptly-network
     restart: unless-stopped

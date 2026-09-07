@@ -166,7 +166,7 @@ Once you've created the `.env` file:
 
 ```bash
 cd docker
-docker-compose up -d
+docker compose up -d
 ```
 
 Wait ~30 seconds for services to start, then:
@@ -174,7 +174,7 @@ Wait ~30 seconds for services to start, then:
 - **Web UI**: http://localhost:3000
 - **API**: http://localhost:5000
 - **Swagger**: http://localhost:5000/swagger
-- **Python Worker**: http://localhost:8000/docs
+- **Python Worker**: internal service at `http://promptly-eval:8000`
 
 ---
 
@@ -183,12 +183,13 @@ Wait ~30 seconds for services to start, then:
 ### Test Azure OpenAI Connection
 
 ```bash
-# Check Python worker health (includes LLM provider info)
-curl http://localhost:8000/health
+# Check Python worker readiness (authenticates to the configured provider)
+docker compose exec promptly-eval python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
 
 # Should return:
 {
-  "status": "healthy",
+  "status": "ready",
   "llm_provider": "azureopenai",
   "llm_configured": true
 }
@@ -248,13 +249,13 @@ curl -X POST http://localhost:5000/demo/chat \
 - Go to Azure AI Studio → Deployments and verify the exact name
 
 ### Database connection errors
-- Run `docker-compose logs postgres` to see database logs
+- Run `docker compose logs postgres` to see database logs
 - Ensure PostgreSQL container is running: `docker ps | grep postgres`
 
 ---
 
 ## 📧 Need Help?
 
-1. Check logs: `docker-compose logs <service-name>`
-2. Verify configuration: `docker-compose config`
-3. Restart services: `docker-compose restart`
+1. Check logs: `docker compose logs <service-name>`
+2. Verify configuration: `docker compose config`
+3. Restart services: `docker compose restart`

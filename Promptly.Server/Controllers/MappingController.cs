@@ -31,7 +31,10 @@ public class MappingController : ControllerBase
     /// Propose a mapping spec using the Python worker's LLM-based analysis
     /// </summary>
     [HttpPost("endpoints/{endpointId:guid}/mapping/propose")]
-    public async Task<IActionResult> ProposeMapping(Guid endpointId, [FromBody] ProposeMappingRequest request)
+    public async Task<IActionResult> ProposeMapping(
+        Guid endpointId,
+        [FromBody] ProposeMappingRequest request,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -46,11 +49,24 @@ public class MappingController : ControllerBase
             var result = await _pythonEvalClient.ProposeMappingAsync(
                 request.SampleResponseJson,
                 request.SampleRequestJson,
-                request.Hints);
+                request.Hints,
+                cancellationToken);
 
             if (!result.Success)
             {
-                return BadRequest(new { message = result.ErrorMessage });
+                var statusCode = result.WorkerStatusCode switch
+                {
+                    StatusCodes.Status400BadRequest => StatusCodes.Status400BadRequest,
+                    StatusCodes.Status422UnprocessableEntity => StatusCodes.Status422UnprocessableEntity,
+                    StatusCodes.Status502BadGateway => StatusCodes.Status502BadGateway,
+                    StatusCodes.Status503ServiceUnavailable => StatusCodes.Status503ServiceUnavailable,
+                    _ => StatusCodes.Status502BadGateway
+                };
+                return StatusCode(statusCode, new
+                {
+                    message = result.ErrorMessage,
+                    errorCode = result.ErrorCode ?? PythonWorkerErrorCodes.ClientError
+                });
             }
 
             return Ok(new ProposeMappingResponse
@@ -58,6 +74,10 @@ public class MappingController : ControllerBase
                 MappingSpecJson = result.MappingSpecJson!,
                 Reason = result.Reason
             });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

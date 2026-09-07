@@ -93,6 +93,31 @@ public sealed class ExternalCallCancellationTests
         Assert.True(handler.ObservedCancellationToken.CanBeCanceled);
     }
 
+    [Fact]
+    public async Task PythonEvalClient_propagates_cancellation_to_mapping_requests()
+    {
+        var handler = new BlockingHandler();
+        var configuration = new ConfigurationManager
+        {
+            ["PROMPTLY_EVAL_BASE_URL"] = "https://worker.example.test"
+        };
+        var client = new PythonEvalClient(
+            new HttpClient(handler),
+            configuration,
+            NullLogger<PythonEvalClient>.Instance);
+        using var cancellation = new CancellationTokenSource();
+
+        var proposal = client.ProposeMappingAsync(
+            "{}",
+            cancellationToken: cancellation.Token);
+
+        await handler.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => proposal);
+        Assert.True(handler.ObservedCancellationToken.CanBeCanceled);
+    }
+
     private sealed class BlockingHandler : HttpMessageHandler
     {
         public TaskCompletionSource Entered { get; } =

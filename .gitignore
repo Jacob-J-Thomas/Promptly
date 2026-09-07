@@ -6,6 +6,18 @@
 # dotenv files
 .env
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+.coverage.*
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+htmlcov/
+
 # User-specific files
 *.rsuser
 *.suo

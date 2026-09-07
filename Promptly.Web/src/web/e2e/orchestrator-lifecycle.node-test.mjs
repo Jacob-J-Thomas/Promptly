@@ -3,7 +3,6 @@ import { EventEmitter, once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -280,7 +279,7 @@ for (const [signal, exitCode, otherSignal] of [
     const childPidFile = path.join(directory, 'child-pid');
     const resultFile = path.join(directory, 'result.json');
     const childScript = path.join(directory, 'child.mjs');
-    const lifecycleModule = path.resolve('Promptly.Web/src/web/e2e/orchestrator-lifecycle.mjs');
+    const lifecycleModule = new URL('./orchestrator-lifecycle.mjs', import.meta.url).href;
     await writeFile(childScript, [
       "import { existsSync, writeFileSync } from 'node:fs';",
       '',
@@ -329,7 +328,7 @@ for (const [signal, exitCode, otherSignal] of [
       PROMPTLY_TEST_CHILD_PID_FILE: childPidFile,
       PROMPTLY_TEST_RESULT_FILE: resultFile,
       PROMPTLY_TEST_CHILD_SCRIPT: childScript,
-      PROMPTLY_TEST_LIFECYCLE_MODULE: pathToFileURL(lifecycleModule).href,
+      PROMPTLY_TEST_LIFECYCLE_MODULE: lifecycleModule,
       PROMPTLY_TEST_ROOT: directory,
     };
 

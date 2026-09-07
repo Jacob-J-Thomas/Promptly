@@ -96,6 +96,58 @@ jobs:
       - name: Run web unit tests and coverage gate
         run: npm run test:coverage
 
+      - name: Require covered authentication UI sources
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const reportPath = "../../../artifacts/test-results/web/coverage/coverage-final.json";
+          const report = JSON.parse(readFileSync(reportPath, "utf8"));
+          const requiredSources = [
+            "src/api/errors.ts",
+            "src/authenticationInputLimits.ts",
+            "src/pages/Login.tsx",
+            "src/pages/Register.tsx",
+          ];
+
+          for (const sourcePath of requiredSources) {
+            const matches = Object.entries(report).filter(([path]) =>
+              path.replaceAll("\\", "/").endsWith(`/${sourcePath}`));
+            if (matches.length !== 1) {
+              throw new Error(
+                `Expected one web coverage source for ${sourcePath}; found ${matches.length}`,
+              );
+            }
+
+            const [, source] = matches[0];
+            const lineHits = new Map();
+            for (const [statementId, location] of Object.entries(source.statementMap)) {
+              const line = location.start.line;
+              const hits = source.s[statementId];
+              lineHits.set(line, Math.max(lineHits.get(line) ?? 0, hits));
+            }
+            if (lineHits.size === 0) {
+              throw new Error(`Coverage JSON has no executable lines for ${sourcePath}`);
+            }
+
+            const branchHits = Object.values(source.b).flat();
+            const coveredLines = [...lineHits.values()].filter((hits) => hits > 0).length;
+            const coveredBranches = branchHits.filter((hits) => hits > 0).length;
+            const lineRate = coveredLines / lineHits.size;
+            const branchRate = branchHits.length === 0
+              ? 1
+              : coveredBranches / branchHits.length;
+            if (lineRate < 0.90 || branchRate < 0.90) {
+              throw new Error(
+                `Coverage for ${sourcePath} is below 90%: line=${lineRate} branch=${branchRate}`,
+              );
+            }
+            console.log(
+              `${sourcePath}: line=${(lineRate * 100).toFixed(2)}% branch=${(branchRate * 100).toFixed(2)}%`,
+            );
+          }
+          NODE
+
       - name: Build release bundle
         run: npm run build
 

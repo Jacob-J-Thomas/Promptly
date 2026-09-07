@@ -54,6 +54,20 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddDbContext<PromptlyDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
+// Configure authentication abuse controls before Identity so the persisted
+// account-lockout policy and the request-level limits share one validated source.
+var authenticationAbuseSection = builder.Configuration.GetSection(
+    AuthenticationAbuseOptions.SectionName);
+var authenticationAbuseSettings = AuthenticationAbuseOptionsValidator.GetValidatedSettings(
+    authenticationAbuseSection.Get<AuthenticationAbuseOptions>()
+        ?? new AuthenticationAbuseOptions());
+builder.Services.AddOptions<AuthenticationAbuseOptions>()
+    .Bind(authenticationAbuseSection)
+    .ValidateOnStart();
+builder.Services.AddSingleton<
+    IValidateOptions<AuthenticationAbuseOptions>,
+    AuthenticationAbuseOptionsValidator>();
+
 // Configure Identity
 builder.Services.AddIdentity<User, IdentityRole>(options =>
 {
@@ -63,6 +77,11 @@ builder.Services.AddIdentity<User, IdentityRole>(options =>
     options.Password.RequireNonAlphanumeric = false;
     options.Password.RequiredLength = 8;
     options.User.RequireUniqueEmail = true;
+    options.Lockout.AllowedForNewUsers = true;
+    options.Lockout.MaxFailedAccessAttempts =
+        authenticationAbuseSettings.IdentityMaxFailedAccessAttempts;
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromSeconds(
+        authenticationAbuseSettings.IdentityLockoutSeconds);
 })
 .AddEntityFrameworkStores<PromptlyDbContext>()
 .AddDefaultTokenProviders();
@@ -113,6 +132,14 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantAccessScopeAccessor, HttpContextTenantAccessScopeAccessor>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IAuthenticationPartitionKeyProvider, AuthenticationPartitionKeyProvider>();
+builder.Services.AddSingleton<IAuthenticationAbuseGuard, AuthenticationAbuseGuard>();
+builder.Services.AddSingleton<
+    IAuthenticationThrottleResponseWriter,
+    AuthenticationThrottleResponseWriter>();
+builder.Services.AddSingleton<IInvalidCredentialPasswordVerifier, InvalidCredentialPasswordVerifier>();
+builder.Services.AddScoped<IIdentityCredentialVerifier, IdentityCredentialVerifier>();
 
 // Configure Data Protection
 var dataProtectionPath = builder.Configuration["DATA_PROTECTION_PATH"] ?? "./dataprotection-keys";
@@ -202,6 +229,7 @@ builder.Services.AddCors(options =>
         policy.WithOrigins("http://localhost:3000")
               .AllowAnyHeader()
               .AllowAnyMethod()
+              .WithExposedHeaders("Retry-After")
               .AllowCredentials();
     });
 });
@@ -224,7 +252,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseRouting();
 app.UseCors();
+app.UseMiddleware<AuthenticationAbuseMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();

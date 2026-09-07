@@ -32,6 +32,8 @@ services:
       - JWT__Key=${JWT__Key:?JWT__Key must be set to base64-encoded random bytes}
       - JWT__RetiredKeyFingerprints=${JWT__RetiredKeyFingerprints:-}
       - JWT__ExpiryMinutes=60
+      # Authentication rate-limit state is process-local in this release.
+      - AuthenticationAbuse__ApiReplicaCount=${AuthenticationAbuse__ApiReplicaCount:-1}
       - DATA_PROTECTION_PATH=/app/dataprotection-keys
       - PROMPTLY_EVAL_BASE_URL=http://promptly-eval:8000
       - EndpointEgress__RequireProxy=true

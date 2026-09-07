@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Domain.Entities;
 using Promptly.Server.Models;
+using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
 
@@ -11,40 +12,62 @@ namespace Promptly.Server.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly UserManager<User> _userManager;
-    private readonly SignInManager<User> _signInManager;
+    private readonly IIdentityCredentialVerifier _credentialVerifier;
+    private readonly IAuthenticationAbuseGuard _abuseGuard;
+    private readonly IAuthenticationThrottleResponseWriter _throttleResponseWriter;
     private readonly IJwtService _jwtService;
-    private readonly ILogger<AuthController> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public AuthController(
         UserManager<User> userManager,
-        SignInManager<User> signInManager,
+        IIdentityCredentialVerifier credentialVerifier,
+        IAuthenticationAbuseGuard abuseGuard,
+        IAuthenticationThrottleResponseWriter throttleResponseWriter,
         IJwtService jwtService,
-        ILogger<AuthController> logger)
+        TimeProvider timeProvider)
     {
         _userManager = userManager;
-        _signInManager = signInManager;
+        _credentialVerifier = credentialVerifier;
+        _abuseGuard = abuseGuard;
+        _throttleResponseWriter = throttleResponseWriter;
         _jwtService = jwtService;
-        _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
     /// Register a new user
     /// </summary>
     [HttpPost("register")]
+    [RequestSizeLimit(AuthenticationInputLimits.RequestBodyMaxBytes)]
+    [AuthenticationAbuseOperation(AuthenticationOperation.Registration)]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> Register(
+        [FromBody] RegisterRequest request,
+        CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
 
+        await using var accountAttempt = await _abuseGuard.BeginAccountAttemptAsync(
+            AuthenticationOperation.Registration,
+            HttpContext,
+            NormalizeAccount(request.Email),
+            cancellationToken);
+        if (!accountAttempt.IsAllowed)
+        {
+            return _throttleResponseWriter.CreateActionResult(accountAttempt.Decision);
+        }
+
         var user = new User
         {
             UserName = request.Email,
             Email = request.Email,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = _timeProvider.GetUtcNow().UtcDateTime
         };
 
         var result = await _userManager.CreateAsync(user, request.Password);
@@ -57,8 +80,6 @@ public class AuthController : ControllerBase
             }
             return BadRequest(ModelState);
         }
-
-        _logger.LogInformation("User {Email} registered successfully", request.Email);
 
         var token = _jwtService.GenerateToken(user);
 
@@ -78,33 +99,46 @@ public class AuthController : ControllerBase
     /// Login with email and password
     /// </summary>
     [HttpPost("login")]
+    [RequestSizeLimit(AuthenticationInputLimits.RequestBodyMaxBytes)]
+    [AuthenticationAbuseOperation(AuthenticationOperation.Login)]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> Login(
+        [FromBody] LoginRequest request,
+        CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
 
-        var user = await _userManager.FindByEmailAsync(request.Email);
-        if (user == null)
+        await using var accountAttempt = await _abuseGuard.BeginAccountAttemptAsync(
+            AuthenticationOperation.Login,
+            HttpContext,
+            NormalizeAccount(request.Email),
+            cancellationToken);
+        if (!accountAttempt.IsAllowed)
         {
-            return Unauthorized(new { message = "Invalid email or password" });
+            return _throttleResponseWriter.CreateActionResult(accountAttempt.Decision);
         }
 
-        var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: false);
-
-        if (!result.Succeeded)
+        var user = await _credentialVerifier.VerifyAsync(
+            request.Email,
+            request.Password,
+            cancellationToken);
+        if (user is null)
         {
+            var sprayDecision = _abuseGuard.RecordLoginFailure(accountAttempt);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!sprayDecision.IsAllowed)
+            {
+                return _throttleResponseWriter.CreateActionResult(sprayDecision);
+            }
+
             return Unauthorized(new { message = "Invalid email or password" });
         }
-
-        // Update last login time
-        user.LastLoginAt = DateTime.UtcNow;
-        await _userManager.UpdateAsync(user);
-
-        _logger.LogInformation("User {Email} logged in successfully", request.Email);
 
         var token = _jwtService.GenerateToken(user);
 
@@ -119,4 +153,7 @@ public class AuthController : ControllerBase
             }
         });
     }
+
+    private string NormalizeAccount(string email) =>
+        _userManager.NormalizeEmail(email) ?? email.ToUpperInvariant();
 }

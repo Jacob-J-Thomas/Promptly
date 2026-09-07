@@ -105,6 +105,56 @@ fingerprint. A validator cannot prove how an otherwise plausible sample was gene
 operators must still use the documented cryptographically secure generator. Never reuse a
 development or test signing key in Production.
 
+### 5. **Authentication Abuse Controls**
+
+Promptly enables persisted ASP.NET Identity lockout and bounded process-local fixed-window
+limits for registration and login requests. Defaults are fail-closed and can be overridden
+with the usual double-underscore environment-variable syntax:
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `AuthenticationAbuse__ApiReplicaCount` | `1` | Startup guard for the process-local implementation; any other value is rejected. |
+| `AuthenticationAbuse__IdentityMaxFailedAccessAttempts` | `5` | Failed passwords before persisted account lockout. |
+| `AuthenticationAbuse__IdentityLockoutSeconds` | `900` | Automatic lockout recovery interval. |
+| `AuthenticationAbuse__LoginIpPermitLimit` / `LoginIpWindowSeconds` | `30` / `60` | Login attempts per client and window. |
+| `AuthenticationAbuse__RegistrationIpPermitLimit` / `RegistrationIpWindowSeconds` | `5` / `900` | Registrations per client and window. |
+| `AuthenticationAbuse__LoginAccountPermitLimit` / `LoginAccountWindowSeconds` | `10` / `900` | Login attempts per normalized account and window. |
+| `AuthenticationAbuse__RegistrationAccountPermitLimit` / `RegistrationAccountWindowSeconds` | `3` / `900` | Registration attempts per normalized account and window. |
+| `AuthenticationAbuse__PasswordSprayDistinctAccountLimit` | `10` | Distinct failed account targets from one client before blocking it. |
+| `AuthenticationAbuse__PasswordSprayWindowSeconds` / `PasswordSprayBlockSeconds` | `600` / `900` | Spray observation and client-block periods. |
+| `AuthenticationAbuse__MaximumTrackedPartitions` | `10000` | Hard memory bound split across independently reserved login-client, registration-client, login-account/spray, and registration-account cohorts; new partitions fail closed within their cohort at capacity. |
+| `AuthenticationAbuse__MaximumTrackedSprayAccountEntries` | `50000` | Hard global bound for distinct hashed account keys retained by password-spray tracking; new distinct entries fail closed at capacity. |
+| `AuthenticationAbuse__AccountLockStripeCount` | `256` | Bounded zero-queue synchronization stripes for Identity updates; a busy stripe returns a generic one-second `429` instead of accumulating waiters. |
+| `AuthenticationAbuse__MaximumRetryAfterSeconds` | `900` | Maximum integer `Retry-After` returned to clients. |
+
+Limiter keys are one-way, process-keyed HMAC values; raw IP addresses and normalized account
+identifiers are not retained in limiter state. A restart clears request-limit state, while
+Identity lockout remains in PostgreSQL. This release deliberately supports one Server API
+replica: horizontal API scaling requires a shared, atomic limiter store and must not be enabled
+by bypassing the startup validator.
+
+Promptly ignores `X-Forwarded-For` by default. If a reverse proxy is the Server's only direct
+peer, add each exact canonical CIDR as an indexed value such as
+`AuthenticationAbuse__TrustedProxyNetworks__0=10.20.0.0/16`. Only a single unscoped unicast IP
+literal from an explicitly trusted direct peer is accepted; lists, ports, malformed values,
+and headers from untrusted peers are ignored. At most 256 trusted proxy networks are accepted.
+Publicly reachable proxies must be configured as exact `/32` or `/128` host routes; broader
+CIDRs are accepted only inside validated private and special-use ranges. IPv4 clients are
+partitioned by exact address; IPv6 clients are deliberately aggregated by canonical `/64`
+prefix so ordinary privacy-address rotation cannot bypass client or password-spray limits.
+
+Throttled authentication requests return `429 application/problem+json`, `Cache-Control:
+no-store`, a bounded integer `Retry-After`, and stable problem code
+`authentication_rate_limited`. Missing users, incorrect passwords, and locked accounts all
+return the same generic `401` response.
+
+Authentication JSON bodies are capped at 8 KiB before model binding. Email addresses are capped
+at 256 characters to match the ASP.NET Identity persistence boundary; registration display names
+have a separate 256-character input bound. New registration passwords are capped at 128
+characters and retain their 8-character minimum. Login accepts longer legacy passwords within
+the 8 KiB body cap so accounts created before this policy remain usable. Overlong bounded fields
+are rejected before account partitioning, password verification, or user persistence.
+
 ---
 
 ## 📝 Complete .env File Template
@@ -138,6 +188,9 @@ JWT__RetiredKeyFingerprints=
 JWT__Issuer=Promptly
 JWT__Audience=Promptly
 JWT__ExpiryMinutes=60
+
+# Authentication abuse controls are process-local and require one API replica.
+AuthenticationAbuse__ApiReplicaCount=1
 
 # ========================================
 # Optional: Test Runner Settings

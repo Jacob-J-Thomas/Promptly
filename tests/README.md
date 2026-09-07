@@ -2,15 +2,23 @@
 
 Promptly's automated test foundation is being added in dependency-ordered slices under issue #18.
 
-The expanding C# gate exercises the public behavior of `ExpectationEvaluator`, `BoundedRegexMatcher`, `MappingService`, and every production source file in the `Promptly.Infrastructure` assembly. It fails zero-test runs and enforces at least 90% line and branch coverage for each measured assembly and each named Application class:
+The expanding C# gate exercises named Application services, every production source in `Promptly.Infrastructure`, and the authentication/controller plus tenant/security Server sources listed by the application-verification workflow. It fails zero-test runs and enforces at least 90% line and branch coverage for each measured assembly, named top-level class, and measured source:
 
 ```bash
 dotnet test tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj --configuration Release --settings tests/Promptly.runsettings --logger "trx;LogFileName=Promptly.Application.UnitTests.trx" --results-directory artifacts/test-results/csharp
 ```
 
-The ignored `artifacts/test-results/csharp` directory receives the TRX result plus Cobertura and JSON coverage reports. GitHub Actions runs the same gate for every pull request and `main` push, verifies the exact measured assembly and Application source cohorts plus all checked-in Infrastructure C# sources, and retains those artifacts for 14 days.
+The ignored `artifacts/test-results/csharp` directory receives the TRX result plus Cobertura and JSON coverage reports. GitHub Actions runs the same gate for every pull request and `main` push, verifies the exact measured assembly/source/class cohorts, and retains those artifacts for 14 days.
 
-This expanding gate is not evidence of repository-wide 90% C# coverage; Application services outside the named cohort, Domain, Server, SDK, and CLI remain outside its denominator. Issues #18 and #19 remain open until every unit-testable production area is included in the required aggregate gates.
+The application workflow also fails unexpected skips or changes to the named high-risk
+authentication concurrency, capacity, cancellation, proxy, and private-response test cohort.
+The two opt-in live Python worker contracts are the only acknowledged skips in this unit-test
+job; the worker workflow executes those contracts separately against the real worker.
+
+The web workflow enforces the aggregate 90% line/branch threshold and the same threshold for
+the authentication error parser plus Login and Register pages individually.
+
+This expanding gate is not evidence of repository-wide 90% C# coverage; Application services and Server sources outside the named cohorts, plus Domain, SDK, and CLI, remain outside its denominator. Issues #18 and #19 remain open until every unit-testable production area is included in the required aggregate gates.
 
 ## Integration tests
 
@@ -20,6 +28,10 @@ Covered foundation contracts include:
 
 - empty-database migration and health startup;
 - registration, login failure, anonymous denial, and top-level two-user project isolation;
+- persisted authentication lockout/recovery; generic missing, wrong-password, and locked
+  responses; bounded client/account/registration/password-spray throttles; concurrency and
+  partition isolation; stable `429` retry contracts; trusted-proxy spoof resistance; and
+  pre-Identity authentication field/body limits;
 - owned suite YAML import persistence (semantic YAML export round-tripping remains tracked separately in issue #44);
 - real mapping proposal across Server, FastAPI, and the provider stub;
 - safe Server responses when the worker is unavailable or returns malformed JSON.

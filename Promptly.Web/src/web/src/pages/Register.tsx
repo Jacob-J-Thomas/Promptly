@@ -11,7 +11,12 @@ import {
 } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
-import { getApiErrorMessage } from '../api/errors';
+import { getAuthenticationErrorMessage } from '../api/errors';
+import {
+  AUTHENTICATION_EMAIL_MAX_LENGTH,
+  AUTHENTICATION_NAME_MAX_LENGTH,
+  AUTHENTICATION_PASSWORD_MAX_LENGTH,
+} from '../authenticationInputLimits';
 
 export const Register: React.FC = () => {
   const navigate = useNavigate();
@@ -49,7 +54,11 @@ export const Register: React.FC = () => {
       await register(name, email, password);
       navigate('/');
     } catch (error: unknown) {
-      setError(getApiErrorMessage(error, 'Registration failed. Please try again.'));
+      setError(getAuthenticationErrorMessage(
+        error,
+        'registration',
+        'Registration failed. Please try again.',
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -83,6 +92,7 @@ export const Register: React.FC = () => {
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
+              slotProps={{ htmlInput: { maxLength: AUTHENTICATION_NAME_MAX_LENGTH } }}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -94,6 +104,7 @@ export const Register: React.FC = () => {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              slotProps={{ htmlInput: { maxLength: AUTHENTICATION_EMAIL_MAX_LENGTH } }}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -106,6 +117,7 @@ export const Register: React.FC = () => {
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              slotProps={{ htmlInput: { maxLength: AUTHENTICATION_PASSWORD_MAX_LENGTH } }}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -118,6 +130,7 @@ export const Register: React.FC = () => {
               autoComplete="new-password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              slotProps={{ htmlInput: { maxLength: AUTHENTICATION_PASSWORD_MAX_LENGTH } }}
               sx={{ mb: 3 }}
             />
             <Button

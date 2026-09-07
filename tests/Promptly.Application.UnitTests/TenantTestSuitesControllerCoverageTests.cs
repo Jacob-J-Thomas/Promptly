@@ -62,7 +62,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
         Assert.IsType<NoContentResult>(await controller.DeleteTestSuite(suite.Id));
 
         var import = Assert.IsType<OkObjectResult>(
-            await controller.ImportTests(suite.Id, CreateFile("- id: imported")));
+            await ImportAsync(controller, suite.Id, "- id: imported"));
         var importResponse = Assert.IsType<ImportTestsResponse>(import.Value);
         Assert.Equal(1, importResponse.ImportedCount);
         Assert.Equal(["imported"], importResponse.ImportedTestIds);
@@ -97,7 +97,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
                 Guid.NewGuid(),
                 new UpdateTestSuiteRequest { Name = "suite" }),
             await controller.DeleteTestSuite(Guid.NewGuid()),
-            await controller.ImportTests(Guid.NewGuid(), CreateFile("tests: []")),
+            await ImportAsync(controller, Guid.NewGuid(), "tests: []"),
             await controller.ExportTests(Guid.NewGuid())
         };
 
@@ -123,7 +123,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
             await controller.GetTestSuite(id),
             await controller.UpdateTestSuite(id, new UpdateTestSuiteRequest { Name = "suite" }),
             await controller.DeleteTestSuite(id),
-            await controller.ImportTests(id, CreateFile("tests: []")),
+            await ImportAsync(controller, id, "tests: []"),
             await controller.ExportTests(id)
         };
 
@@ -141,13 +141,13 @@ public sealed class TenantTestSuitesControllerCoverageTests
 
         Assert.IsType<BadRequestObjectResult>(await controller.ImportTests(suite.Id, null!));
         Assert.IsType<BadRequestObjectResult>(
-            await controller.ImportTests(suite.Id, CreateFile(string.Empty)));
+            await ImportAsync(controller, suite.Id, string.Empty));
         Assert.IsType<NotFoundObjectResult>(
-            await controller.ImportTests(suite.Id, CreateFile("tests: []")));
+            await ImportAsync(controller, suite.Id, "tests: []"));
 
         yaml.DeserializeFailure = new InvalidOperationException("invalid yaml");
         var invalid = Assert.IsType<BadRequestObjectResult>(
-            await controller.ImportTests(suite.Id, CreateFile("invalid")));
+            await ImportAsync(controller, suite.Id, "invalid"));
         Assert.Contains("invalid yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
     }
 
@@ -207,7 +207,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
                 id,
                 new UpdateTestSuiteRequest { Name = "suite" }),
             SuiteAction.Delete => controller.DeleteTestSuite(id),
-            SuiteAction.Import => controller.ImportTests(id, CreateFile("tests: []")),
+            SuiteAction.Import => ImportAsync(controller, id, "tests: []"),
             SuiteAction.Export => controller.ExportTests(id),
             _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
         };
@@ -245,10 +245,15 @@ public sealed class TenantTestSuitesControllerCoverageTests
         ExpectationsJson = "[]"
     };
 
-    private static FormFile CreateFile(string content)
+    private static async Task<IActionResult> ImportAsync(
+        TestSuitesController controller,
+        Guid suiteId,
+        string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
-        return new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", "tests.yaml");
+        using var stream = new MemoryStream(bytes);
+        var file = new FormFile(stream, 0, bytes.Length, "file", "tests.yaml");
+        return await controller.ImportTests(suiteId, file);
     }
 
     public enum SuiteAction

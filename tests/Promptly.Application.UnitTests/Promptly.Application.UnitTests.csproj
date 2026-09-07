@@ -12,10 +12,10 @@
     <CoverletOutput>$(MSBuildProjectDirectory)/../../artifacts/test-results/csharp/coverage/coverage</CoverletOutput>
     <CoverletOutputFormat>cobertura,json</CoverletOutputFormat>
     <DeterministicReport>true</DeterministicReport>
-    <Include>[Promptly.Application]Promptly.Application.Services.ExpectationEvaluator,[Promptly.Application]Promptly.Application.Services.BoundedRegexMatcher,[Promptly.Application]Promptly.Application.Services.MappingService*,[Promptly.Application]Promptly.Application.Services.MappingSpecValidationException</Include>
+    <Include>[Promptly.Application]Promptly.Application.Services.ExpectationEvaluator,[Promptly.Application]Promptly.Application.Services.BoundedRegexMatcher,[Promptly.Application]Promptly.Application.Services.MappingService*,[Promptly.Application]Promptly.Application.Services.MappingSpecValidationException,[Promptly.Infrastructure]*</Include>
     <Threshold>90</Threshold>
     <ThresholdType>line,branch</ThresholdType>
-    <ThresholdStat>total</ThresholdStat>
+    <ThresholdStat>minimum</ThresholdStat>
   </PropertyGroup>
 
   <ItemGroup>

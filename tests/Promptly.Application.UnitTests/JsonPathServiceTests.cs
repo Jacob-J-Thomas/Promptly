@@ -57,4 +57,32 @@ public sealed class JsonPathServiceTests
         Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
         Assert.NotNull(exception.InnerException);
     }
+
+    [Fact]
+    public void Selection_treats_a_json_null_document_as_no_match()
+    {
+        Assert.Null(_service.SelectToken("null", "$"));
+        Assert.Empty(_service.SelectTokens("null", "$"));
+    }
+
+    [Fact]
+    public void Selection_filters_a_matched_json_null_value()
+    {
+        const string json = """{ "value": null }""";
+
+        Assert.Null(_service.SelectToken(json, "$.value"));
+        Assert.Empty(_service.SelectTokens(json, "$.value"));
+    }
+
+    [Fact]
+    public void SelectTokens_wraps_an_invalid_path_with_context()
+    {
+        const string invalidPath = "$[";
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            _service.SelectTokens("{}", invalidPath).ToArray());
+
+        Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
+        Assert.NotNull(exception.InnerException);
+    }
 }

@@ -45,6 +45,9 @@ jobs:
       - name: Lint without warnings
         run: npm run lint -- --max-warnings=0
 
+      - name: Verify E2E harness safety
+        run: npm run test:e2e:harness
+
       - name: Clean web verification artifacts
         shell: pwsh
         run: |

@@ -1,0 +1,235 @@
+services:
+  postgres:
+    image: postgres:18.4-alpine3.23@sha256:996d0920e4ff9df1fc19dacb904492f3c1ec0ec1cc338f0ad7123be7731c5f5e
+    environment:
+      POSTGRES_DB: promptly_e2e
+      POSTGRES_USER: promptly_e2e
+      POSTGRES_PASSWORD: ${PROMPTLY_E2E_DATABASE_PASSWORD:?PROMPTLY_E2E_DATABASE_PASSWORD must be set}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - promptly-control
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promptly_e2e -d promptly_e2e"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: "no"
+
+  provider-stub:
+    image: ${PROMPTLY_E2E_WORKER_IMAGE:?PROMPTLY_E2E_WORKER_IMAGE must be set}
+    entrypoint:
+      - python
+      - /provider_stub.py
+      - --bind-all
+      - --record-evidence
+    working_dir: /tmp
+    volumes:
+      - ../Promptly.Worker/scripts/provider_stub.py:/provider_stub.py:ro
+    networks:
+      - promptly-control
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import socket;
+          connection=socket.create_connection(('127.0.0.1',8080),timeout=2);
+          connection.close()
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+    restart: "no"
+
+  promptly-egress-proxy:
+    build:
+      context: egress-proxy
+      dockerfile: Dockerfile
+    expose:
+      - "4750"
+    networks:
+      - promptly-control
+      - promptly-egress
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 1.0
+    init: true
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "/smokescreen-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: "no"
+
+  promptly-eval:
+    image: ${PROMPTLY_E2E_WORKER_IMAGE:?PROMPTLY_E2E_WORKER_IMAGE must be set}
+    build:
+      context: ..
+      dockerfile: Promptly.Worker/Dockerfile
+    environment:
+      PROMPTLY_LLM_PROVIDER: openai
+      PROMPTLY_LLM_API_KEY: verification-only
+      PROMPTLY_LLM_BASE_URL: http://provider-stub:8080/v1
+      PROMPTLY_LLM_MODEL_DEFAULT: verification-model
+      PROMPTLY_LLM_TIMEOUT_SECONDS: "5"
+      HTTP_PROXY: http://promptly-egress-proxy:4750
+      HTTPS_PROXY: http://promptly-egress-proxy:4750
+      ALL_PROXY: ""
+      NO_PROXY: localhost,127.0.0.1,::1,promptly-server,promptly-eval,postgres,provider-stub
+      http_proxy: http://promptly-egress-proxy:4750
+      https_proxy: http://promptly-egress-proxy:4750
+      all_proxy: ""
+      no_proxy: localhost,127.0.0.1,::1,promptly-server,promptly-eval,postgres,provider-stub
+    expose:
+      - "8000"
+    networks:
+      - promptly-control
+    depends_on:
+      provider-stub:
+        condition: service_healthy
+      promptly-egress-proxy:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health/ready',timeout=3).read()
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: "no"
+
+  promptly-server:
+    build:
+      context: ..
+      dockerfile: Promptly.Server/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "5000"
+      ConnectionStrings__Default: Host=postgres;Database=promptly_e2e;Username=promptly_e2e;Password=${PROMPTLY_E2E_DATABASE_PASSWORD:?PROMPTLY_E2E_DATABASE_PASSWORD must be set}
+      JWT__Issuer: Promptly-E2E
+      JWT__Audience: Promptly-E2E
+      JWT__Key: ${PROMPTLY_E2E_JWT_KEY:?PROMPTLY_E2E_JWT_KEY must be set}
+      JWT__RetiredKeyFingerprints: ""
+      JWT__ExpiryMinutes: "1"
+      AuthenticationAbuse__ApiReplicaCount: "1"
+      AuthenticationAbuse__MaximumConcurrentAuthenticationRequests: "64"
+      DATA_PROTECTION_PATH: /app/dataprotection-keys
+      PROMPTLY_EVAL_BASE_URL: http://promptly-eval:8000
+      EndpointEgress__RequireProxy: "true"
+      EndpointEgress__ProxyUrl: http://promptly-egress-proxy:4750
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      no_proxy: ""
+    volumes:
+      - dataprotection-keys:/app/dataprotection-keys
+    networks:
+      - promptly-control
+    depends_on:
+      postgres:
+        condition: service_healthy
+      promptly-eval:
+        condition: service_healthy
+      promptly-egress-proxy:
+        condition: service_healthy
+    restart: "no"
+
+  promptly-web:
+    build:
+      context: ../Promptly.Web/src/web
+      dockerfile: Dockerfile
+    networks:
+      - promptly-control
+    depends_on:
+      promptly-server:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: "no"
+
+  promptly-ingress-gateway:
+    build:
+      context: e2e-ingress-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${PROMPTLY_E2E_API_PORT:?PROMPTLY_E2E_API_PORT must be set}:5000"
+      - "127.0.0.1:${PROMPTLY_E2E_WEB_PORT:?PROMPTLY_E2E_WEB_PORT must be set}:8080"
+    networks:
+      - promptly-control
+      - promptly-ingress
+    depends_on:
+      promptly-server:
+        condition: service_started
+      promptly-web:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=16m,mode=0755
+      - /var/run:rw,noexec,nosuid,nodev,size=1m,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.5
+    init: true
+    stop_grace_period: 10s
+    restart: "no"
+
+networks:
+  promptly-control:
+    driver: bridge
+    internal: true
+  promptly-ingress:
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+  promptly-egress:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  dataprotection-keys:

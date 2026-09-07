@@ -18,6 +18,30 @@ job; the worker workflow executes those contracts separately against the real wo
 The web workflow enforces the aggregate 90% line/branch threshold and the same threshold for
 the authentication error parser plus Login and Register pages individually.
 
+## Browser end-to-end tests
+
+The first checked-in Playwright slice proves the authentication/session boundary against a
+standalone production-composed stack: anonymous redirect, real UI registration/logout/login,
+and an expired signed JWT producing a real API 401, redirect, and storage cleanup. It does not
+claim the still-blocked project-to-result, CRUD/navigation, demo, or mapping journeys in #24.
+
+Run the exact gate from the web directory:
+
+```bash
+cd Promptly.Web/src/web
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The suite has a schema-versioned exact inventory, zero retries, no quarantine path, same-origin
+browser egress and error guards, per-run secrets and Compose state, bounded readiness, and
+unconditional cleanup. JUnit, JSON, HTML, failure media, sanitized provider evidence, Compose
+diagnostics, and topology/cleanup attestations are stored under
+`artifacts/test-results/e2e`. Retained trace archives are recursively inspected and sanitized
+before the workflow can create its upload-safe marker. See `Promptly.Web/src/web/e2e/README.md`
+for the complete policy.
+
 This expanding gate is not evidence of repository-wide 90% C# coverage; Application services and Server sources outside the named cohorts, plus Domain, SDK, and CLI, remain outside its denominator. Issues #18 and #19 remain open until every unit-testable production area is included in the required aggregate gates.
 
 ## Integration tests

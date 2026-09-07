@@ -183,7 +183,9 @@ Configuration via environment variables:
 
 Configuration via environment variables:
 
-- **VITE_API_BASE_URL**: Base URL for C# API (default: `http://localhost:5000`)
+- **VITE_API_BASE_URL**: Optional explicit base URL for the C# API. Development defaults
+  to `http://localhost:5000`; production builds default to the same-origin `/api` route
+  used by the static web container's reverse proxy.
 
 ## Usage
 
@@ -349,6 +351,19 @@ cd Promptly.Web/src/web
 npm install
 npm run dev
 ```
+
+**Production-composed browser gate**:
+```bash
+cd Promptly.Web/src/web
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+This bounded Playwright foundation uses disposable Compose state and real web, API,
+PostgreSQL, worker, and deterministic-provider services. See
+[`Promptly.Web/src/web/e2e/README.md`](Promptly.Web/src/web/e2e/README.md) for its exact
+test inventory, evidence paths, failure policy, and remaining #24 scope.
 
 ### Database Migrations
 

@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:coverage": "npm test -- --coverage",
     "test:e2e:harness": "node --test e2e/*.node-test.mjs",
-    "test:e2e": "node e2e/run-composed.mjs",
+    "test:e2e": "node e2e/run-composed-orchestrator.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -47,6 +47,7 @@
     "vitest": "4.1.10"
   },
   "overrides": {
+    "@humanfs/node": "0.16.8",
     "dompurify": "3.4.13"
   }
 }

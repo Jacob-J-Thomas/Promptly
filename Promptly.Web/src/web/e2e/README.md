@@ -1,11 +1,15 @@
 # Production-composed browser verification
 
-This gate proves only the currently implemented authentication/session boundary:
+This gate proves the implemented authentication/session and Run Suite boundaries:
 
 - anonymous protected-route redirect;
 - browser registration, Projects arrival, logout, and login through the real API;
 - a deterministically expired, test-signed JWT receiving a real protected-API 401,
   redirecting to login, and clearing both stored auth entries.
+- authenticated persisted project, environment, endpoint, mapping, suite, and test
+  setup followed by a queued Run Suite with one deterministic passing expectation;
+- direct-mode fixture isolation, exact destination allowlisting, and rejection of
+  an unrelated private destination.
 
 It does not claim the remaining project-to-result, CRUD/navigation, demo, or
 mapping journeys tracked by #24 and their product blockers.
@@ -22,17 +26,22 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-`npm run test:e2e` is the only supported entry point. It generates unique
-Compose project state, high-entropy database/JWT secrets, and free loopback web
-and API ports; builds the static web, Production server, worker, provider stub,
-egress proxy, and dedicated host-ingress gateway; waits with fixed bounds; runs
-the exact required-test inventory; collects evidence; and unconditionally removes
-the containers, networks, volumes, and per-run images. It never calls a reset
-endpoint and never uses production credentials.
+`npm run test:e2e` is the only supported entry point. It executes two required
+phases with separate Compose projects: the original proxy-mode authentication and
+ingress/egress phase, followed by the direct-mode Run Suite fixture. Each phase
+generates unique Compose project state, high-entropy database/JWT secrets, and
+free loopback web and API ports; builds the Production server, worker, provider
+stub, egress proxy, and dedicated host-ingress gateway; waits with fixed bounds;
+collects a phase receipt; and unconditionally removes its containers, networks,
+volumes, and per-run images. The direct phase adds one fixed-address internal
+fixture service with one exact host/port/CIDR rule and never joins the egress
+network. Both phase receipts are required for the aggregate gate. It never calls
+a reset endpoint and never uses production credentials.
 
 Artifacts are written under `artifacts/test-results/e2e`:
 
-- `junit.xml`, `results.json`, `verification.json`, and `html/index.html`;
+- `proxy/` and `direct/` phase receipts, reports, and `html/index.html` files;
+- aggregate phase receipts, metadata, cleanup attestation, and upload marker;
 - retained failure traces, screenshots, and videos under `playwright-output`;
 - sanitized provider requests, Compose logs/state/images, topology and cleanup
   attestations, runner log, and run metadata.

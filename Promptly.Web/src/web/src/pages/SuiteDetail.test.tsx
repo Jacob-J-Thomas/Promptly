@@ -12,6 +12,10 @@ const router = vi.hoisted(() => ({
   suiteId: 'suite-1' as string | undefined,
 }));
 
+const runDialogMock = vi.hoisted(() => ({
+  projectId: '',
+}));
+
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return {
@@ -23,6 +27,28 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 vi.mock('../components/Layout', () => ({
   Layout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock('../components/RunConfigDialog', () => ({
+  RunConfigDialog: ({
+    open,
+    onClose,
+    projectId,
+  }: {
+    open: boolean;
+    onClose: () => void;
+    projectId: string;
+  }) => {
+    runDialogMock.projectId = projectId;
+    if (!open) return null;
+    return (
+      <div role="dialog" aria-label="Run Test Suite">
+        <input aria-label="Git Commit Hash (optional)" />
+        <button type="button" onClick={onClose}>Cancel</button>
+        <button type="button" disabled>Start Run</button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../api/suites', () => ({
@@ -164,6 +190,7 @@ describe('SuiteDetail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Run Suite' }));
     expect(screen.getByRole('dialog', { name: 'Run Test Suite' })).toBeInTheDocument();
+    expect(runDialogMock.projectId).toBe('project-1');
     fireEvent.change(screen.getByLabelText('Git Commit Hash (optional)'), {
       target: { value: 'abc123' },
     });

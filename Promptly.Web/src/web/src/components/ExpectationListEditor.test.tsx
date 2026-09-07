@@ -47,15 +47,51 @@ describe('ExpectationListEditor', () => {
   it('groups add choices as Text, Tools, and AI and emits explicit defaults', () => {
     const onChange = renderEditor([]);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add expectation' }));
+    const choices = [
+      ['Contains text', { type: 'contains_text', text: '', case_insensitive: true }],
+      ['Banned text', { type: 'banned_text', text: '', case_insensitive: true }],
+      ['Regex match', { type: 'regex_match', pattern: '', case_insensitive: true }],
+      ['Link pattern', { type: 'link_pattern', pattern: '' }],
+      ['Tool called', { type: 'tool_called', tool_name: '' }],
+      ['Tool sequence', { type: 'tool_sequence', sequence: [''], exact_sequence: true }],
+      ['LLM judge', { type: 'llm_judge', rubric: '', min_score: 0.8 }],
+      ['Groundedness', { type: 'groundedness', min_score: 0.8 }],
+    ] as const;
+
+    choices.forEach(([label]) => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add expectation' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: label }));
+    });
+
     expect(screen.getByText('Text')).toBeInTheDocument();
     expect(screen.getByText('Tools')).toBeInTheDocument();
     expect(screen.getByText('AI')).toBeInTheDocument();
+    expect(onChange).toHaveBeenCalledTimes(choices.length);
+    choices.forEach(([, expected], index) => {
+      expect(onChange).toHaveBeenNthCalledWith(index + 1, [expected]);
+    });
+  });
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Regex match' }));
-    expect(onChange).toHaveBeenCalledWith([
-      { type: 'regex_match', pattern: '', case_insensitive: true },
-    ]);
+  it('changes a row type through the select and retains stored AI metadata', () => {
+    const expectations: ExpectationDraft[] = [{
+      type: 'llm_judge',
+      rubric: 'Answer well',
+      min_score: 0.8,
+      model: 'stored-model',
+      provider: 'stored-provider',
+    }];
+    const onChange = renderEditor(expectations);
+    const row = screen.getByRole('group', { name: 'Expectation 1' });
+
+    fireEvent.mouseDown(within(row).getByRole('combobox'));
+    fireEvent.click(screen.getByRole('option', { name: 'Groundedness' }));
+
+    expect(onChange).toHaveBeenCalledWith([{
+      type: 'groundedness',
+      min_score: 0.8,
+      model: 'stored-model',
+      provider: 'stored-provider',
+    }]);
   });
 
   it('edits fields immutably while retaining stored AI model and provider metadata', () => {
@@ -120,9 +156,38 @@ describe('ExpectationListEditor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Move expectation 2 up' }));
     expect(onChange).toHaveBeenLastCalledWith([expectations[1], expectations[0], ...expectations.slice(2)]);
+    fireEvent.click(screen.getByRole('button', { name: 'Move expectation 1 down' }));
+    expect(onChange).toHaveBeenLastCalledWith([expectations[1], expectations[0], ...expectations.slice(2)]);
     fireEvent.click(screen.getByRole('button', { name: 'Delete expectation 2' }));
     expect(onChange).toHaveBeenLastCalledWith([expectations[0], ...expectations.slice(2)]);
     expect(expectations[0].type).toBe('contains_text');
+  });
+
+  it('shows field errors for malformed rows and preserves unsupported values for repair', () => {
+    renderEditor([
+      { type: 'contains_text', text: 42, case_insensitive: 'yes' },
+      { type: 'banned_text', text: 'failure', case_insensitive: false, retained: 'metadata' },
+      { type: 'link_pattern', pattern: null },
+      { type: 'tool_called', tool_name: 42 },
+      { type: 'tool_sequence', sequence: 'not-a-list', exact_sequence: 'yes' },
+      { type: 'llm_judge', rubric: 42, min_score: '0.5', model: 42 },
+      { type: 'groundedness', min_score: '' },
+      { type: 'future_type', value: true },
+    ]);
+
+    expect(screen.getByText('Text must be text.')).toBeInTheDocument();
+    expect(screen.getByText('Case-insensitive flag must be true or false.')).toBeInTheDocument();
+    expect(screen.getByText('Link pattern must be text.')).toBeInTheDocument();
+    expect(screen.getByText('Tool name must be text.')).toBeInTheDocument();
+    expect(screen.getByText('Add at least one tool to the sequence.')).toBeInTheDocument();
+    expect(screen.getByText('Exact-sequence flag must be true or false.')).toBeInTheDocument();
+    expect(screen.getByText('Rubric must be text.')).toBeInTheDocument();
+    expect(screen.getByText('Score must be a finite number between 0 and 1.')).toBeInTheDocument();
+    expect(screen.getByText('This expectation type is not supported. Choose a supported type to continue.'))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Stored fields that this editor does not use will be retained/))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText('Minimum score for expectation 7')).toHaveValue('');
   });
 
   it('shows actionable validation for empty and incomplete drafts without inventing rows', () => {

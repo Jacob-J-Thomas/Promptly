@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AxiosError, AxiosHeaders } from 'axios';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { endpointsApi, type Endpoint } from '../api/endpoints';
 import { environmentsApi, type Environment } from '../api/environments';
@@ -115,6 +116,7 @@ const renderDialog = () => {
       suiteId="suite-1"
       onRunStarted={onRunStarted}
     />,
+    { wrapper: MemoryRouter },
   );
   return { ...rendered, onClose, onRunStarted };
 };
@@ -250,12 +252,20 @@ describe('RunConfigDialog', () => {
 
   it('clears mapping immediately and ignores stale mapping responses', async () => {
     let resolveDevelopmentMapping: ((value: MappingSpec[]) => void) | undefined;
-    vi.mocked(endpointsApi.getByEnvironment).mockResolvedValue([endpointOne, endpointTwo]);
+    const secondEndpoint: Endpoint = {
+      ...endpointTwo,
+      environmentId: environmentOne.id,
+    };
+    const secondMapping: MappingSpec = {
+      ...mappingTwo,
+      endpointId: secondEndpoint.id,
+    };
+    vi.mocked(endpointsApi.getByEnvironment).mockResolvedValue([endpointOne, secondEndpoint]);
     vi.mocked(mappingApi.getByEndpoint).mockImplementation((endpointId) => {
       if (endpointId === endpointOne.id) {
         return new Promise((resolve) => { resolveDevelopmentMapping = resolve; });
       }
-      return Promise.resolve([mappingTwo]);
+      return Promise.resolve([secondMapping]);
     });
     renderDialog();
 

@@ -134,9 +134,10 @@ test('persisted Run Suite configuration queues a run and loads its result', asyn
   await expect.poll(async () => {
     const current = await api(page, `/api/runs/${run.id}`, 'GET');
     return (current.body as { status?: number | string }).status;
-  }, { timeout: 20_000, intervals: [1_000, 2_000] }).toBe('Completed');
+  }, { timeout: 20_000, intervals: [1_000, 2_000] }).toBe(2);
   await page.reload();
-  await expect(page.getByText('Completed', { exact: true })).toBeVisible();
+  const runStatus = page.getByRole('heading', { name: 'Run Status' }).locator('xpath=..');
+  await expect(runStatus.getByText('Completed', { exact: true })).toBeVisible();
   await expect(page.getByText('Test Results (1)', { exact: true })).toBeVisible();
   await expect(page.getByText('Provider fixture response', { exact: true })).toBeVisible();
   await expect(page.getByText('Pass', { exact: true })).toBeVisible();
@@ -199,7 +200,7 @@ test('persisted Run Suite configuration queues a run and loads its result', asyn
   await expect.poll(async () => {
     const current = await api(page, `/api/runs/${deniedRunId}`, 'GET');
     return (current.body as { status?: number | string }).status;
-  }, { timeout: 20_000, intervals: [1_000, 2_000] }).toBe('Completed');
+  }, { timeout: 20_000, intervals: [1_000, 2_000] }).toBe(2);
   const deniedResults = await api(page, `/api/runs/${deniedRunId}/results`, 'GET');
   expect(deniedResults.status).toBe(200);
   const [deniedResult] = deniedResults.body as Array<{

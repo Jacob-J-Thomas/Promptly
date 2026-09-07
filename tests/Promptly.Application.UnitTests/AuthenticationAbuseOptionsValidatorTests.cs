@@ -32,6 +32,7 @@ public sealed class AuthenticationAbuseOptionsValidatorTests
         Assert.Equal(10, options.PasswordSprayDistinctAccountLimit);
         Assert.Equal(600, options.PasswordSprayWindowSeconds);
         Assert.Equal(900, options.PasswordSprayBlockSeconds);
+        Assert.Equal(16, options.MaximumConcurrentAuthenticationRequests);
         Assert.Equal(10_000, options.MaximumTrackedPartitions);
         Assert.Equal(50_000, options.MaximumTrackedSprayAccountEntries);
         Assert.Equal(256, options.AccountLockStripeCount);
@@ -69,6 +70,8 @@ public sealed class AuthenticationAbuseOptionsValidatorTests
     [InlineData(nameof(AuthenticationAbuseOptions.PasswordSprayWindowSeconds), 3_601)]
     [InlineData(nameof(AuthenticationAbuseOptions.PasswordSprayBlockSeconds), 0)]
     [InlineData(nameof(AuthenticationAbuseOptions.PasswordSprayBlockSeconds), 3_601)]
+    [InlineData(nameof(AuthenticationAbuseOptions.MaximumConcurrentAuthenticationRequests), 0)]
+    [InlineData(nameof(AuthenticationAbuseOptions.MaximumConcurrentAuthenticationRequests), 257)]
     [InlineData(nameof(AuthenticationAbuseOptions.MaximumTrackedPartitions), 63)]
     [InlineData(nameof(AuthenticationAbuseOptions.MaximumTrackedPartitions), 1_000_001)]
     [InlineData(nameof(AuthenticationAbuseOptions.MaximumTrackedSprayAccountEntries), 63)]
@@ -106,6 +109,7 @@ public sealed class AuthenticationAbuseOptionsValidatorTests
             PasswordSprayDistinctAccountLimit = 2,
             PasswordSprayWindowSeconds = 1,
             PasswordSprayBlockSeconds = 1,
+            MaximumConcurrentAuthenticationRequests = 1,
             MaximumTrackedPartitions = 64,
             MaximumTrackedSprayAccountEntries = 64,
             AccountLockStripeCount = 16,
@@ -136,6 +140,7 @@ public sealed class AuthenticationAbuseOptionsValidatorTests
             PasswordSprayDistinctAccountLimit = 10_000,
             PasswordSprayWindowSeconds = 3_600,
             PasswordSprayBlockSeconds = 3_600,
+            MaximumConcurrentAuthenticationRequests = 256,
             MaximumTrackedPartitions = 1_000_000,
             MaximumTrackedSprayAccountEntries = 1_000_000,
             AccountLockStripeCount = 4_096,
@@ -455,6 +460,9 @@ public sealed class AuthenticationAbuseOptionsValidatorTests
                 break;
             case nameof(AuthenticationAbuseOptions.PasswordSprayBlockSeconds):
                 options.PasswordSprayBlockSeconds = value;
+                break;
+            case nameof(AuthenticationAbuseOptions.MaximumConcurrentAuthenticationRequests):
+                options.MaximumConcurrentAuthenticationRequests = value;
                 break;
             case nameof(AuthenticationAbuseOptions.MaximumTrackedPartitions):
                 options.MaximumTrackedPartitions = value;

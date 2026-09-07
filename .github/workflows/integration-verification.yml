@@ -105,10 +105,11 @@ jobs:
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Password_spray_blocks_login_but_not_an_isolated_client"; Count = 1 }
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Forwarded_for_is_ignored_from_untrusted_peers_and_partitioned_for_trusted_proxy"; Count = 1 }
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Concurrent_client_admission_is_exact_and_malformed_json_consumes_permits"; Count = 1 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Aggregate_authentication_saturation_is_zero_queue_and_recovers_after_cancellation"; Count = 1 }
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Overlong_authentication_fields_are_rejected_before_identity_work"; Count = 1 }
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Legacy_password_above_registration_limit_remains_login_compatible"; Count = 1 }
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseTests.Oversized_authentication_bodies_return_413_before_identity_work"; Count = 1 }
-            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseConfigurationStartupTests.Unsafe_configuration_fails_before_host_startup"; Count = 5 }
+            @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseConfigurationStartupTests.Unsafe_configuration_fails_before_host_startup"; Count = 6 }
             @{ BaseName = "Promptly.IntegrationTests.AuthenticationAbuseConfigurationStartupTests.Defaults_and_safe_proxy_override_start_a_healthy_host"; Count = 2 }
           )
           $executedNames = @(

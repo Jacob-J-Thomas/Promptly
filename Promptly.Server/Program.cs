@@ -136,6 +136,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IAuthenticationPartitionKeyProvider, AuthenticationPartitionKeyProvider>();
 builder.Services.AddSingleton<IAuthenticationAbuseGuard, AuthenticationAbuseGuard>();
 builder.Services.AddSingleton<
+    IAuthenticationRequestAdmissionGate,
+    AuthenticationRequestAdmissionGate>();
+builder.Services.AddSingleton<
     IAuthenticationThrottleResponseWriter,
     AuthenticationThrottleResponseWriter>();
 builder.Services.AddSingleton<IInvalidCredentialPasswordVerifier, InvalidCredentialPasswordVerifier>();

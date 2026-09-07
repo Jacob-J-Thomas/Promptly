@@ -15,10 +15,12 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
     public async Task InvokeAsync(
         HttpContext httpContext,
         IAuthenticationAbuseGuard abuseGuard,
+        IAuthenticationRequestAdmissionGate requestAdmissionGate,
         IAuthenticationThrottleResponseWriter responseWriter)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         ArgumentNullException.ThrowIfNull(abuseGuard);
+        ArgumentNullException.ThrowIfNull(requestAdmissionGate);
         ArgumentNullException.ThrowIfNull(responseWriter);
 
         var operation = httpContext.GetEndpoint()
@@ -46,6 +48,17 @@ public sealed class AuthenticationAbuseMiddleware(RequestDelegate next)
             await responseWriter.WriteAsync(
                     httpContext,
                     decision,
+                    httpContext.RequestAborted)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        using var admissionLease = requestAdmissionGate.TryAcquire(operation.Operation);
+        if (admissionLease is null)
+        {
+            await responseWriter.WriteAsync(
+                    httpContext,
+                    AuthenticationThrottleDecision.RejectAfter(1),
                     httpContext.RequestAborted)
                 .ConfigureAwait(false);
             return;

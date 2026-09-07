@@ -3,6 +3,7 @@ import { EventEmitter, once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -166,6 +167,15 @@ test('waits for child close after a child error', async () => {
   runner.dispose();
 });
 
+const processIsAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const waitForFile = async (filePath) => {
   const deadline = Date.now() + 2_000;
   while (Date.now() < deadline) {
@@ -251,6 +261,117 @@ setInterval(() => {}, 1_000);
         const closed = once(child, 'close');
         child.kill('SIGKILL');
         await closed;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [signal, exitCode, otherSignal] of [
+  ['SIGINT', 130, 'SIGTERM'],
+  ['SIGTERM', 143, 'SIGINT'],
+]) {
+  test('real parent survives repeated OS ' + signal + ' during child cleanup', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'promptly-parent-runner-'));
+    const readyFile = path.join(directory, 'ready');
+    const cleanupFile = path.join(directory, 'cleanup');
+    const releaseFile = path.join(directory, 'release');
+    const finishedFile = path.join(directory, 'finished');
+    const childPidFile = path.join(directory, 'child-pid');
+    const resultFile = path.join(directory, 'result.json');
+    const childScript = path.join(directory, 'child.mjs');
+    const lifecycleModule = path.resolve('Promptly.Web/src/web/e2e/orchestrator-lifecycle.mjs');
+    await writeFile(childScript, [
+      "import { existsSync, writeFileSync } from 'node:fs';",
+      '',
+      'let handled = false;',
+      'const stop = (code) => {',
+      '  if (handled) return;',
+      '  handled = true;',
+      "  writeFileSync(process.env.PROMPTLY_TEST_CLEANUP_FILE, 'started');",
+      '  const finishWhenReleased = () => {',
+      '    if (existsSync(process.env.PROMPTLY_TEST_RELEASE_FILE)) {',
+      "      writeFileSync(process.env.PROMPTLY_TEST_FINISHED_FILE, 'finished');",
+      '      process.exit(code);',
+      '      return;',
+      '    }',
+      '    setTimeout(finishWhenReleased, 10);',
+      '  };',
+      '  finishWhenReleased();',
+      '};',
+      "process.on('SIGINT', () => stop(130));",
+      "process.on('SIGTERM', () => stop(143));",
+      'writeFileSync(process.env.PROMPTLY_TEST_CHILD_PID_FILE, String(process.pid));',
+      "writeFileSync(process.env.PROMPTLY_TEST_READY_FILE, 'ready');",
+      'setInterval(() => {}, 1_000);',
+    ].join('\n'));
+    const parentSource = [
+      "import { writeFileSync } from 'node:fs';",
+      "const { createPhaseProcessRunner } = await import(process.env.PROMPTLY_TEST_LIFECYCLE_MODULE);",
+      'const runner = createPhaseProcessRunner({',
+      '  phaseRunner: process.env.PROMPTLY_TEST_CHILD_SCRIPT,',
+      '  repositoryRoot: process.env.PROMPTLY_TEST_ROOT,',
+      '});',
+      "const result = await runner.runPhase('proxy');",
+      'writeFileSync(process.env.PROMPTLY_TEST_RESULT_FILE, JSON.stringify(result));',
+      'runner.dispose();',
+    ].join('\n');
+
+    let parent = null;
+    let childPid = null;
+    let parentStderr = '';
+    const parentEnvironment = {
+      ...process.env,
+      PROMPTLY_TEST_READY_FILE: readyFile,
+      PROMPTLY_TEST_CLEANUP_FILE: cleanupFile,
+      PROMPTLY_TEST_RELEASE_FILE: releaseFile,
+      PROMPTLY_TEST_FINISHED_FILE: finishedFile,
+      PROMPTLY_TEST_CHILD_PID_FILE: childPidFile,
+      PROMPTLY_TEST_RESULT_FILE: resultFile,
+      PROMPTLY_TEST_CHILD_SCRIPT: childScript,
+      PROMPTLY_TEST_LIFECYCLE_MODULE: pathToFileURL(lifecycleModule).href,
+      PROMPTLY_TEST_ROOT: directory,
+    };
+
+    try {
+      parent = spawn(process.execPath, ['--input-type=module', '--eval', parentSource], {
+        cwd: directory,
+        env: parentEnvironment,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      parent.stderr.setEncoding('utf8');
+      parent.stderr.on('data', (chunk) => { parentStderr += chunk; });
+      const parentClosed = once(parent, 'close');
+      await waitForFile(readyFile);
+      childPid = Number.parseInt(await readFile(childPidFile, 'utf8'), 10);
+      assert.equal(processIsAlive(parent.pid), true);
+      assert.equal(processIsAlive(childPid), true);
+
+      process.kill(parent.pid, signal);
+      await waitForFile(cleanupFile);
+      process.kill(parent.pid, signal);
+      process.kill(parent.pid, otherSignal);
+      await delay(30);
+      assert.equal(processIsAlive(parent.pid), true, 'repeated OS signals must not kill the orchestrator');
+      assert.equal(await readFile(finishedFile, 'utf8').catch(() => null), null);
+
+      await writeFile(releaseFile, 'release');
+      const [parentExit, parentSignal] = await parentClosed;
+      assert.equal(parentExit, 0, parentStderr);
+      assert.equal(parentSignal, null, parentStderr);
+      const result = JSON.parse(await readFile(resultFile, 'utf8'));
+      assert.equal(result.cancelled, true);
+      assert.equal(result.signal, signal);
+      assert.equal(result.code, exitCode);
+      assert.equal(await readFile(finishedFile, 'utf8'), 'finished');
+      assert.equal(processIsAlive(childPid), false, 'the child must be reaped after cleanup');
+    } finally {
+      if (parent && parent.exitCode === null) {
+        parent.kill('SIGKILL');
+        await once(parent, 'close');
+      }
+      if (childPid && processIsAlive(childPid)) {
+        process.kill(childPid, 'SIGKILL');
       }
       await rm(directory, { recursive: true, force: true });
     }

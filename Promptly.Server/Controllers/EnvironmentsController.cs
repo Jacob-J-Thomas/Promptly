@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
+using Promptly.Application.Models;
 using Promptly.Server.Models;
 using Promptly.Server.Security;
 
@@ -113,12 +114,20 @@ public class EnvironmentsController : ControllerBase
             return Unauthorized();
         }
 
-        var environment = await _environmentService.CreateEnvironmentAsync(
-            projectId,
-            request.Name,
-            request.BaseUrl,
-            request.Headers,
-            scope);
+        Promptly.Domain.Entities.Environment? environment;
+        try
+        {
+            environment = await _environmentService.CreateEnvironmentAsync(
+                projectId,
+                request.Name,
+                request.BaseUrl,
+                request.Headers,
+                scope);
+        }
+        catch (EnvironmentBaseUrlValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
 
         if (environment == null)
         {
@@ -156,12 +165,20 @@ public class EnvironmentsController : ControllerBase
             return Unauthorized();
         }
 
-        var environment = await _environmentService.UpdateEnvironmentAsync(
-            environmentId,
-            request.Name,
-            request.BaseUrl,
-            request.Headers,
-            scope);
+        Promptly.Domain.Entities.Environment? environment;
+        try
+        {
+            environment = await _environmentService.UpdateEnvironmentAsync(
+                environmentId,
+                request.Name,
+                request.BaseUrl,
+                request.Headers,
+                scope);
+        }
+        catch (EnvironmentBaseUrlValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
 
         if (environment == null)
         {

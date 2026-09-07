@@ -99,16 +99,17 @@ public static class EndpointTargetPolicy
         return true;
     }
 
-    private static bool TryValidateBaseUri(
+    public static bool TryValidateBaseUri(
         string? environmentBaseUrl,
-        out Uri baseUri,
+        [NotNullWhen(true)] out Uri? baseUri,
         out string validationError)
     {
-        baseUri = null!;
+        baseUri = null;
 
         if (string.IsNullOrEmpty(environmentBaseUrl)
             || environmentBaseUrl.Any(character =>
                 char.IsControl(character) || char.IsWhiteSpace(character))
+            || HasUnpairedSurrogate(environmentBaseUrl)
             || environmentBaseUrl.Contains('\\')
             || !Uri.TryCreate(environmentBaseUrl, UriKind.Absolute, out var candidate)
             || !IsHttpScheme(candidate.Scheme)
@@ -122,6 +123,16 @@ public static class EndpointTargetPolicy
         baseUri = candidate;
         validationError = string.Empty;
         return true;
+    }
+
+    public static Uri EnsureBaseUri(string? environmentBaseUrl)
+    {
+        if (!TryValidateBaseUri(environmentBaseUrl, out var baseUri, out var validationError))
+        {
+            throw new EnvironmentBaseUrlValidationException(validationError);
+        }
+
+        return baseUri;
     }
 
     public static bool IsAllowedResolvedTarget(Uri environmentBaseUri, Uri candidate) =>
@@ -216,6 +227,14 @@ public sealed class EndpointTargetValidationException : ArgumentException
     }
 }
 
+public sealed class EnvironmentBaseUrlValidationException : ArgumentException
+{
+    public EnvironmentBaseUrlValidationException(string detail)
+        : base($"Invalid environment base URL: {detail}", "baseUrl")
+    {
+    }
+}
+
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Parameter)]
 public sealed class EndpointTargetAttribute : ValidationAttribute
 {
@@ -237,5 +256,30 @@ public sealed class EndpointTargetAttribute : ValidationAttribute
         }
 
         return new ValidationResult($"Invalid endpoint target: {validationError}");
+    }
+}
+
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Parameter)]
+public sealed class EnvironmentBaseUrlAttribute : ValidationAttribute
+{
+    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
+    {
+        if (value == null)
+        {
+            return ValidationResult.Success;
+        }
+
+        if (value is not string baseUrl)
+        {
+            return new ValidationResult(
+                "Invalid environment base URL: the environment base URL must be text");
+        }
+
+        if (EndpointTargetPolicy.TryValidateBaseUri(baseUrl, out _, out var validationError))
+        {
+            return ValidationResult.Success;
+        }
+
+        return new ValidationResult($"Invalid environment base URL: {validationError}");
     }
 }

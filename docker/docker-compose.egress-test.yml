@@ -1,0 +1,269 @@
+services:
+  promptly-eval:
+    environment:
+      PROMPTLY_LLM_PROVIDER: openai
+      PROMPTLY_LLM_API_KEY: verification-only
+      PROMPTLY_LLM_BASE_URL: https://allowed-tls.test:8443/v1
+      PROMPTLY_LLM_MODEL_DEFAULT: verification-model
+      PROMPTLY_LLM_TIMEOUT_SECONDS: "10"
+      SSL_CERT_FILE: /test/tls/ca.crt
+    volumes:
+      - ./egress-proxy/tests/tls/ca.crt:/test/tls/ca.crt:ro
+    depends_on:
+      promptly-egress-proxy:
+        condition: service_healthy
+      egress-test-allowed-tls-recorder:
+        condition: service_started
+
+  promptly-egress-proxy:
+    command:
+      - --config-file=/etc/smokescreen/smokescreen.yaml
+      - --resolver-address=11.252.0.53:5353
+    networks:
+      - promptly-control
+      - promptly-egress
+      - egress-test-public
+      - egress-test-private
+      - egress-test-metadata
+      - egress-test-rebind
+      - egress-test-reserved-v6
+      - egress-test-dns
+    depends_on:
+      egress-test-dns:
+        condition: service_started
+    restart: "no"
+
+  egress-test-dns:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/dns_rebinder.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/dns_rebinder.py:/test/dns_rebinder.py:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/dns.jsonl:/evidence/dns.jsonl
+    networks:
+      egress-test-dns:
+        ipv4_address: 11.252.0.53
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-dns-preflight:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/dns_preflight.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/dns_preflight.py:/test/dns_preflight.py:ro
+    networks:
+      - egress-test-dns
+    depends_on:
+      egress-test-dns:
+        condition: service_started
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-allowed-recorder:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/recorder.py"]
+    environment:
+      RECORDER_BIND_ADDRESS: 11.253.0.10
+      RECORDER_MARKER: allowed
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/allowed.jsonl:/evidence/record.jsonl
+    networks:
+      egress-test-public:
+        ipv4_address: 11.253.0.10
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-allowed-tls-recorder:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/recorder.py"]
+    environment:
+      RECORDER_BIND_ADDRESS: 11.253.0.11
+      RECORDER_BIND_PORT: "8443"
+      RECORDER_MARKER: allowed-tls
+      RECORDER_RESPONSE_BODY: '{"object":"list","data":[]}'
+      RECORDER_RESPONSE_CONTENT_TYPE: application/json
+      RECORDER_TLS_CERTIFICATE_PATH: /test/tls/server.crt
+      RECORDER_TLS_KEY_PATH: /test/tls/server.key
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
+      - ./egress-proxy/tests/tls/server.crt:/test/tls/server.crt:ro
+      - ./egress-proxy/tests/tls/server.key:/test/tls/server.key:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/allowed-tls.jsonl:/evidence/record.jsonl
+    networks:
+      egress-test-public:
+        ipv4_address: 11.253.0.11
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-private-recorder:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/recorder.py"]
+    environment:
+      RECORDER_BIND_ADDRESS: 10.253.0.10
+      RECORDER_MARKER: private
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/private.jsonl:/evidence/record.jsonl
+    networks:
+      egress-test-private:
+        ipv4_address: 10.253.0.10
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-metadata-recorder:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/recorder.py"]
+    environment:
+      RECORDER_BIND_ADDRESS: 100.100.100.200
+      RECORDER_MARKER: metadata
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/metadata.jsonl:/evidence/record.jsonl
+    networks:
+      egress-test-metadata:
+        ipv4_address: 100.100.100.200
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-rebind-recorder:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/recorder.py"]
+    environment:
+      RECORDER_BIND_ADDRESS: 10.252.0.11
+      RECORDER_MARKER: rebind
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/rebind.jsonl:/evidence/record.jsonl
+    networks:
+      egress-test-rebind:
+        ipv4_address: 10.252.0.11
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-test-reserved-v6-recorder:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/recorder.py"]
+    environment:
+      RECORDER_BIND_ADDRESS: "2001:2::10"
+      RECORDER_MARKER: reserved-v6
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/recorder.py:/test/recorder.py:ro
+      - ${PROMPTLY_EGRESS_ARTIFACT_DIR:?PROMPTLY_EGRESS_ARTIFACT_DIR must be set}/reserved-v6.jsonl:/evidence/record.jsonl
+    networks:
+      egress-test-reserved-v6:
+        ipv6_address: 2001:2::10
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  egress-policy-client:
+    image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+    command: ["python", "/test/policy_client.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./egress-proxy/tests/policy_client.py:/test/policy_client.py:ro
+      - ./egress-proxy/tests/tls/ca.crt:/test/tls/ca.crt:ro
+    networks:
+      - promptly-control
+    depends_on:
+      promptly-egress-proxy:
+        condition: service_healthy
+      egress-test-dns-preflight:
+        condition: service_completed_successfully
+      egress-test-allowed-recorder:
+        condition: service_started
+      egress-test-allowed-tls-recorder:
+        condition: service_started
+      promptly-eval:
+        condition: service_healthy
+      egress-test-private-recorder:
+        condition: service_started
+      egress-test-metadata-recorder:
+        condition: service_started
+      egress-test-rebind-recorder:
+        condition: service_started
+      egress-test-reserved-v6-recorder:
+        condition: service_started
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+networks:
+  egress-test-public:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 11.253.0.0/24
+  egress-test-private:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.253.0.0/24
+  egress-test-metadata:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 100.100.100.0/24
+  egress-test-rebind:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.252.0.0/24
+  egress-test-reserved-v6:
+    driver: bridge
+    internal: true
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 2001:2::/64
+  egress-test-dns:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 11.252.0.0/24

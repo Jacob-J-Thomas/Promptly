@@ -9,7 +9,9 @@ internal sealed class PromptlyWebApplicationFactory(
     string connectionString,
     string workerBaseUrl,
     string dataProtectionPath,
-    string serverLogPath) : WebApplicationFactory<Program>
+    string serverLogPath,
+    IReadOnlyDictionary<string, string?>? additionalSettings = null)
+    : WebApplicationFactory<Program>
 {
     private static readonly string JwtKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
 
@@ -28,6 +30,11 @@ internal sealed class PromptlyWebApplicationFactory(
             .UseSetting("PROMPTLY_EVAL_BASE_URL", workerBaseUrl)
             .UseSetting("Startup:ApplyDatabaseMigrations", "true")
             .UseSetting("TestRunner:Enabled", "false");
+        foreach (var setting in additionalSettings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(setting.Key, setting.Value);
+        }
+
         builder.ConfigureLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Information);

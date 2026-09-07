@@ -197,13 +197,16 @@ public sealed class IntegrationFixture : IAsyncLifetime
 
     internal async Task RunWithHostAsync(
         string workerBaseUrl,
-        Func<IntegrationTestHost, Task> operation)
+        Func<IntegrationTestHost, Task> operation,
+        IReadOnlyDictionary<string, string?>? additionalSettings = null)
     {
-        var host = await CreateHostAsync(workerBaseUrl);
+        var host = await CreateHostAsync(workerBaseUrl, additionalSettings);
         await host.RunAndDisposeAsync(operation);
     }
 
-    private async Task<IntegrationTestHost> CreateHostAsync(string workerBaseUrl)
+    private async Task<IntegrationTestHost> CreateHostAsync(
+        string workerBaseUrl,
+        IReadOnlyDictionary<string, string?>? additionalSettings = null)
     {
         if (_postgres is null)
         {
@@ -219,7 +222,8 @@ public sealed class IntegrationFixture : IAsyncLifetime
             _postgres.GetConnectionString(),
             workerBaseUrl,
             dataProtectionPath,
-            Path.Join(ArtifactDirectory, logName));
+            Path.Join(ArtifactDirectory, logName),
+            additionalSettings);
         return await IntegrationTestHost.CreateAsync(factory);
     }
 

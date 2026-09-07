@@ -7,11 +7,11 @@ services:
       POSTGRES_USER: promptly
       POSTGRES_PASSWORD: promptly_dev_password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
-      - promptly-network
+      - promptly-control
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U promptly"]
       interval: 10s
@@ -34,8 +34,19 @@ services:
       - JWT__ExpiryMinutes=60
       - DATA_PROTECTION_PATH=/app/dataprotection-keys
       - PROMPTLY_EVAL_BASE_URL=http://promptly-eval:8000
+      - EndpointEgress__RequireProxy=true
+      - EndpointEgress__ProxyUrl=http://promptly-egress-proxy:4750
+      # Do not grant an ambient route to unrelated HttpClient instances.
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - ALL_PROXY=
+      - NO_PROXY=
+      - http_proxy=
+      - https_proxy=
+      - all_proxy=
+      - no_proxy=
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     volumes:
       - dataprotection-keys:/app/dataprotection-keys
     depends_on:
@@ -43,22 +54,71 @@ services:
         condition: service_healthy
       promptly-eval:
         condition: service_healthy
+      promptly-egress-proxy:
+        condition: service_healthy
     networks:
-      - promptly-network
+      - promptly-control
+    restart: unless-stopped
+
+  promptly-egress-proxy:
+    build:
+      context: egress-proxy
+      dockerfile: Dockerfile
+    container_name: ${PROMPTLY_EGRESS_PROXY_CONTAINER_NAME:-promptly-egress-proxy}
+    expose:
+      - "4750"
+    networks:
+      - promptly-control
+      - promptly-egress
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 1.0
+    init: true
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "/smokescreen-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     restart: unless-stopped
 
   promptly-eval:
     build:
       context: ..
       dockerfile: Promptly.Worker/Dockerfile
-    container_name: promptly-eval
+    container_name: ${PROMPTLY_EVAL_CONTAINER_NAME:-promptly-eval}
     environment:
       - PROMPTLY_LLM_PROVIDER=${PROMPTLY_LLM_PROVIDER:-azureopenai}
       - PROMPTLY_LLM_API_KEY=${PROMPTLY_LLM_API_KEY:-}
+      - PROMPTLY_LLM_BASE_URL=${PROMPTLY_LLM_BASE_URL:-https://api.openai.com/v1}
       - PROMPTLY_LLM_AZURE_ENDPOINT=${PROMPTLY_LLM_AZURE_ENDPOINT:-}
       - PROMPTLY_LLM_API_VERSION=${PROMPTLY_LLM_API_VERSION:-2024-08-01-preview}
       - PROMPTLY_LLM_MODEL_DEFAULT=${PROMPTLY_LLM_MODEL_DEFAULT:-gpt-4o}
       - PROMPTLY_LLM_TIMEOUT_SECONDS=${PROMPTLY_LLM_TIMEOUT_SECONDS:-90}
+      # The Python provider SDK has no Promptly-specific proxy option. Scope
+      # ambient proxy variables to this container and exempt control-plane hops.
+      - HTTP_PROXY=http://promptly-egress-proxy:4750
+      - HTTPS_PROXY=http://promptly-egress-proxy:4750
+      - ALL_PROXY=
+      - NO_PROXY=localhost,127.0.0.1,::1,promptly-server,promptly-eval,postgres
+      - http_proxy=http://promptly-egress-proxy:4750
+      - https_proxy=http://promptly-egress-proxy:4750
+      - all_proxy=
+      - no_proxy=localhost,127.0.0.1,::1,promptly-server,promptly-eval,postgres
     expose:
       - "8000"
     healthcheck:
@@ -68,8 +128,11 @@ services:
       timeout: 8s
       start_period: 15s
       retries: 3
+    depends_on:
+      promptly-egress-proxy:
+        condition: service_healthy
     networks:
-      - promptly-network
+      - promptly-control
     restart: unless-stopped
 
   promptly-web:
@@ -80,18 +143,21 @@ services:
     environment:
       - VITE_API_BASE_URL=http://localhost:5000
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ../Promptly.Web/src/web:/app
       - /app/node_modules
     networks:
-      - promptly-network
+      - promptly-control
     restart: unless-stopped
     stdin_open: true
     tty: true
 
 networks:
-  promptly-network:
+  promptly-control:
+    driver: bridge
+    internal: true
+  promptly-egress:
     driver: bridge
 
 volumes:

@@ -12,7 +12,8 @@ export type MessageSpecIssueCode =
   | 'invalid_shape'
   | 'required'
   | 'invalid_role'
-  | 'invalid_type';
+  | 'invalid_type'
+  | 'unknown_property';
 
 export interface MessageSpecIssue {
   code: MessageSpecIssueCode;
@@ -137,6 +138,16 @@ export const parseInputSpecJson = (inputSpecJson: string): InputSpecParseResult 
       });
       return;
     }
+
+    Object.keys(rawMessage).forEach((property) => {
+      if (property !== 'role' && property !== 'content') {
+        errors.push({
+          code: 'unknown_property',
+          path: `inputSpecJson.messages[${index}].${property}`,
+          message: `Message property "${property}" is not supported.`,
+        });
+      }
+    });
 
     if (!isMessageRole(rawMessage.role)) {
       errors.push({

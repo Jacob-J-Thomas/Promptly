@@ -72,6 +72,26 @@ describe('message input-spec helpers', () => {
     expect(parsed.errors[0]?.code).toBe(code);
   });
 
+  it('rejects unknown message properties while retaining top-level metadata and original text', () => {
+    const input = JSON.stringify({
+      temperature: 0.5,
+      options: { retries: 2 },
+      messages: [{ role: 'user', content: 'Hello', provider_hint: 'stored' }],
+    });
+
+    const parsed = parseInputSpecJson(input);
+
+    expect(parsed.valid).toBe(false);
+    expect(parsed.messages).toBeNull();
+    expect(parsed.originalText).toBe(input);
+    expect(parsed.metadata).toEqual({ temperature: 0.5, options: { retries: 2 } });
+    expect(parsed.errors).toContainEqual({
+      code: 'unknown_property',
+      path: 'inputSpecJson.messages[0].provider_hint',
+      message: 'Message property "provider_hint" is not supported.',
+    });
+  });
+
   it('returns a warning for a valid assistant-only conversation', () => {
     const parsed = parseInputSpecJson('{"messages":[{"role":"assistant","content":"Hi"}]}');
 

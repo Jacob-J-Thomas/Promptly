@@ -509,7 +509,10 @@ Data retention:
 
 ## C# control plane env vars
 - ConnectionStrings__Default
-- JWT__Issuer, JWT__Audience, JWT__Key
+- JWT__Issuer, JWT__Audience, JWT__Key (required secret-manager value containing at least
+  32 random bytes encoded as canonical base64)
+- JWT__RetiredKeyFingerprints (optional comma-separated SHA-256 fingerprints preventing
+  retired-key reuse)
 - DATA_PROTECTION_PATH
 - PROMPTLY_EVAL_BASE_URL (e.g., http://promptly-eval:8000)
 

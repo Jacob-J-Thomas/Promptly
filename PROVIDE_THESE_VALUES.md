@@ -16,6 +16,9 @@ PROMPTLY_LLM_PROVIDER=azureopenai
 PROMPTLY_LLM_API_KEY=________________________
 PROMPTLY_LLM_AZURE_ENDPOINT=________________________
 PROMPTLY_LLM_MODEL_DEFAULT=________________________
+
+# Generate with: openssl rand -base64 48
+JWT__Key=________________________
 ```
 
 ### Where to get these values:
@@ -83,7 +86,7 @@ The PostgreSQL database:
 
 | File/Location | What | Status |
 |---------------|------|--------|
-| `docker/.env` | Azure OpenAI credentials | ⚠️ **YOU CREATE THIS** |
+| `docker/.env` | Azure OpenAI credentials and a unique JWT signing key | ⚠️ **YOU CREATE THIS** |
 | `docker/docker-compose.yml` | Service configuration | ✅ Already configured |
 | `docker/.env.example` | Template file | ✅ Reference available |
 | Database | PostgreSQL | ✅ Auto-configured in Docker |
@@ -121,11 +124,12 @@ docker compose exec promptly-eval python -c \
 
 **Minimum required to start testing:**
 1. Create `docker/.env`
-2. Add 3 Azure OpenAI values (key, endpoint, deployment name)
+2. Add 3 Azure OpenAI values and a unique `JWT__Key`
 3. Run `docker compose up -d`
 4. Open http://localhost:3000
 
-**That's it!** Everything else is pre-configured.
+Everything else is pre-configured. Promptly intentionally refuses to start without the JWT
+key; see `CONFIGURATION.md` for generation, rotation, and incident response.
 
 ---
 
@@ -139,7 +143,7 @@ docker compose exec promptly-eval python -c \
 
 ## 🚀 I'm Ready to Test!
 
-Once you provide these values, I can:
+Once you provide the provider values and configure the signing key locally, I can:
 - ✅ Start the entire system with `docker compose up`
 - ✅ Test LLM judge evaluations
 - ✅ Test mapping proposal (AI-powered)
@@ -147,9 +151,11 @@ Once you provide these values, I can:
 - ✅ Run end-to-end test scenarios
 - ✅ Verify all components work together
 
-**Please provide:**
+**Please provide or configure as indicated:**
 1. Your Azure OpenAI API key
 2. Your Azure OpenAI endpoint
 3. Your deployment name
+4. Configure a unique JWT signing key locally in `docker/.env` or your secret manager with
+   `openssl rand -base64 48`; do not provide it to another person or commit it
 
 And let me know if you want to use the built-in demo endpoint or if you have your own service to test against!

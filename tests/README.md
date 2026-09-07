@@ -23,6 +23,8 @@ Covered foundation contracts include:
 - owned suite YAML import persistence (semantic YAML export round-tripping remains tracked separately in issue #44);
 - real mapping proposal across Server, FastAPI, and the provider stub;
 - safe Server responses when the worker is unavailable or returns malformed JSON.
+- fail-closed JWT configuration in Development, test, and Production, plus healthy startup
+  with an injected high-entropy signing key.
 
 The suite intentionally does not assert current cross-tenant behavior of nested resources. Those authorization contracts belong after issue #26 closes, so this foundation does not canonize a known vulnerability.
 

@@ -11,6 +11,7 @@ PROMPTLY_LLM_PROVIDER=azureopenai
 PROMPTLY_LLM_API_KEY=___________________  # ← PASTE YOUR KEY HERE
 PROMPTLY_LLM_AZURE_ENDPOINT=___________________  # ← PASTE YOUR ENDPOINT HERE
 PROMPTLY_LLM_MODEL_DEFAULT=___________________  # ← YOUR DEPLOYMENT NAME HERE
+JWT__Key=___________________  # ← OUTPUT OF: openssl rand -base64 48
 ```
 
 **Where to find these:**
@@ -85,13 +86,14 @@ Open: http://localhost:5000/swagger
 | **Azure Endpoint** | `docker/.env` | ⚠️ YOU PROVIDE |
 | **Deployment Name** | `docker/.env` | ⚠️ YOU PROVIDE |
 | **Database** | Docker container | ✅ AUTO-CONFIGURED |
-| **JWT Secret** | `docker-compose.yml` | ✅ CONFIGURED (dev default) |
+| **JWT signing key** | untracked `docker/.env` / secret manager | ⚠️ YOU GENERATE |
 | **Test Endpoint** | Built-in or UI | ✅ BUILT-IN DEMO AVAILABLE |
 
 ---
 
 ## That's It!
 
-You only need to provide **3 values** (Azure OpenAI credentials). Everything else is already configured.
+Provide the three Azure OpenAI values plus a unique JWT signing key. Promptly fails startup
+if the key is missing or insecure; see `CONFIGURATION.md` for rotation guidance.
 
 See `CONFIGURATION.md` for detailed explanation of each setting.

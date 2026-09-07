@@ -1,6 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -62,7 +62,7 @@ public sealed class JwtServiceTests
         {
             Issuer = "promptly-tests",
             Audience = "promptly-clients",
-            Key = "unit-test-signing-key-that-is-at-least-32-bytes",
+            Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)),
             ExpiryMinutes = 15
         };
         var service = new JwtService(Options.Create(settings));
@@ -86,7 +86,7 @@ public sealed class JwtServiceTests
                 ValidAudience = settings.Audience,
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(settings.Key)),
+                IssuerSigningKey = new SymmetricSecurityKey(Convert.FromBase64String(settings.Key)),
                 ClockSkew = TimeSpan.Zero
             },
             out var validatedToken);

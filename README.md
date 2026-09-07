@@ -106,7 +106,19 @@ That process is part of what Promptly is meant to demonstrate. The repository is
    PROMPTLY_LLM_MODEL_DEFAULT=gpt-4o-mini
    ```
 
-   **Database and other settings are pre-configured** - see `SETUP_CHECKLIST.md` for details.
+   Generate a unique JWT signing key and add it to the same untracked `docker/.env` file:
+
+   ```bash
+   if grep -q '^JWT__Key=' docker/.env; then
+     echo "docker/.env already contains JWT__Key; replace that single value explicitly" >&2
+     exit 1
+   fi
+   printf 'JWT__Key=%s\n' "$(openssl rand -base64 48)" >> docker/.env
+   ```
+
+   Promptly intentionally refuses to render the Compose service or start the Server when
+   this key is missing or insecure. Database settings remain pre-configured; see
+   `CONFIGURATION.md` for JWT rotation/incident response and `SETUP_CHECKLIST.md` for details.
 
 3. **Start all services**
    ```bash
@@ -131,10 +143,13 @@ That process is part of what Promptly is meant to demonstrate. The repository is
 Configuration via `appsettings.json` or environment variables:
 
 - **ConnectionStrings:Default**: PostgreSQL connection string
-- **JWT:Key**: Secret key for JWT signing (min 32 characters)
+- **JWT:Key**: Required canonical-base64 JWT signing key (at least 32 decoded random bytes;
+  generate a unique per-environment value with `openssl rand -base64 48`)
 - **JWT:Issuer**: JWT issuer
 - **JWT:Audience**: JWT audience
 - **JWT:ExpiryMinutes**: Token expiry time (default: 60)
+- **JWT:RetiredKeyFingerprints**: Optional comma-separated SHA-256 fingerprints of retired
+  signing keys; startup rejects reuse (see `CONFIGURATION.md` for rotation and incident response)
 - **DATA_PROTECTION_PATH**: Path for Data Protection keys persistence
 - **PROMPTLY_EVAL_BASE_URL**: Python worker base URL
 - **TestRunner:PollingIntervalSeconds**: Background worker polling interval (default: 5)

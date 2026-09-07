@@ -87,15 +87,23 @@ If you have your own LLM service to test, you'll configure it in the UI after st
 
 ---
 
-### 4. **JWT Secret** (Already Configured ✅)
+### 4. **JWT Signing Key** (Required)
 
-The JWT secret is already set in docker-compose.yml:
+Generate a unique 48-byte key for each environment and put it in that environment's
+secret manager or untracked `docker/.env` file:
 
 ```bash
-JWT__Key=YourSuperSecretJWTKeyThatShouldBeAtLeast32CharactersLongForProduction
+openssl rand -base64 48
+# Copy the output into docker/.env:
+JWT__Key=<BASE64_OUTPUT>
 ```
 
-For development/testing, this default is fine. For production, change it to a secure random string (32+ characters).
+Promptly has no fallback signing key. Startup fails in every environment when the value is
+missing, is the historic public default, is not canonical base64, decodes to fewer than 32
+bytes, has a recognized low-entropy/predictable structure, or matches a configured retired-key
+fingerprint. A validator cannot prove how an otherwise plausible sample was generated, so
+operators must still use the documented cryptographically secure generator. Never reuse a
+development or test signing key in Production.
 
 ---
 
@@ -122,9 +130,11 @@ POSTGRES_PASSWORD=promptly_dev_password
 ConnectionStrings__Default=Host=postgres;Database=promptly;Username=promptly;Password=promptly_dev_password
 
 # ========================================
-# JWT (Leave as-is for development)
+# JWT (required; unique per environment)
 # ========================================
-JWT__Key=YourSuperSecretJWTKeyThatShouldBeAtLeast32CharactersLongForProduction
+JWT__Key=<OUTPUT_OF_OPENSSL_RAND_BASE64_48>
+# Optional comma-separated SHA-256 fingerprints of retired keys
+JWT__RetiredKeyFingerprints=
 JWT__Issuer=Promptly
 JWT__Audience=Promptly
 JWT__ExpiryMinutes=60
@@ -142,7 +152,7 @@ TestRunner__MaxConcurrentRuns=2
 
 ### **C# API (promptly-server)**
 - ✅ Database connection string (configured)
-- ✅ JWT settings (configured)
+- ⚠️ JWT signing key (YOU GENERATE and inject)
 - ✅ Data Protection path (configured)
 - ✅ Python worker URL (configured via Docker network)
 
@@ -169,12 +179,63 @@ cd docker
 docker compose up -d
 ```
 
+The Server refuses to start when `JWT__Key` is absent or empty.
+
 Wait ~30 seconds for services to start, then:
 
 - **Web UI**: http://localhost:3000
 - **API**: http://localhost:5000
 - **Swagger**: http://localhost:5000/swagger
 - **Python Worker**: internal service at `http://promptly-eval:8000`
+
+---
+
+## JWT key rotation and incident response
+
+Treat the signing key as a production secret. Prefer a per-environment secret-manager
+injection over a dotenv file; restrict read access, avoid shell history and logs, and use
+an independent key for each deployment.
+
+For a planned rotation:
+
+1. Generate a new key with `openssl rand -base64 48`. Before replacing the old value,
+   calculate its fingerprint from the authoritative secret-manager value. For the local
+   `docker/.env` path, the checked helper rejects missing, empty, duplicate, or non-canonical
+   Base64 entries, reads the value without printing it or embedding it in shell history,
+   and prints only its SHA-256 fingerprint:
+
+   ```bash
+   docker/fingerprint-jwt-key.sh docker/.env
+   ```
+
+   The first upgrade from a Promptly version that treated `JWT__Key` as literal UTF-8 text
+   must fingerprint those exact legacy bytes instead. Run the helper once in legacy mode
+   before replacing the old value, then use the default canonical-Base64 mode for every
+   later rotation:
+
+   ```bash
+   docker/fingerprint-jwt-key.sh --legacy-raw docker/.env
+   ```
+
+2. Add that 64-character digest to the comma-separated
+   `JWT__RetiredKeyFingerprints` value, inject the new `JWT__Key`, and restart every Server
+   replica together. Compose forwards both settings. Startup rejects accidental reuse of
+   any listed key.
+3. Existing JWTs immediately become invalid. Notify users that they must sign in again and
+   monitor authentication failures for expected convergence.
+4. Retain fingerprints—not old keys—in the deployment's security record.
+
+If the historic public key or any active key may have been used or disclosed, treat it as
+an authentication compromise: rotate immediately, invalidate all sessions by restarting
+on the new key, inspect authentication and sensitive-resource access logs from the exposure
+window, notify affected operators/users, and rotate downstream credentials that may have
+been exposed. Never commit the replacement key.
+
+HMAC remains the only supported signing mode in this release because Promptly currently
+issues and validates its own tokens. First-class asymmetric signing requires a separately
+designed issuer/trust and rotation contract; do not assume an external identity provider is
+compatible until that integration exists and is tested. Environments requiring independent
+signer/verifier custody should treat that missing integration as a deployment blocker.
 
 ---
 
@@ -257,5 +318,5 @@ curl -X POST http://localhost:5000/demo/chat \
 ## 📧 Need Help?
 
 1. Check logs: `docker compose logs <service-name>`
-2. Verify configuration: `docker compose config`
+2. Verify configuration without printing resolved secrets: `docker compose config --quiet`
 3. Restart services: `docker compose restart`

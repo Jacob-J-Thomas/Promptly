@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import os
+import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -19,7 +24,12 @@ IMAGE_TAG = "promptly-worker:verification"
 MINIMUM_COVERAGE = 0.90
 
 
-def run(command: list[str], *, capture: bool = False) -> str:
+def run(
+    command: list[str],
+    *,
+    capture: bool = False,
+    environment: dict[str, str] | None = None,
+) -> str:
     """Run a command from the worker directory and stop on any failure."""
 
     print(f"+ {' '.join(command)}", flush=True)
@@ -29,6 +39,7 @@ def run(command: list[str], *, capture: bool = False) -> str:
         check=True,
         text=True,
         stdout=subprocess.PIPE if capture else None,
+        env=environment,
     )
     return completed.stdout.strip() if capture else ""
 
@@ -206,19 +217,75 @@ def assert_summary(path: Path) -> None:
 
 
 def assert_compose_isolation() -> None:
-    compose_json = run(
-        [
-            "docker",
-            "compose",
-            "--file",
-            str(REPOSITORY_ROOT / "docker" / "docker-compose.yml"),
-            "config",
-            "--format",
-            "json",
-        ],
-        capture=True,
-    )
+    compose_file = str(REPOSITORY_ROOT / "docker" / "docker-compose.yml")
+    environment = os.environ.copy()
+    environment.pop("JWT__Key", None)
+    environment.pop("JWT__RetiredKeyFingerprints", None)
+    verification_key = base64.b64encode(secrets.token_bytes(48)).decode("ascii")
+    retired_fingerprint = "a" * 64
+
+    with tempfile.TemporaryDirectory(prefix="promptly-compose-verification-") as temp_dir:
+        empty_env_file = Path(temp_dir) / "missing.env"
+        empty_env_file.write_text("", encoding="utf-8")
+        empty_key_env_file = Path(temp_dir) / "empty.env"
+        empty_key_env_file.write_text("JWT__Key=\n", encoding="utf-8")
+        valid_env_file = Path(temp_dir) / "valid.env"
+        valid_env_file.write_text(
+            f"JWT__Key={verification_key}\nJWT__RetiredKeyFingerprints={retired_fingerprint}\n",
+            encoding="utf-8",
+        )
+
+        for key_case, env_file in (
+            ("missing", empty_env_file),
+            ("empty", empty_key_env_file),
+        ):
+            compose_command = [
+                "docker",
+                "compose",
+                "--env-file",
+                str(env_file),
+                "--file",
+                compose_file,
+                "config",
+            ]
+            rejected = subprocess.run(
+                [*compose_command, "--quiet"],
+                cwd=WORKER_ROOT,
+                check=False,
+                text=True,
+                capture_output=True,
+                env=environment,
+            )
+            if rejected.returncode == 0 or "JWT__Key must be set" not in rejected.stderr:
+                raise RuntimeError(f"Compose must reject a {key_case} JWT signing key")
+
+        compose_json = run(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                str(valid_env_file),
+                "--file",
+                compose_file,
+                "config",
+                "--format",
+                "json",
+            ],
+            capture=True,
+            environment=environment,
+        )
     services = json.loads(compose_json)["services"]
+    server_environment = services["promptly-server"]["environment"]
+    if "JWT__Key" not in server_environment:
+        raise RuntimeError("Compose must forward the injected JWT signing key")
+    if "JWT__RetiredKeyFingerprints" not in server_environment:
+        raise RuntimeError("Compose must forward retired JWT key fingerprints")
+    if server_environment["JWT__Key"] != verification_key:
+        raise RuntimeError("Compose must forward the exact injected JWT signing key")
+    if server_environment["JWT__RetiredKeyFingerprints"] != retired_fingerprint:
+        raise RuntimeError("Compose must forward the exact retired JWT key fingerprints")
+    if server_environment["JWT__Key"].startswith("YourSuperSecretJWTKey"):
+        raise RuntimeError("Compose must not contain the published legacy JWT signing key")
     worker = services["promptly-eval"]
     if worker.get("ports"):
         raise RuntimeError("Compose must not publish the worker port to the host")
@@ -227,6 +294,73 @@ def assert_compose_isolation() -> None:
     dependency = services["promptly-server"]["depends_on"]["promptly-eval"]
     if dependency["condition"] != "service_healthy":
         raise RuntimeError("The server must wait for a healthy worker")
+
+
+def assert_jwt_rotation_helper() -> None:
+    helper = REPOSITORY_ROOT / "docker" / "fingerprint-jwt-key.sh"
+    verification_key_bytes = secrets.token_bytes(48)
+    verification_key = base64.b64encode(verification_key_bytes).decode("ascii")
+
+    with tempfile.TemporaryDirectory(prefix="promptly-jwt-rotation-verification-") as temp_dir:
+        absent_env_file = Path(temp_dir) / "absent.env"
+        absent = subprocess.run(
+            ["bash", str(helper), str(absent_env_file)],
+            cwd=REPOSITORY_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if absent.returncode == 0:
+            raise RuntimeError("JWT rotation helper must reject a missing environment file")
+
+        valid_env_file = Path(temp_dir) / "valid.env"
+        valid_env_file.write_text(f"JWT__Key={verification_key}\n", encoding="utf-8")
+        valid = subprocess.run(
+            ["bash", str(helper), str(valid_env_file)],
+            cwd=REPOSITORY_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        expected_fingerprint = hashlib.sha256(verification_key_bytes).hexdigest()
+        if valid.returncode != 0 or valid.stdout.strip() != expected_fingerprint:
+            raise RuntimeError("JWT rotation helper must fingerprint canonical key bytes exactly")
+
+        legacy = subprocess.run(
+            ["bash", str(helper), "--legacy-raw", str(valid_env_file)],
+            cwd=REPOSITORY_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        expected_legacy_fingerprint = hashlib.sha256(verification_key.encode("ascii")).hexdigest()
+        if legacy.returncode != 0 or legacy.stdout.strip() != expected_legacy_fingerprint:
+            raise RuntimeError("JWT rotation helper must fingerprint legacy literal key bytes")
+        if legacy.stdout.strip() == valid.stdout.strip():
+            raise RuntimeError("Legacy and canonical JWT fingerprints must use distinct bytes")
+
+        invalid_cases = {
+            "missing": "PROMPTLY_LLM_PROVIDER=openai\n",
+            "empty": "JWT__Key=\n",
+            "duplicate": f"JWT__Key={verification_key}\nJWT__Key={verification_key}\n",
+            "malformed": "JWT__Key=not-base64\n",
+            "invalid-characters": "JWT__Key=!!!!\n",
+            "trailing-junk": "JWT__Key=YWJjZA==junk\n",
+        }
+        for key_case, contents in invalid_cases.items():
+            invalid_env_file = Path(temp_dir) / f"{key_case}.env"
+            invalid_env_file.write_text(contents, encoding="utf-8")
+            rejected = subprocess.run(
+                ["bash", str(helper), str(invalid_env_file)],
+                cwd=REPOSITORY_ROOT,
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            if rejected.returncode == 0:
+                raise RuntimeError(f"JWT rotation helper must reject a {key_case} key entry")
+            if verification_key in rejected.stdout or verification_key in rejected.stderr:
+                raise RuntimeError("JWT rotation helper must not disclose signing key material")
 
 
 def assert_image_sources(sources: list[Path]) -> str:
@@ -556,6 +690,7 @@ def main() -> None:
     )
 
     summary = assert_tool_artifacts(sources)
+    assert_jwt_rotation_helper()
     assert_compose_isolation()
     run(
         [

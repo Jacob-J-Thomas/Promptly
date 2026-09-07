@@ -145,7 +145,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "foreign-create",
             "foreign-create",
             null,
-            "{}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var updated = await service.UpdateTestCaseAsync(
@@ -153,7 +153,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "tampered",
             "tampered",
             null,
-            "{}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var deleted = await service.DeleteTestCaseAsync(graph.SiblingTestCaseId, scope);
@@ -188,8 +188,8 @@ public sealed class TenantSuiteAndTestServiceTests
             SuiteId = suppliedSuiteId,
             ExternalId = "imported",
             Name = "imported",
-            InputSpecJson = "{}",
-            ExpectationsJson = "[]"
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
         };
 
         var result = await service.BulkCreateTestsAsync(
@@ -218,7 +218,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "created",
             "created",
             null,
-            "{}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         Assert.NotNull(created);
@@ -227,7 +227,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "updated",
             "updated",
             "updated",
-            "{\"messages\":[]}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var imported = await service.BulkCreateTestsAsync(
@@ -236,8 +236,8 @@ public sealed class TenantSuiteAndTestServiceTests
             {
                 ExternalId = "imported",
                 Name = "imported",
-                InputSpecJson = "{}",
-                ExpectationsJson = "[]"
+                InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
             }],
             scope);
         var listed = await service.GetTestCasesBySuiteAsync(graph.AllowedSuiteId, scope);

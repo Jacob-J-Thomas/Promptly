@@ -19,6 +19,7 @@ public class TestRunProcessor : ITestRunProcessor
     private readonly IExpectationEvaluator _expectationEvaluator;
     private readonly IPythonEvalClient _pythonEvalClient;
     private readonly IExpectationValidator _expectationValidator;
+    private readonly ITestSpecificationValidator _specificationValidator;
     private readonly ILogger<TestRunProcessor> _logger;
 
     public TestRunProcessor(
@@ -29,7 +30,8 @@ public class TestRunProcessor : ITestRunProcessor
         IExpectationEvaluator expectationEvaluator,
         IPythonEvalClient pythonEvalClient,
         ILogger<TestRunProcessor> logger,
-        IExpectationValidator? expectationValidator = null)
+        IExpectationValidator? expectationValidator = null,
+        ITestSpecificationValidator? specificationValidator = null)
     {
         _dbContext = dbContext;
         _testRunWorkerStore = testRunWorkerStore;
@@ -38,6 +40,7 @@ public class TestRunProcessor : ITestRunProcessor
         _expectationEvaluator = expectationEvaluator;
         _pythonEvalClient = pythonEvalClient;
         _expectationValidator = expectationValidator ?? new ExpectationDslValidator();
+        _specificationValidator = specificationValidator ?? new TestSpecificationValidator(_expectationValidator);
         _logger = logger;
     }
 
@@ -217,6 +220,17 @@ public class TestRunProcessor : ITestRunProcessor
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            var inputValidation = _specificationValidator.ValidateInput(testCase.InputSpecJson);
+            if (!inputValidation.IsValid)
+            {
+                return InvalidTestCase(
+                    run.Id,
+                    testCase.Id,
+                    inputValidation.Issues,
+                    "{}",
+                    usage: null);
+            }
 
             // Step 1: Execute HTTP request
             var executionResult = await _endpointExecutor.ExecuteAsync(

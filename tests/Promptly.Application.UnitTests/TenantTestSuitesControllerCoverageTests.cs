@@ -145,10 +145,11 @@ public sealed class TenantTestSuitesControllerCoverageTests
         Assert.IsType<NotFoundObjectResult>(
             await ImportAsync(controller, suite.Id, "tests: []"));
 
-        yaml.DeserializeFailure = new InvalidOperationException("invalid yaml");
+        yaml.DeserializeFailure = new TestSpecificationValidationException(
+            [new ExpectationValidationIssue("invalid_yaml", "$", "YAML document is invalid")]);
         var invalid = Assert.IsType<BadRequestObjectResult>(
             await ImportAsync(controller, suite.Id, "invalid"));
-        Assert.Contains("invalid yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("invalid_yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

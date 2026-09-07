@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Promptly.Domain.Entities;
+using Promptly.Application.Models;
 using Promptly.Infrastructure.Configuration;
 using Promptly.Infrastructure.Services;
 
@@ -105,7 +106,7 @@ public sealed class YamlServiceTests
     private readonly YamlService _service = new(NullLogger<YamlService>.Instance);
 
     [Fact]
-    public void DeserializeTests_maps_snake_case_documents_and_ignores_unknown_fields()
+    public void DeserializeTests_rejects_unknown_row_fields()
     {
         var suiteId = Guid.NewGuid();
         const string yaml = """
@@ -122,22 +123,42 @@ public sealed class YamlServiceTests
                   text: Hello
             """;
 
-        var testCase = Assert.Single(_service.DeserializeTests(yaml, suiteId));
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, suiteId));
 
-        Assert.Equal(suiteId, testCase.SuiteId);
-        Assert.Equal("case-1", testCase.ExternalId);
-        Assert.Equal("Greeting", testCase.Name);
-        Assert.Equal("Greets the caller", testCase.Description);
-        using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
-        Assert.Equal(
-            "Hello",
-            input.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
-        using var expectations = System.Text.Json.JsonDocument.Parse(testCase.ExpectationsJson);
-        Assert.Equal("contains_text", expectations.RootElement[0].GetProperty("type").GetString());
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "unsupported_value" && issue.Path == "rows[0].ignored_field");
     }
 
     [Fact]
-    public void SerializeTests_round_trips_identity_and_null_collections_as_empty_collections()
+    public void DeserializeTests_rejects_typed_yaml_identifiers_and_descriptions()
+    {
+        const string yaml = """
+            - id: 123
+              name: true
+              description: 5
+              input:
+                messages:
+                  - role: user
+                    content: Hello
+              expectations:
+                - type: contains_text
+                  text: Hello
+            """;
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Contains(exception.Issues, issue => issue.Path == "rows[0].id");
+        Assert.Contains(exception.Issues, issue => issue.Path == "rows[0].name");
+        Assert.Contains(exception.Issues, issue => issue.Path == "rows[0].description");
+        Assert.All(
+            exception.Issues.Where(issue => issue.Path.StartsWith("rows[0.", StringComparison.Ordinal)),
+            issue => Assert.Equal("invalid_type", issue.Code));
+    }
+
+    [Fact]
+    public void SerializeTests_round_trips_nested_metadata_without_value_kind_fields()
     {
         var original = new List<TestCase>
         {
@@ -146,15 +167,15 @@ public sealed class YamlServiceTests
                 ExternalId = "case-1",
                 Name = "Greeting",
                 Description = "Greets the caller",
-                InputSpecJson = "{}",
-                ExpectationsJson = "[]"
+                InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"temperature\":0.5,\"enabled\":true,\"metadata\":{\"tags\":[\"demo\",null]}}",
+                ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"Hello\"}]"
             },
             new()
             {
                 ExternalId = "case-2",
                 Name = "Defaults",
-                InputSpecJson = "null",
-                ExpectationsJson = "null"
+                InputSpecJson = "{\"messages\":[{\"role\":\"assistant\",\"content\":\"Done\"}],\"metadata\":null}",
+                ExpectationsJson = "[{\"type\":\"groundedness\",\"min_score\":0.8}]"
             }
         };
 
@@ -162,19 +183,27 @@ public sealed class YamlServiceTests
         var roundTripped = _service.DeserializeTests(yaml, Guid.NewGuid());
 
         Assert.Contains("id: case-1", yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("value_kind", yaml, StringComparison.Ordinal);
         Assert.Collection(
             roundTripped,
             testCase =>
             {
                 Assert.Equal("Greeting", testCase.Name);
                 Assert.Equal("Greets the caller", testCase.Description);
-                Assert.Equal("{}", testCase.InputSpecJson);
-                Assert.Equal("[]", testCase.ExpectationsJson);
+                using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+                Assert.Equal(0.5, input.RootElement.GetProperty("temperature").GetDouble());
+                Assert.True(input.RootElement.GetProperty("enabled").GetBoolean());
+                Assert.Null(input.RootElement.GetProperty("metadata").GetProperty("tags")[1].GetString());
+                using var expectations = System.Text.Json.JsonDocument.Parse(testCase.ExpectationsJson);
+                Assert.Equal("contains_text", expectations.RootElement[0].GetProperty("type").GetString());
             },
             testCase =>
             {
-                Assert.Equal("{}", testCase.InputSpecJson);
-                Assert.Equal("[]", testCase.ExpectationsJson);
+                Assert.Null(testCase.Description);
+                using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+                Assert.True(input.RootElement.GetProperty("metadata").ValueKind == System.Text.Json.JsonValueKind.Null);
+                using var expectations = System.Text.Json.JsonDocument.Parse(testCase.ExpectationsJson);
+                Assert.Equal(0.8, expectations.RootElement[0].GetProperty("min_score").GetDouble());
             });
     }
 
@@ -187,19 +216,19 @@ public sealed class YamlServiceTests
     }
 
     [Fact]
-    public void DeserializeTests_wraps_invalid_yaml_with_context()
+    public void DeserializeTests_returns_safe_invalid_yaml_issue()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
             _service.DeserializeTests("tests: [unterminated", Guid.NewGuid()));
 
-        Assert.StartsWith("Failed to parse YAML:", exception.Message, StringComparison.Ordinal);
-        Assert.NotNull(exception.InnerException);
+        Assert.Contains(exception.Issues, issue => issue.Code == "invalid_yaml" && issue.Path == "$");
+        Assert.DoesNotContain("unterminated", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("not-json", "[]")]
     [InlineData("{}", "not-json")]
-    public void SerializeTests_wraps_invalid_json_with_context(
+    public void SerializeTests_returns_safe_invalid_json_issue(
         string inputSpecJson,
         string expectationsJson)
     {
@@ -211,10 +240,10 @@ public sealed class YamlServiceTests
             ExpectationsJson = expectationsJson
         };
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
             _service.SerializeTests([testCase]));
 
-        Assert.StartsWith("Failed to generate YAML:", exception.Message, StringComparison.Ordinal);
-        Assert.NotNull(exception.InnerException);
+        Assert.Contains(exception.Issues, issue => issue.Code is "invalid_json" or "invalid_expectations_json");
+        Assert.DoesNotContain("not-json", exception.Message, StringComparison.Ordinal);
     }
 }

@@ -26,7 +26,7 @@ public sealed class TestRunProcessorTests
             SuiteId = suiteId,
             ExternalId = "case-1",
             Name = "Regex safety",
-            InputSpecJson = "{}",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"regex safety input\"}]}",
             ExpectationsJson = """
                 [{"type":"regex_match","pattern":"(a+)+$"}]
                 """
@@ -297,7 +297,7 @@ public sealed class TestRunProcessorTests
             SuiteId = suiteId,
             ExternalId = "case-1",
             Name = "Cancellation",
-            InputSpecJson = "{}",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"cancellation input\"}]}",
             ExpectationsJson = expectationsJson
         };
     }

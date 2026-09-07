@@ -66,12 +66,11 @@ public class TestsController : ControllerBase
 
             return CreatedAtAction(nameof(GetTestCase), new { id = testCase.Id }, response);
         }
-        catch (Exception ex)
-            when (ex is ExpectationValidationException validationException)
+        catch (TestSpecificationValidationException validationException)
         {
             return BadRequest(new
             {
-                message = "Invalid expectations",
+                message = "Invalid test specification",
                 errors = validationException.Issues
             });
         }
@@ -202,12 +201,11 @@ public class TestsController : ControllerBase
 
             return Ok(response);
         }
-        catch (Exception ex)
-            when (ex is ExpectationValidationException validationException)
+        catch (TestSpecificationValidationException validationException)
         {
             return BadRequest(new
             {
-                message = "Invalid expectations",
+                message = "Invalid test specification",
                 errors = validationException.Issues
             });
         }

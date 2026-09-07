@@ -227,6 +227,50 @@ public sealed class TestRunProcessorCoverageTests
     }
 
     [Theory]
+    [InlineData("not-json", "invalid_json")]
+    [InlineData("{\"messages\":[]}", "required")]
+    public async Task ProcessRunAsync_rejects_invalid_legacy_input_before_endpoint_execution(
+        string inputSpecJson,
+        string expectedErrorCode)
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = suiteId,
+            ExternalId = "legacy-invalid-input",
+            Name = "Legacy invalid input",
+            InputSpecJson = inputSpecJson,
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"response\"}]"
+        });
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var endpointExecutor = new DelegateEndpointExecutor((_, _, _, _) =>
+            throw new InvalidOperationException("invalid input must not reach endpoint"));
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            endpointExecutor: endpointExecutor);
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var result = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Error, result.Status);
+        Assert.Equal(0, endpointExecutor.CallCount);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
+        Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
+        Assert.Equal(0, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Contains(expectedErrorCode, result.FailureReasonsJson, StringComparison.Ordinal);
+        Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
+    }
+
+    [Theory]
     [InlineData("contains_text")]
     [InlineData("banned_text")]
     [InlineData("regex_match")]
@@ -700,7 +744,7 @@ public sealed class TestRunProcessorCoverageTests
             SuiteId = suiteId,
             ExternalId = Guid.NewGuid().ToString("N"),
             Name = "Processor coverage",
-            InputSpecJson = "{}",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"coverage input\"}]}",
             ExpectationsJson = expectationsJson
         };
     }

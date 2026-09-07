@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Infrastructure.Services;
 using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
@@ -237,17 +238,65 @@ public class TestSuitesController : ControllerBase
 
             if (file == null || file.Length == 0)
             {
-                return BadRequest(new { message = "No file provided" });
+                return BadRequest(new
+                {
+                    message = "Invalid test specification",
+                    errors = new[]
+                    {
+                        new ExpectationValidationIssue(
+                            "required",
+                            "file",
+                            "A YAML file is required")
+                    }
+                });
             }
 
-            // Read YAML content
-            string yamlContent;
-            using (var reader = new StreamReader(file.OpenReadStream()))
+            if (file.Length > YamlService.MaxYamlBytes)
             {
-                yamlContent = await reader.ReadToEndAsync();
+                return BadRequest(new
+                {
+                    message = "Invalid test specification",
+                    errors = new[]
+                    {
+                        new ExpectationValidationIssue(
+                            "too_large",
+                            "$",
+                            "YAML content exceeds the maximum size")
+                    }
+                });
             }
 
-            // Deserialize and create tests
+            string yamlContent;
+            await using (var stream = file.OpenReadStream())
+            await using (var buffer = new MemoryStream())
+            {
+                var chunk = new byte[8192];
+                var total = 0;
+                int read;
+                while ((read = await stream.ReadAsync(chunk, HttpContext.RequestAborted)) > 0)
+                {
+                    total += read;
+                    if (total > YamlService.MaxYamlBytes)
+                    {
+                        return BadRequest(new
+                        {
+                            message = "Invalid test specification",
+                            errors = new[]
+                            {
+                                new ExpectationValidationIssue(
+                                    "too_large",
+                                    "$",
+                                    "YAML content exceeds the maximum size")
+                            }
+                        });
+                    }
+
+                    await buffer.WriteAsync(chunk.AsMemory(0, read), HttpContext.RequestAborted);
+                }
+
+                yamlContent = Encoding.UTF8.GetString(buffer.ToArray());
+            }
+
             var testCases = _yamlService.DeserializeTests(yamlContent, id);
             var createdTests = await _testCaseService.BulkCreateTestsAsync(id, testCases, scope);
             if (createdTests == null)
@@ -263,9 +312,13 @@ public class TestSuitesController : ControllerBase
 
             return Ok(response);
         }
-        catch (InvalidOperationException ex)
+        catch (TestSpecificationValidationException validationException)
         {
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(new
+            {
+                message = "Invalid test specification",
+                errors = validationException.Issues
+            });
         }
         catch (Exception ex)
         {
@@ -300,6 +353,14 @@ public class TestSuitesController : ControllerBase
             var bytes = Encoding.UTF8.GetBytes(yaml);
 
             return File(bytes, "application/x-yaml", fileName);
+        }
+        catch (TestSpecificationValidationException validationException)
+        {
+            return BadRequest(new
+            {
+                message = "Invalid test specification",
+                errors = validationException.Issues
+            });
         }
         catch (Exception ex)
         {

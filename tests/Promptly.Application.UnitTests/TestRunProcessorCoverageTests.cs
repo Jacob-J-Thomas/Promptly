@@ -311,8 +311,8 @@ public sealed class TestRunProcessorCoverageTests
         Assert.Equal(TestResultStatus.Error, result.Status);
         using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
         Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
-        Assert.Equal(2, metrics.RootElement.GetProperty("failed").GetInt32());
-        Assert.Equal(2, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(3, metrics.RootElement.GetProperty("errors").GetInt32());
         Assert.Equal(4, metrics.RootElement.GetProperty("expectationResults").GetArrayLength());
         Assert.Contains("unknown_expectation_field", result.FailureReasonsJson, StringComparison.Ordinal);
         Assert.Contains("unsupported_expectation_type", result.FailureReasonsJson, StringComparison.Ordinal);

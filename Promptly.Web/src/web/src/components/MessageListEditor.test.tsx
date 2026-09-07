@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MessageListEditor } from './MessageListEditor';
 import type { ConversationMessage } from './messageSpec';
@@ -25,7 +25,8 @@ describe('MessageListEditor', () => {
     expect(screen.getByRole('group', { name: 'Conversation messages' })).toBeInTheDocument();
     expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(3);
 
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Role for message 2' }));
+    const secondMessage = screen.getByRole('group', { name: 'Message 2' });
+    fireEvent.mouseDown(within(secondMessage).getByRole('combobox'));
     fireEvent.click(screen.getByRole('option', { name: 'assistant' }));
     fireEvent.change(screen.getByLabelText('Content for message 2'), {
       target: { value: 'Hello\nwith a second line' },
@@ -79,7 +80,8 @@ describe('MessageListEditor', () => {
     renderEditor(initialMessages, vi.fn(), true);
 
     expect(screen.getByRole('button', { name: 'Add message' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Role for message 1' })).toBeDisabled();
+    const firstMessage = screen.getByRole('group', { name: 'Message 1' });
+    expect(within(firstMessage).getByRole('combobox')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByLabelText('Content for message 1')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete message 1' })).toBeDisabled();
   });

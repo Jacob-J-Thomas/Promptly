@@ -1,0 +1,832 @@
+{
+  "observedDate": "2026-09-07",
+  "baselineMain": "849a00b113ae694f3e8997b212e7e8786378ad0c",
+  "purpose": "Live-read historical checks, not acceptance receipts",
+  "pullRequests": [
+    {
+      "number": 71,
+      "title": "[P0][E2E] Add production-composed Playwright auth gate",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/67-playwright-foundation",
+      "headRefOid": "c01c136eea8bbc3b4e4b274228921da37678c462",
+      "baseRefName": "codex/69-run-detail-polling",
+      "baseRefOid": "4c5ef8035cb3fc85c36eb3b954fcd03b71a49705",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:22:19Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536792/job/94324239782"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:23:03Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536777/job/94324239769"
+        },
+        {
+          "name": "E2E verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:24:27Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536783/job/94324239670"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:24:49Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536775/job/94324239854"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:22:28Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536809/job/94324239616"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:22:59Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536778/job/94324239652"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:22:05Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536777/job/94324239762"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:21:48Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31660536777/job/94324239767"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-13T02:21:41Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94324372340"
+        }
+      ]
+    },
+    {
+      "number": 70,
+      "title": "test: make run polling regression deterministic",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/69-run-detail-polling",
+      "headRefOid": "4c5ef8035cb3fc85c36eb3b954fcd03b71a49705",
+      "baseRefName": "codex/64-auth-concurrency",
+      "baseRefOid": "1f0796dfe7d2633b337b7740379e69385a1222e6",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:46:35Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014275/job/94298233710"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:47:37Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014316/job/94298234189"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:48:54Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014278/job/94298233732"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:46:34Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014246/job/94298233730"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:47:10Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014164/job/94298233378"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:46:01Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014316/job/94298234082"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:46:03Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31652014316/job/94298234048"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:45:56Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94298388267"
+        }
+      ]
+    },
+    {
+      "number": 66,
+      "title": "security: bound in-flight authentication work",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/64-auth-concurrency",
+      "headRefOid": "1f0796dfe7d2633b337b7740379e69385a1222e6",
+      "baseRefName": "codex/30-auth-abuse",
+      "baseRefOid": "0d5a43b4b01f2ebc3deb4cf56bfe0dad2f8d6ed7",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:26:19Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795820/job/94294483691"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:27:36Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795781/job/94294483364"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:28:06Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795789/job/94294483547"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:38:17Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795804/job/94296689810"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:26:59Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795797/job/94294483509"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:26:04Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795781/job/94294483375"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:25:54Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31650795781/job/94294483344"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T23:25:48Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94294645884"
+        }
+      ]
+    },
+    {
+      "number": 65,
+      "title": "security: harden authentication abuse controls",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/30-auth-abuse",
+      "headRefOid": "0d5a43b4b01f2ebc3deb4cf56bfe0dad2f8d6ed7",
+      "baseRefName": "codex/28-ssrf",
+      "baseRefOid": "7dcc7b5aa984bc647610b81c760afd31cd888e1b",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:40:55Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511638/job/94271569288"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:42:03Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511672/job/94271633845"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:42:54Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511642/job/94271569597"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:41:06Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511641/job/94271569383"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:41:22Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511670/job/94271569272"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:40:50Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511672/job/94271633843"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:40:34Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31643511672/job/94271633868"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T21:40:29Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94271829227"
+        }
+      ]
+    },
+    {
+      "number": 60,
+      "title": "fix: prevent SSRF in endpoint execution",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/28-ssrf",
+      "headRefOid": "7dcc7b5aa984bc647610b81c760afd31cd888e1b",
+      "baseRefName": "codex/27-run-graph",
+      "baseRefOid": "fe500a3a5966a0ce866f0964d8e8e9a3b0bf21ee",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:11:32Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290708/job/94230428010"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:12:08Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290771/job/94230427689"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:13:30Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290705/job/94230427472"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:11:45Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290723/job/94230427990"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:12:12Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290795/job/94230427675"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:11:12Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290771/job/94230427695"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:10:55Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31631290771/job/94230427929"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T19:10:50Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94230648844"
+        }
+      ]
+    },
+    {
+      "number": 59,
+      "title": "[P0] Harden run graph execution boundaries",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/27-run-graph",
+      "headRefOid": "fe500a3a5966a0ce866f0964d8e8e9a3b0bf21ee",
+      "baseRefName": "codex/26-tenant-isolation",
+      "baseRefOid": "973ca2fdc040568d14f53adb8873f6e8745be9d5",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:10:41Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191458/job/94196166840"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:11:47Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191438/job/94196166828"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:11:06Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191475/job/94196166790"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:10:34Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191539/job/94196167340"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:11:28Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191365/job/94196166414"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:10:28Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191438/job/94196166771"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:10:14Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31621191438/job/94196166616"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T17:10:06Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94196382541"
+        }
+      ]
+    },
+    {
+      "number": 57,
+      "title": "Enforce tenant isolation across nested APIs",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/26-tenant-isolation",
+      "headRefOid": "973ca2fdc040568d14f53adb8873f6e8745be9d5",
+      "baseRefName": "codex/29-jwt-secret",
+      "baseRefOid": "bc4773d23d65154ce90d81121f4d57f6e4fff474",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:48:37Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204774/job/94172805778"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:49:44Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204730/job/94172805248"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:48:57Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204721/job/94172805407"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:48:43Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204796/job/94172805542"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:49:07Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204762/job/94172804275"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:48:31Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204730/job/94172804230"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:48:25Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31614204730/job/94172804129"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T15:48:16Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94173067622"
+        }
+      ]
+    },
+    {
+      "number": 56,
+      "title": "Fail closed on insecure JWT signing keys",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/29-jwt-secret",
+      "headRefOid": "bc4773d23d65154ce90d81121f4d57f6e4fff474",
+      "baseRefName": "codex/20-integration-harness",
+      "baseRefOid": "9c8bb5f6a1e1540f8d2a99b3ea4915f666513999",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:51:16Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961454/job/94155076461"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:52:23Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961377/job/94155076773"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:51:20Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961380/job/94155076293"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:51:50Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961324/job/94155077001"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:51:55Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961387/job/94155076525"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:51:19Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961377/job/94155076710"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:51:01Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31608961377/job/94155076684"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:50:54Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94155354448"
+        }
+      ]
+    },
+    {
+      "number": 55,
+      "title": "Add real-stack integration verification harness",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/20-integration-harness",
+      "headRefOid": "9c8bb5f6a1e1540f8d2a99b3ea4915f666513999",
+      "baseRefName": "codex/18-infrastructure-coverage",
+      "baseRefOid": "5c2c1c27f83c9eae890441b14e02dece95be4b02",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:15:56Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719802/job/94144022369"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:16:59Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719858/job/94144022339"
+        },
+        {
+          "name": "Integration verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:16:20Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719901/job/94144022778"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:16:35Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719937/job/94144022940"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:16:41Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719790/job/94144021973"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:15:51Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719858/job/94144022527"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:15:48Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31605719858/job/94144022329"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T14:15:39Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94144285908"
+        }
+      ]
+    },
+    {
+      "number": 54,
+      "title": "Enforce complete Infrastructure coverage cohort",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/18-infrastructure-coverage",
+      "headRefOid": "5c2c1c27f83c9eae890441b14e02dece95be4b02",
+      "baseRefName": "codex/18-application-coverage",
+      "baseRefOid": "b09f9732963c4b733991b872cd022c3d1bb1d2d6",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:45:21Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602952260/job/94134646156"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:46:14Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602952194/job/94134645954"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:45:27Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602952327/job/94134646565"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:45:52Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602952334/job/94134646370"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:45:17Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602952194/job/94134646065"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:44:49Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602952194/job/94134646004"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:44:43Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94134839990"
+        }
+      ]
+    },
+    {
+      "number": 53,
+      "title": "Enforce strict schema-1 mapping contracts",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/18-application-coverage",
+      "headRefOid": "b09f9732963c4b733991b872cd022c3d1bb1d2d6",
+      "baseRefName": "codex/21-dependency-security",
+      "baseRefOid": "61b81a4efb3310eab32832fa2032f165d7de167f",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:37:24Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602272390/job/94132400895"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:38:31Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602272328/job/94132401958"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:37:35Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602272394/job/94132404908"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:38:42Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602272314/job/94132405366"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:37:24Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602272328/job/94132401981"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:37:16Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31602272328/job/94132401997"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T13:37:12Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94132635102"
+        }
+      ]
+    },
+    {
+      "number": 52,
+      "title": "Remediate dependency advisories and add continuous scans",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/21-dependency-security",
+      "headRefOid": "61b81a4efb3310eab32832fa2032f165d7de167f",
+      "baseRefName": "codex/25-worker-runtime",
+      "baseRefOid": "972ab5600b9168571f9424ee3fe09f31cfb8cf91",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:38:42Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31592706484/job/94101055461"
+        },
+        {
+          "name": "CodeQL (csharp)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:40:03Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31592706492/job/94101056134"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:39:31Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31592706500/job/94101055594"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:39:51Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31592706637/job/94101056282"
+        },
+        {
+          "name": "CodeQL (javascript-typescript)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:39:00Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31592706492/job/94101056119"
+        },
+        {
+          "name": "CodeQL (python)",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:38:55Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31592706492/job/94101056453"
+        },
+        {
+          "name": "CodeQL",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:38:47Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/runs/94101266017"
+        }
+      ]
+    },
+    {
+      "number": 51,
+      "title": "Restore FastAPI worker and enforce portable verification",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/25-worker-runtime",
+      "headRefOid": "972ab5600b9168571f9424ee3fe09f31cfb8cf91",
+      "baseRefName": "codex/23-web-quality-gate",
+      "baseRefOid": "ef5f7044af26a8d01b5f3ef3cdb6cb6b35f48a2f",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:16:04Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31591015480/job/94095716389"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:16:17Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31591015386/job/94095716155"
+        },
+        {
+          "name": "Worker verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T11:16:50Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31591015342/job/94095715768"
+        }
+      ]
+    },
+    {
+      "number": 50,
+      "title": "Restore frontend quality gate and align web contracts",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/23-web-quality-gate",
+      "headRefOid": "ef5f7044af26a8d01b5f3ef3cdb6cb6b35f48a2f",
+      "baseRefName": "codex/31-regex-test-foundation",
+      "baseRefOid": "94772ad03f5c37a00c1e3efa8a813229a7bf9845",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T09:29:49Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31583126021/job/94070620582"
+        },
+        {
+          "name": "Web verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T09:30:41Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31583126095/job/94070620681"
+        }
+      ]
+    },
+    {
+      "number": 48,
+      "title": "Bound regex evaluation and add application test gate",
+      "url": null,
+      "isDraft": true,
+      "headRefName": "codex/31-regex-test-foundation",
+      "headRefOid": "94772ad03f5c37a00c1e3efa8a813229a7bf9845",
+      "baseRefName": "main",
+      "baseRefOid": "849a00b113ae694f3e8997b212e7e8786378ad0c",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "",
+      "updatedAt": null,
+      "checks": [
+        {
+          "name": "Application verification",
+          "conclusion": "SUCCESS",
+          "completedAt": "2026-08-12T08:20:53Z",
+          "url": "https://github.com/Jacob-J-Thomas/Promptly/actions/runs/31577852923/job/94053936397"
+        }
+      ]
+    }
+  ]
+}

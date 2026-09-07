@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Local browser audit state. Retain only sanitized evidence under docs/audits.
+.playwright-cli/
+output/playwright/

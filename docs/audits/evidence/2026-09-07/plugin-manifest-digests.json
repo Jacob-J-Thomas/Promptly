@@ -1,0 +1,19 @@
+{
+  "pluginId": "promptly-aidlc@personal",
+  "version": "0.1.0",
+  "officialPluginValidator": "PASS",
+  "officialSkillValidator": "PASS",
+  "independentBehavioralReview": "PASS after one full and one targeted pass",
+  "filesSha256": {
+    ".codex-plugin/plugin.json": "70f1d698efbc68e71f87521a109ec8de12fb036cd1a556cba97c2358bb75e1f8",
+    "skills/promptly-aidlc/SKILL.md": "7a36732a602dd2c14c08a89c34790b221bf49b7625025811fd964f6e579b624e",
+    "skills/promptly-aidlc/agents/openai.yaml": "1ef5473980584248e6eaffd6e4c64bc9a5670453ce29b914a60c1a0495829fb9",
+    "skills/promptly-aidlc/references/delivery-recovery-routing.md": "ce07dae19e2a2940760a90208c28372e226b11845d2c5589c36c64f5e2984381",
+    "skills/promptly-aidlc/references/governance-and-contract.md": "5ca29564d47e70cf818cf395d5a40c5d94dd837b7cca93d13ca3c880193a94f6",
+    "skills/promptly-aidlc/references/planning.md": "e2cc264edc3085e4d7ba012e7ea6ccb22fa15c548563de01f05a685aad4f1492",
+    "skills/promptly-aidlc/references/qa-and-discovery.md": "d6585d17908b4b102cd64086e52327555ff721e7d6a92fd939f5f4a4713b3a23",
+    "skills/promptly-aidlc/references/repository-baseline.md": "ae9429a4ecd84a84f8e259b1334a03032e7e7eff20d112cf2f7bfb64df85ca00",
+    "skills/promptly-aidlc/references/verification-and-review.md": "50aea55b316fec7da84ada4b4f4ca8bf2efdc07fac4c1b2a33447ce785701b85",
+    "skills/promptly-aidlc/references/work-taxonomy.md": "503ae979bf0dc8a148f1f153c492c7c9141ec8d84447b08f7f42e89b31953c53"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "promptly-aidlc",
+  "version": "0.1.0",
+  "description": "Evidence-bound delivery, aggressive user QA, and bounded AIDLC planning for the Promptly prototype.",
+  "author": {
+    "name": "Jacob J Thomas",
+    "url": "https://github.com/Jacob-J-Thomas"
+  },
+  "repository": "https://github.com/Jacob-J-Thomas/Promptly",
+  "keywords": ["promptly", "aidlc", "quality", "qa", "delivery"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Promptly AIDLC",
+    "shortDescription": "Plan, test, and deliver Promptly work.",
+    "longDescription": "Evidence-bound workflow for auditing Promptly as a user, tracking deduplicated findings, planning bounded implementation, and reviewing exact changes across the .NET, Python, React, and Docker stack.",
+    "developerName": "Jacob J Thomas",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write", "Review"],
+    "defaultPrompt": "Use $promptly-aidlc to audit Promptly, record evidence-backed findings, and produce a bounded delivery plan."
+  }
+}

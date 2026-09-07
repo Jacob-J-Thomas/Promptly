@@ -1,0 +1,36 @@
+Promptly worker QA harness evidence
+SHA: 849a00b113ae694f3e8997b212e7e8786378ad0c
+Environment: /private/tmp/promptly-audit-20260907/worker/venv (Python 3.13; pinned requirements)
+
+Startup:
+  Command: /private/tmp/promptly-audit-20260907/worker/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 18000
+  Result: exit 1
+  Output: ERROR: Error loading ASGI app. Attribute "app" not found in module "main".
+
+Current routers in an in-memory FastAPI app:
+  POST /mapping/propose invalid JSON: 400, detail=Invalid JSON in sample_response_json
+  POST /eval/llm-judge no key: 200, score=0.0, reason starts Evaluation failed
+  POST /eval/groundedness no key + docs=[]: 200, score=0.0, reason starts Evaluation failed
+  POST /eval/llm-judge malformed trace message: 422
+
+Fake mapping provider outputs:
+  {} -> 200, accepted mappingSpec={}
+  {"foo":"bar"} -> 200, accepted mappingSpec
+  {"version":"oops"} -> 200, accepted mappingSpec
+  [] -> 500, response-model Pydantic ValidationError
+
+Provider selection monkeypatch:
+  AzureOpenAI -> OpenAI
+  azureopenai -> AzureOpenAI
+  OpenAI -> OpenAI
+  bogus -> OpenAI
+
+Concurrency fake (provider call sleeps 0.25 s):
+  two concurrent /eval/llm-judge requests: statuses 200/200, elapsed 0.512 s
+
+sample_request_json capture:
+  supplied {"requestField":"needed"}; captured LLM prompt omitted it.
+
+Docker:
+  docker compose config passed with warning that `version: '3.8'` is obsolete.
+  docker info/runtime was unavailable: permission denied connecting to ~/.colima/default/docker.sock.

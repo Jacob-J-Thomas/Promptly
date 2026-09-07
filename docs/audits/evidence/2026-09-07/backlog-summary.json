@@ -1,0 +1,64 @@
+{
+  "captured_at": "2026-09-07",
+  "repository": "Jacob-J-Thomas/Promptly",
+  "default_branch": "main",
+  "main_sha": "849a00b113ae694f3e8997b212e7e8786378ad0c",
+  "main_commit_date": "2026-08-02T21:11:20Z",
+  "issue_counts": {
+    "open": 56,
+    "closed": 0,
+    "production_readiness_milestone_open": 53
+  },
+  "pull_requests": {
+    "open": 15,
+    "draft": 15,
+    "approved": 0,
+    "exact_head_checks_all_success": true,
+    "stack_order": [48, 50, 51, 52, 53, 54, 55, 56, 57, 59, 60, 65, 66, 70, 71]
+  },
+  "native_hierarchy": {
+    "roots_with_native_children": {
+      "6": [9, 10, 11, 12],
+      "1": [13, 14, 15],
+      "30": [61, 62, 63, 64],
+      "24": [67],
+      "21": [68],
+      "19": [69]
+    },
+    "audit_umbrella_47_native_children": [],
+    "native_blocked_by_edges_found": 0
+  },
+  "enforcement": {
+    "main_branch_protection": false,
+    "rulesets": 0,
+    "workflows_registered": 7,
+    "workflow_files_on_main": false,
+    "dependabot_security_updates": "disabled",
+    "secret_scanning": "enabled",
+    "secret_scanning_push_protection": "enabled",
+    "code_scanning_open_alerts": 0
+  },
+  "dependabot": {
+    "records": 104,
+    "open": 87,
+    "open_by_severity": {"critical": 1, "high": 33, "medium": 46, "low": 7},
+    "open_by_ecosystem": {"nuget": 1, "npm": 86},
+    "critical": {
+      "alert": 1,
+      "package": "Microsoft.AspNetCore.DataProtection",
+      "manifest": "Promptly.Infrastructure/Promptly.Infrastructure.csproj",
+      "patched_version": "10.0.7",
+      "cve": "CVE-2026-40372"
+    }
+  },
+  "exact_head_inline_review_comments": {
+    "48": 1,
+    "51": 2,
+    "55": 18,
+    "57": 4,
+    "60": 2,
+    "65": 2,
+    "66": 9,
+    "71": 3
+  }
+}

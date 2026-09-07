@@ -1,0 +1,4 @@
+interface:
+  display_name: "Promptly AIDLC"
+  short_description: "Audit and deliver Promptly work"
+  default_prompt: "Use $promptly-aidlc to audit the Promptly app, track real findings, and create a bounded delivery plan."

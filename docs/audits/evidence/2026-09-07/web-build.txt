@@ -1,0 +1,53 @@
+
+> web@0.0.0 build
+> tsc -b && vite build
+
+src/components/MappingWizard.tsx(21,3): error TS6133: 'Grid' is declared but its value is never read.
+src/contexts/AuthContext.tsx(1,65): error TS1484: 'ReactNode' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/pages/EnvironmentDetail.tsx(25,3): error TS6133: 'Edit' is declared but its value is never read.
+src/pages/EnvironmentDetail.tsx(27,3): error TS6133: 'ExpandMore' is declared but its value is never read.
+src/pages/EnvironmentDetail.tsx(28,3): error TS6133: 'ExpandLess' is declared but its value is never read.
+src/pages/EnvironmentDetail.tsx(69,39): error TS6133: 'endpointId' is declared but its value is never read.
+src/pages/ProjectDetail.tsx(12,3): error TS6133: 'ListItem' is declared but its value is never read.
+src/pages/ProjectDetail.tsx(131,47): error TS6133: 'e' is declared but its value is never read.
+src/pages/ProjectsList.tsx(20,35): error TS6133: 'Edit' is declared but its value is never read.
+src/pages/ProjectsList.tsx(136,18): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { component: ElementType<any, keyof IntrinsicElements>; } & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<...> & Omit<...>): Element | null', gave the following error.
+    Property 'component' is missing in type '{ children: Element; item: true; xs: number; md: number; lg: number; key: string; }' but required in type '{ component: ElementType<any, keyof IntrinsicElements>; }'.
+  Overload 2 of 2, '(props: DefaultComponentProps<GridTypeMap<{}, "div">>): Element | null', gave the following error.
+    Type '{ children: Element; item: true; xs: number; md: number; lg: number; key: string; }' is not assignable to type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+      Property 'item' does not exist on type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+src/pages/RunDetail.tsx(318,31): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { component: ElementType<any, keyof IntrinsicElements>; } & ChipOwnProps & ChipSlotsAndSlotProps & CommonProps & Omit<...>): Element | null', gave the following error.
+    Type 'Element | null' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>> | undefined'.
+      Type 'null' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>> | undefined'.
+  Overload 2 of 2, '(props: DefaultComponentProps<ChipTypeMap<{}, "div">>): Element | null', gave the following error.
+    Type 'Element | null' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>> | undefined'.
+      Type 'null' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>> | undefined'.
+src/pages/SuiteDetail.tsx(190,18): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { component: ElementType<any, keyof IntrinsicElements>; } & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<...> & Omit<...>): Element | null', gave the following error.
+    Property 'component' is missing in type '{ children: Element[]; item: true; xs: number; sm: number; }' but required in type '{ component: ElementType<any, keyof IntrinsicElements>; }'.
+  Overload 2 of 2, '(props: DefaultComponentProps<GridTypeMap<{}, "div">>): Element | null', gave the following error.
+    Type '{ children: Element[]; item: true; xs: number; sm: number; }' is not assignable to type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+      Property 'item' does not exist on type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+src/pages/SuiteDetail.tsx(196,18): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { component: ElementType<any, keyof IntrinsicElements>; } & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<...> & Omit<...>): Element | null', gave the following error.
+    Property 'component' is missing in type '{ children: Element[]; item: true; xs: number; sm: number; }' but required in type '{ component: ElementType<any, keyof IntrinsicElements>; }'.
+  Overload 2 of 2, '(props: DefaultComponentProps<GridTypeMap<{}, "div">>): Element | null', gave the following error.
+    Type '{ children: Element[]; item: true; xs: number; sm: number; }' is not assignable to type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+      Property 'item' does not exist on type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+src/pages/SuiteDetail.tsx(204,18): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { component: ElementType<any, keyof IntrinsicElements>; } & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<...> & Omit<...>): Element | null', gave the following error.
+    Property 'component' is missing in type '{ children: Element; item: true; xs: number; sm: number; }' but required in type '{ component: ElementType<any, keyof IntrinsicElements>; }'.
+  Overload 2 of 2, '(props: DefaultComponentProps<GridTypeMap<{}, "div">>): Element | null', gave the following error.
+    Type '{ children: Element; item: true; xs: number; sm: number; }' is not assignable to type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+      Property 'item' does not exist on type 'IntrinsicAttributes & GridBaseProps & { sx?: SxProps<Theme> | undefined; } & SystemProps<Theme> & Omit<...>'.
+src/pages/SuiteDetail.tsx(358,10): error TS6133: 'environments' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(358,24): error TS6133: 'setEnvironments' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(359,10): error TS6133: 'endpoints' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(359,21): error TS6133: 'setEndpoints' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(360,10): error TS6133: 'mappings' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(360,20): error TS6133: 'setMappings' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(362,23): error TS6133: 'setSelectedEnv' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(363,28): error TS6133: 'setSelectedEndpoint' is declared but its value is never read.
+src/pages/SuiteDetail.tsx(364,27): error TS6133: 'setSelectedMapping' is declared but its value is never read.

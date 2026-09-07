@@ -1,0 +1,102 @@
+
+> web@0.0.0 lint
+> eslint .
+
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/api/mapping.ts
+  31:18  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/api/suites.ts
+  63:61  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/components/MappingWizard.tsx
+   21:3   error  'Grid' is defined but never used          @typescript-eslint/no-unused-vars
+   66:52  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   98:18  error  'err' is defined but never used           @typescript-eslint/no-unused-vars
+  113:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  151:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  181:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  218:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/contexts/AuthContext.tsx
+  45:7   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/contexts/AuthContext.tsx:45:7
+  43 |
+  44 |     if (storedToken && storedUser) {
+> 45 |       setToken(storedToken);
+     |       ^^^^^^^^ Avoid calling setState() directly within an effect
+  46 |       setUser(JSON.parse(storedUser));
+  47 |     }
+  48 |  react-hooks/set-state-in-effect
+  93:14  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          react-refresh/only-export-components
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/EnvironmentDetail.tsx
+  25:3   error    'Edit' is defined but never used                                                                                        @typescript-eslint/no-unused-vars
+  27:3   error    'ExpandMore' is defined but never used                                                                                  @typescript-eslint/no-unused-vars
+  28:3   error    'ExpandLess' is defined but never used                                                                                  @typescript-eslint/no-unused-vars
+  50:6   warning  React Hook useEffect has a missing dependency: 'loadEnvironmentData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  62:19  error    Unexpected any. Specify a different type                                                                                @typescript-eslint/no-explicit-any
+  69:39  error    'endpointId' is defined but never used                                                                                  @typescript-eslint/no-unused-vars
+  81:19  error    Unexpected any. Specify a different type                                                                                @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/EnvironmentForm.tsx
+  67:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/Login.tsx
+  37:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/ProjectDetail.tsx
+  12:3   error    'ListItem' is defined but never used                                                                                @typescript-eslint/no-unused-vars
+  54:6   warning  React Hook useEffect has a missing dependency: 'loadProjectData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  68:19  error    Unexpected any. Specify a different type                                                                            @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/ProjectsList.tsx
+  20:35  error  'Edit' is defined but never used          @typescript-eslint/no-unused-vars
+  45:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  69:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  84:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/Register.tsx
+  50:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/RunDetail.tsx
+  49:6   warning  React Hook useEffect has a missing dependency: 'loadRunData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  58:6   warning  React Hook useEffect has a missing dependency: 'loadRunData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  75:19  error    Unexpected any. Specify a different type                                                                        @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/RunsList.tsx
+   39:6   warning  React Hook useEffect has a missing dependency: 'loadData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   51:19  error    Unexpected any. Specify a different type                                                                     @typescript-eslint/no-explicit-any
+  154:64  error    Unexpected any. Specify a different type                                                                     @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/SuiteDetail.tsx
+   67:6   warning  React Hook useEffect has a missing dependency: 'loadSuiteData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   79:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  113:21  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  130:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  358:10  error    'environments' is assigned a value but never used                                                                 @typescript-eslint/no-unused-vars
+  358:24  error    'setEnvironments' is assigned a value but never used                                                              @typescript-eslint/no-unused-vars
+  358:52  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  359:10  error    'endpoints' is assigned a value but never used                                                                    @typescript-eslint/no-unused-vars
+  359:21  error    'setEndpoints' is assigned a value but never used                                                                 @typescript-eslint/no-unused-vars
+  359:46  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  360:10  error    'mappings' is assigned a value but never used                                                                     @typescript-eslint/no-unused-vars
+  360:20  error    'setMappings' is assigned a value but never used                                                                  @typescript-eslint/no-unused-vars
+  360:44  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  362:23  error    'setSelectedEnv' is assigned a value but never used                                                               @typescript-eslint/no-unused-vars
+  363:28  error    'setSelectedEndpoint' is assigned a value but never used                                                          @typescript-eslint/no-unused-vars
+  364:27  error    'setSelectedMapping' is assigned a value but never used                                                           @typescript-eslint/no-unused-vars
+  536:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+
+/Users/jake/Repos/Promptly/Promptly.Web/src/web/src/pages/SuiteForm.tsx
+  44:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 52 problems (46 errors, 6 warnings)
+

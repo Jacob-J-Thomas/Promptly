@@ -26,20 +26,18 @@ public sealed class PythonWorkerLiveContractTests
     {
         var repositoryRoot = FindRepositoryRoot();
         var workerRoot = Path.Combine(repositoryRoot, "Promptly.Worker");
-        var providerPort = AllocateLoopbackPort();
         await using var provider = StartProcess(
             workerRoot,
             ResolveUvExecutable(),
-            new Dictionary<string, string>
-            {
-                ["PROMPTLY_PROVIDER_STUB_HOST"] = "127.0.0.1",
-                ["PROMPTLY_PROVIDER_STUB_PORT"] = providerPort.ToString()
-            },
+            new Dictionary<string, string>(),
             "run",
             "--frozen",
             "--no-dev",
             "python",
-            "scripts/provider_stub.py");
+            "scripts/provider_stub.py",
+            "--ephemeral-port");
+        var providerPort = await provider.ReadProviderPortAsync(
+            TestContext.Current.CancellationToken);
         await WaitForHttpAsync(
             $"http://127.0.0.1:{providerPort}/v1/models",
             new Dictionary<string, string> { ["Authorization"] = $"Bearer {VerificationKey}" },
@@ -126,20 +124,18 @@ public sealed class PythonWorkerLiveContractTests
     {
         var repositoryRoot = FindRepositoryRoot();
         var workerRoot = Path.Combine(repositoryRoot, "Promptly.Worker");
-        var providerPort = AllocateLoopbackPort();
         await using var provider = StartProcess(
             workerRoot,
             ResolveUvExecutable(),
-            new Dictionary<string, string>
-            {
-                ["PROMPTLY_PROVIDER_STUB_HOST"] = "127.0.0.1",
-                ["PROMPTLY_PROVIDER_STUB_PORT"] = providerPort.ToString()
-            },
+            new Dictionary<string, string>(),
             "run",
             "--frozen",
             "--no-dev",
             "python",
-            "scripts/provider_stub.py");
+            "scripts/provider_stub.py",
+            "--ephemeral-port");
+        var providerPort = await provider.ReadProviderPortAsync(
+            TestContext.Current.CancellationToken);
         await WaitForHttpAsync(
             $"http://127.0.0.1:{providerPort}/v1/models",
             new Dictionary<string, string> { ["Authorization"] = $"Bearer {VerificationKey}" },
@@ -360,6 +356,25 @@ public sealed class PythonWorkerLiveContractTests
     private sealed class LiveProcess(Process process) : IAsyncDisposable
     {
         private bool stopped;
+
+        public async Task<ushort> ReadProviderPortAsync(CancellationToken cancellationToken)
+        {
+            var handoff = await process.StandardOutput.ReadLineAsync(cancellationToken);
+            if (handoff is null)
+            {
+                throw new InvalidOperationException("Provider exited before reporting its bound port");
+            }
+
+            using var document = JsonDocument.Parse(handoff);
+            if (document.RootElement.GetProperty("event").GetString() != "provider_listening"
+                || !document.RootElement.GetProperty("port").TryGetUInt16(out var port)
+                || port == 0)
+            {
+                throw new InvalidOperationException($"Provider emitted an invalid port handoff: {handoff}");
+            }
+
+            return port;
+        }
 
         public async Task StopAsync()
         {

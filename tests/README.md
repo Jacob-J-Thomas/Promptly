@@ -11,3 +11,35 @@ dotnet test tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.
 The ignored `artifacts/test-results/csharp` directory receives the TRX result plus Cobertura and JSON coverage reports. GitHub Actions runs the same gate for every pull request and `main` push, verifies the exact measured assembly and Application source cohorts plus all checked-in Infrastructure C# sources, and retains those artifacts for 14 days.
 
 This expanding gate is not evidence of repository-wide 90% C# coverage; Application services outside the named cohort, Domain, Server, SDK, and CLI remain outside its denominator. Issues #18 and #19 remain open until every unit-testable production area is included in the required aggregate gates.
+
+## Integration tests
+
+The skip-free integration suite exercises the real ASP.NET Core request pipeline against a disposable PostgreSQL 18.4 database and the real FastAPI worker. Mapping proposals traverse Server -> FastAPI -> a checked-in deterministic OpenAI-compatible provider stub; no external credentials or paid services are used.
+
+Covered foundation contracts include:
+
+- empty-database migration and health startup;
+- registration, login failure, anonymous denial, and top-level two-user project isolation;
+- owned suite YAML import persistence (semantic YAML export round-tripping remains tracked separately in issue #44);
+- real mapping proposal across Server, FastAPI, and the provider stub;
+- safe Server responses when the worker is unavailable or returns malformed JSON.
+
+The suite intentionally does not assert current cross-tenant behavior of nested resources. Those authorization contracts belong after issue #26 closes, so this foundation does not canonize a known vulnerability.
+
+Docker must be available. Run the locked suite from the repository root:
+
+```bash
+dotnet restore Promptly.slnx --locked-mode
+dotnet build Promptly.slnx --configuration Release --no-restore
+dotnet test tests/Promptly.IntegrationTests/Promptly.IntegrationTests.csproj \
+  --configuration Release \
+  --no-build \
+  --logger "trx;LogFileName=Promptly.IntegrationTests.trx" \
+  --results-directory artifacts/test-results/integration
+```
+
+The harness builds `Promptly.Worker/Dockerfile` by default, pins PostgreSQL by tag and multi-platform digest, and stores the TRX plus Server, PostgreSQL, FastAPI, and provider diagnostics under `artifacts/test-results/integration`. The provider binds port `0` itself and reports the kernel-selected port to the harness, avoiding free-port reservation races. Its `provider-requests.jsonl` artifact records only structured request evidence (monotonic sequence, method, path, request kind, authorization result, model/message count, and a test correlation ID); it does not record credentials or prompt bodies. The mapping test proves that its API call generated a correlated `/v1/chat/completions` request after readiness probes. CI independently validates that evidence, prebuilds the worker image once, fails skipped or zero-test runs, and retains the artifact bundle for 14 days.
+
+All external-resource and process cleanup steps have explicit time bounds, including synchronous delegate execution. Teardown attempts every step and aggregates secondary cleanup failures; if setup or a test operation already failed, that primary exception remains the first preserved exception.
+
+Production defaults remain unchanged. `Startup:ApplyDatabaseMigrations` and `TestRunner:Enabled` default to `true`; specialized test hosts can explicitly control them.

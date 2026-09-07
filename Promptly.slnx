@@ -6,4 +6,5 @@
   <Project Path="Promptly.Sdk.DotNet/Promptly.Sdk.DotNet.csproj" />
   <Project Path="Promptly.Server/Promptly.Server.csproj" />
   <Project Path="tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj" />
+  <Project Path="tests/Promptly.IntegrationTests/Promptly.IntegrationTests.csproj" />
 </Solution>

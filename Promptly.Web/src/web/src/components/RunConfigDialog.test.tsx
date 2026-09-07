@@ -109,15 +109,14 @@ const renderDialog = () => {
   const onClose = vi.fn();
   const onRunStarted = vi.fn();
   const rendered = render(
-    <MemoryRouter>
-      <RunConfigDialog
-        open
-        onClose={onClose}
-        projectId="project-1"
-        suiteId="suite-1"
-        onRunStarted={onRunStarted}
-      />
-    </MemoryRouter>,
+    <RunConfigDialog
+      open
+      onClose={onClose}
+      projectId="project-1"
+      suiteId="suite-1"
+      onRunStarted={onRunStarted}
+    />,
+    { wrapper: MemoryRouter },
   );
   return { ...rendered, onClose, onRunStarted };
 };
@@ -253,12 +252,20 @@ describe('RunConfigDialog', () => {
 
   it('clears mapping immediately and ignores stale mapping responses', async () => {
     let resolveDevelopmentMapping: ((value: MappingSpec[]) => void) | undefined;
-    vi.mocked(endpointsApi.getByEnvironment).mockResolvedValue([endpointOne, endpointTwo]);
+    const secondEndpoint: Endpoint = {
+      ...endpointTwo,
+      environmentId: environmentOne.id,
+    };
+    const secondMapping: MappingSpec = {
+      ...mappingTwo,
+      endpointId: secondEndpoint.id,
+    };
+    vi.mocked(endpointsApi.getByEnvironment).mockResolvedValue([endpointOne, secondEndpoint]);
     vi.mocked(mappingApi.getByEndpoint).mockImplementation((endpointId) => {
       if (endpointId === endpointOne.id) {
         return new Promise((resolve) => { resolveDevelopmentMapping = resolve; });
       }
-      return Promise.resolve([mappingTwo]);
+      return Promise.resolve([secondMapping]);
     });
     renderDialog();
 

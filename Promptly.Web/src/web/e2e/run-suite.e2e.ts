@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 
@@ -44,7 +43,10 @@ const requireCreated = async (
 };
 
 test('persisted Run Suite configuration queues a run and loads its result', async ({ page }) => {
-  const unique = randomUUID();
+  const unique = process.env.PROMPTLY_E2E_EXPECTED_CORRELATION;
+  if (!unique) {
+    throw new Error('PROMPTLY_E2E_EXPECTED_CORRELATION must be supplied by the composed runner');
+  }
   const email = `run-suite-${unique}@promptly.invalid`;
   const password = `Promptly-${unique}-A1`;
 

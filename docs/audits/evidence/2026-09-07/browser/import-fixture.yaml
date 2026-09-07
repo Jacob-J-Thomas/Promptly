@@ -1,0 +1,9 @@
+tests:
+  - externalId: TC-IMPORT
+    name: Imported from UI fixture
+    description: Fixture import
+    input:
+      messages:
+        - role: user
+          content: Hello
+    expectations: []

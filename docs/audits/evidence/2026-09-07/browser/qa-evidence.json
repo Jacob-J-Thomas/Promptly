@@ -1,0 +1,122 @@
+{
+  "run": {
+    "repo": "/Users/jake/Repos/Promptly",
+    "frontend": "http://localhost:3000",
+    "mainSha": "849a00b113ae694f3e8997b212e7e8786378ad0c",
+    "scope": "UI-only browser probes; fixture-backed authenticated routes; no backend/integration/acceptance claim",
+    "note": "Authenticated routes use browser-intercepted fixtures. Even steps called pass establish UI behavior only; no API persistence or integration acceptance."
+  },
+  "steps": [
+    {
+      "name": "protected-root",
+      "result": "pass",
+      "observed": "GET / redirects unauthenticated user to /login"
+    },
+    {
+      "name": "login-unreachable-api",
+      "result": "fail",
+      "observed": "POST http://localhost:5000/api/auth/login ERR_CONNECTION_REFUSED; visible alert is generic Login failed. Please check your credentials."
+    },
+    {
+      "name": "registration-validation",
+      "result": "pass",
+      "observed": "Mismatch and under-8 password alerts render client-side"
+    },
+    {
+      "name": "registration-unreachable-api",
+      "result": "fail",
+      "observed": "POST http://localhost:5000/api/auth/register ERR_CONNECTION_REFUSED; visible alert is generic Registration failed. Please try again."
+    },
+    {
+      "name": "projects",
+      "result": "pass",
+      "observed": "Fixture project list, create dialog and required name validation render"
+    },
+    {
+      "name": "environment-server-dto",
+      "result": "fail",
+      "observed": "Fixture actual server shape {hasHeaders:true, headers:{...}} renders No custom headers configured because UI reads headersEncrypted"
+    },
+    {
+      "name": "mapping-wizard",
+      "result": "pass",
+      "observed": "Required endpoint/sample validation, proposal, Monaco edit-preview, validate, save/default calls and close all exercised with fixtures"
+    },
+    {
+      "name": "suite-create-test",
+      "result": "partial",
+      "observed": "Dialog disables empty Create; valid UI create sends fixed inputSpecJson={messages:[]} and expectationsJson=[] with no editable input/expectation fields"
+    },
+    {
+      "name": "suite-edit-test",
+      "result": "fail",
+      "observed": "Edit menu item closes with no dialog/navigation; console logs Edit test only (source TODO)"
+    },
+    {
+      "name": "suite-import-export",
+      "result": "pass",
+      "observed": "YAML upload POST returned 200 and export downloaded YAML"
+    },
+    {
+      "name": "run-config",
+      "result": "fail",
+      "observed": "Run dialog explicitly placeholder; environment/endpoint/mapping arrays never loaded; Start Run disabled permanently"
+    },
+    {
+      "name": "run-history-server-enum",
+      "result": "fail",
+      "observed": "Actual server enum numeric status=2 crashes RunsList with TypeError status.toLowerCase is not a function"
+    },
+    {
+      "name": "run-detail-server-dto",
+      "result": "fail",
+      "observed": "Actual numeric statuses render 2 and 0 instead of labels/icons; actual result DTO has metricsJson/failureReasonsJson, while UI expects expectationResultsJson/failureReason; expectations render / NaN"
+    },
+    {
+      "name": "desktop-layout",
+      "result": "fail",
+      "observed": "At viewport 1200x829 body width=1200 but #root width=424.8125; large blank area on right, starter body flex/#root CSS cause"
+    },
+    {
+      "name": "mobile-keyboard",
+      "result": "pass",
+      "observed": "390x844 login fits viewport; tab order email -> password -> submit -> signup; root width=390"
+    }
+  ],
+  "artifacts": [
+    "login.png",
+    "environment-detail-loaded.png",
+    "suite-detail.png",
+    "run-dialog.png",
+    "create-test-dialog-empty.png",
+    "wizard-step0.png",
+    "wizard-edit-preview.png",
+    "wizard-save-finalize.png",
+    "run-detail-numeric.png",
+    "run-detail-server-dto.png",
+    "login-mobile.png",
+    "exported-tests.yaml",
+    "import-fixture.yaml",
+    "install-fixtures.js"
+  ],
+  "classification": {
+    "existingIssueCandidates": [
+      "#1/#13/#15 mapping onboarding",
+      "#4 edit action",
+      "#6/#9 run dialog",
+      "#10/#11/#12 editor",
+      "#37 header/status/result DTO contracts",
+      "#41/#44 vacuous test data",
+      "#8/#16 desktop width",
+      "#23 MUI/build/lint",
+      "#24/#67 browser coverage"
+    ],
+    "newOrCrossCutting": [
+      "Desktop root width is additional evidence for #8/#16, not a duplicate new ticket. Header/enum/result contracts already belong to #37."
+    ],
+    "warnings": [
+      "MUI Grid item/xs/md/lg/sm deprecation warnings",
+      "MUI aria-hidden focused descendant warning after SPA dialog navigation"
+    ]
+  }
+}

@@ -1,0 +1,3 @@
+tests:
+  - externalId: TC-001
+    name: returns assistant text

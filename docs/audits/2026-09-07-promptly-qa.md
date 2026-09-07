@@ -33,6 +33,29 @@ development app despite these errors; browser rendering is not release proof.
 Earlier subagent notes about unavailable frontend tooling were superseded by
 the completed build/lint runs above.
 
+## Browser user-flow probes
+
+Executed 15 browser scenarios against the unmodified frontend. Unauthenticated
+navigation and validation used the actual Vite app; authenticated routes used
+browser-intercepted synthetic API responses. The [step ledger and fixture](evidence/2026-09-07/browser/qa-evidence.json)
+identify every result and artifact. A UI-layer pass does not prove backend
+persistence, provider calls, or full-stack acceptance.
+
+| Scenario | Observed result | Tracking |
+| --- | --- | --- |
+| Missing session, registration validation, API unreachable | Protected root redirects to login; mismatched/short passwords show alerts. API requests fail with connection refused and generic visible errors. | #24/#67; real auth integration remains unavailable |
+| Project/environment setup | Project list/dialog and required name validation render. A server-shaped environment with headers incorrectly says no custom headers are configured. | #37 |
+| Mapping wizard | Required validation, proposal, Monaco edit/preview, validation and save/default calls complete with controlled fixtures. This does not prove the real mapping worker works. | #1/#13/#15/#25 |
+| Create/edit a test | Create submits fixed empty messages and expectations; no editor fields exist. Edit closes its menu and logs to console without opening an editor. | #4/#10–12/#41/#44 |
+| YAML import/export | File upload, success UI and download work against fixtures; no persisted or semantic round trip was proved. | #12/#44 |
+| Run Suite | Dialog says it is a placeholder; selectors never populate and Start Run remains disabled. [Screenshot](evidence/2026-09-07/browser/run-dialog.png). | #6/#9 |
+| Actual server-shaped run statuses/results | Numeric status crashes RunsList (`status.toLowerCase is not a function`). RunDetail shows numeric labels and `/ NaN` expectation counts. [Screenshot](evidence/2026-09-07/browser/run-detail-server-dto.png). | #37 |
+| Desktop, mobile, keyboard | Desktop root measured about 425 px in a 1200 px viewport; 390 px mobile login fits and tab order reaches the expected controls. MUI Grid and focused aria-hidden warnings observed. | #8/#16/#23; broader accessibility remains unverified |
+
+Screenshots use only synthetic fixture accounts and data. Browser probes add
+fresh reproductions to existing ownership; they do not create a second set of
+product issues.
+
 ## Findings and existing ownership
 
 These are deduplicated root-cause groups, not 15 new tickets. Source findings
@@ -126,6 +149,8 @@ isolated stack failed before container creation. Storage repair, deletion of
 retained Docker data, or a Colima reset was not attempted. The runtime report's
 port observations are from that attempt; the frontend was subsequently run
 independently on loopback for browser QA. No live LLM call was made.
+After evidence capture, the isolated browser session was closed and the
+audit-started Colima VM was stopped without deleting its data.
 
 Full onboarding-to-results integration, real persisted round trips, two-user
 authorization tests, worker/provider interoperability and SDK/CLI terminal

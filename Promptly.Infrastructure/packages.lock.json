@@ -4,7 +4,7 @@
     "net10.0": {
       "JsonPath.Net": {
         "type": "Direct",
-        "requested": "[1.2.1, )",
+        "requested": "[2.0.0, )",
         "resolved": "2.0.0",
         "contentHash": "psMt/4VtLbz9tw/F8yQmFFN+J4naqDx+lpsFBgIg4S8UXnErn2z4d0zXrdQZVA7+bJZEC5pCsxLXV9IkXVQndg==",
         "dependencies": {

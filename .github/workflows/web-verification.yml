@@ -45,9 +45,53 @@ jobs:
       - name: Lint without warnings
         run: npm run lint -- --max-warnings=0
 
-      - name: Clean web test artifacts
+      - name: Clean web verification artifacts
         shell: pwsh
-        run: Remove-Item ../../../artifacts/test-results/web -Recurse -Force -ErrorAction SilentlyContinue
+        run: |
+          Remove-Item ../../../artifacts/test-results/web -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item ../../../artifacts/test-results/web -ItemType Directory -Force | Out-Null
+
+      - name: Audit locked dependencies
+        shell: bash
+        run: |
+          set +e
+          npm audit --audit-level=high --json \
+            > ../../../artifacts/test-results/web/npm-audit.json
+          full_audit_status=$?
+          npm audit --omit=dev --audit-level=high --json \
+            > ../../../artifacts/test-results/web/npm-audit-production.json
+          production_audit_status=$?
+          set -e
+
+          FULL_AUDIT_PATH=../../../artifacts/test-results/web/npm-audit.json \
+          PRODUCTION_AUDIT_PATH=../../../artifacts/test-results/web/npm-audit-production.json \
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const loadCounts = (label, path) => {
+            const report = JSON.parse(readFileSync(path, "utf8"));
+            const counts = report.metadata?.vulnerabilities;
+            if (!counts) {
+              throw new Error(`${label} npm audit did not return vulnerability metadata`);
+            }
+            console.log(`${label} npm audit: ${JSON.stringify(counts)}`);
+            return counts;
+          };
+
+          const full = loadCounts("Full", process.env.FULL_AUDIT_PATH);
+          const production = loadCounts("Production", process.env.PRODUCTION_AUDIT_PATH);
+          if (full.high !== 0 || full.critical !== 0) {
+            throw new Error("Full npm audit contains high or critical findings");
+          }
+          if (production.high !== 0 || production.critical !== 0) {
+            throw new Error("Production npm audit contains high or critical findings");
+          }
+          NODE
+
+          if (( full_audit_status > 1 || production_audit_status > 1 )); then
+            echo "npm audit failed before producing a valid report" >&2
+            exit 1
+          fi
 
       - name: Run web unit tests and coverage gate
         run: npm run test:coverage
@@ -55,13 +99,15 @@ jobs:
       - name: Build release bundle
         run: npm run build
 
-      - name: Require test and coverage artifacts
+      - name: Require verification artifacts
         shell: pwsh
         run: |
           $requiredArtifacts = @(
             "../../../artifacts/test-results/web/junit.xml",
             "../../../artifacts/test-results/web/coverage/cobertura-coverage.xml",
-            "../../../artifacts/test-results/web/coverage/coverage-final.json"
+            "../../../artifacts/test-results/web/coverage/coverage-final.json",
+            "../../../artifacts/test-results/web/npm-audit.json",
+            "../../../artifacts/test-results/web/npm-audit-production.json"
           )
           foreach ($artifact in $requiredArtifacts) {
             if (-not (Test-Path -Path $artifact -PathType Leaf) -or (Get-Item $artifact).Length -eq 0) {
@@ -69,7 +115,7 @@ jobs:
             }
           }
 
-      - name: Upload test and coverage artifacts
+      - name: Upload test, coverage, and dependency-audit artifacts
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

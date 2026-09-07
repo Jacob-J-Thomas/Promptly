@@ -19,6 +19,7 @@ public sealed class ExpectationEvaluatorTests
         Assert.False(result.Passed);
         Assert.Equal("unknown", result.ExpectationType);
         Assert.Equal(0.0, result.Score);
+        Assert.Equal("missing_expectation_type", result.ErrorCode);
         Assert.Contains("missing 'type'", result.Reason, StringComparison.Ordinal);
     }
 
@@ -40,7 +41,8 @@ public sealed class ExpectationEvaluatorTests
 
         Assert.False(result.Passed);
         Assert.Equal("not_real", result.ExpectationType);
-        Assert.Contains("Unknown expectation type", result.Reason, StringComparison.Ordinal);
+        Assert.Equal("unsupported_expectation_type", result.ErrorCode);
+        Assert.Contains("Unsupported expectation type", result.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -52,6 +54,7 @@ public sealed class ExpectationEvaluatorTests
 
         Assert.False(result.Passed);
         Assert.Equal("unknown", result.ExpectationType);
+        Assert.Equal("missing_expectation_type", result.ErrorCode);
     }
 
     [Fact]
@@ -69,7 +72,7 @@ public sealed class ExpectationEvaluatorTests
     }
 
     [Fact]
-    public async Task Json_non_boolean_case_insensitive_value_is_not_treated_as_true()
+    public async Task Json_non_boolean_case_insensitive_value_is_rejected()
     {
         using var document = JsonDocument.Parse(
             """
@@ -78,7 +81,8 @@ public sealed class ExpectationEvaluatorTests
 
         var result = await _evaluator.EvaluateAsync(document.RootElement, Trace("Value 42"));
 
-        Assert.True(result.Passed);
+        Assert.False(result.Passed);
+        Assert.Equal("invalid_expectation_field", result.ErrorCode);
     }
 
     [Theory]
@@ -185,14 +189,14 @@ public sealed class ExpectationEvaluatorTests
     }
 
     [Fact]
-    public async Task Regex_match_preserves_an_explicit_empty_pattern()
+    public async Task Regex_match_rejects_an_explicit_empty_pattern()
     {
         var result = await _evaluator.EvaluateAsync(
             Expectation("regex_match", ("pattern", "")),
             Trace("assistant response"));
 
-        Assert.True(result.Passed);
-        Assert.Null(result.ErrorCode);
+        Assert.False(result.Passed);
+        Assert.Equal("required_expectation_field", result.ErrorCode);
     }
 
     [Theory]

@@ -146,7 +146,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "foreign-create",
             null,
             "{}",
-            "[]",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var updated = await service.UpdateTestCaseAsync(
             graph.SiblingTestCaseId,
@@ -154,7 +154,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "tampered",
             null,
             "{}",
-            "[]",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var deleted = await service.DeleteTestCaseAsync(graph.SiblingTestCaseId, scope);
 
@@ -219,7 +219,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "created",
             null,
             "{}",
-            "[]",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         Assert.NotNull(created);
         var updated = await service.UpdateTestCaseAsync(
@@ -228,7 +228,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "updated",
             "updated",
             "{\"messages\":[]}",
-            "[]",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var imported = await service.BulkCreateTestsAsync(
             graph.AllowedSuiteId,
@@ -251,6 +251,31 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.NotNull(listed);
         Assert.Contains(listed, testCase => testCase.ExternalId == "imported");
         Assert.True(deleted);
+    }
+
+    [Fact]
+    public async Task Owned_test_case_create_rejects_empty_expectations_before_persisting()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+
+        await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "invalid",
+                "invalid",
+                null,
+                "{}",
+                "[]",
+                scope));
+
+        Assert.DoesNotContain(
+            dbContext.TestCases,
+            testCase => testCase.ExternalId == "invalid");
     }
 
     private static PromptlyDbContext CreateDbContext()

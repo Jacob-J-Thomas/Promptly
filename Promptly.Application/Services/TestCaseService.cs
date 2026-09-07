@@ -11,11 +11,16 @@ public class TestCaseService : ITestCaseService
 {
     private readonly PromptlyDbContext _dbContext;
     private readonly ILogger<TestCaseService> _logger;
+    private readonly IExpectationValidator _expectationValidator;
 
-    public TestCaseService(PromptlyDbContext dbContext, ILogger<TestCaseService> logger)
+    public TestCaseService(
+        PromptlyDbContext dbContext,
+        ILogger<TestCaseService> logger,
+        IExpectationValidator? expectationValidator = null)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _expectationValidator = expectationValidator ?? new ExpectationDslValidator();
     }
 
     public async Task<TestCase?> CreateTestCaseAsync(
@@ -34,6 +39,8 @@ public class TestCaseService : ITestCaseService
         {
             return null;
         }
+
+        EnsureValidExpectations(expectationsJson);
 
         var testCase = new TestCase
         {
@@ -99,6 +106,8 @@ public class TestCaseService : ITestCaseService
             return null;
         }
 
+        EnsureValidExpectations(expectationsJson);
+
         testCase.ExternalId = externalId;
         testCase.Name = name;
         testCase.Description = description;
@@ -159,4 +168,24 @@ public class TestCaseService : ITestCaseService
 
         return testCases;
     }
+
+    private void EnsureValidExpectations(string expectationsJson)
+    {
+        var validation = _expectationValidator.ValidateExpectationsJson(expectationsJson);
+        if (!validation.IsValid)
+        {
+            throw new ExpectationValidationException(validation.Issues);
+        }
+    }
+}
+
+public sealed class ExpectationValidationException : ArgumentException
+{
+    public ExpectationValidationException(IReadOnlyList<ExpectationValidationIssue> issues)
+        : base(string.Join("; ", issues.Select(issue => $"{issue.Path}: {issue.Message}")))
+    {
+        Issues = issues;
+    }
+
+    public IReadOnlyList<ExpectationValidationIssue> Issues { get; }
 }

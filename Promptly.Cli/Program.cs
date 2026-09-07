@@ -2,6 +2,28 @@ using System.CommandLine;
 using System.Text.Json;
 using Promptly.Sdk.DotNet;
 
+const int AssertionFailureExitCode = 1;
+const int InfrastructureErrorExitCode = 2;
+
+static int GetResultExitCode(
+    IReadOnlyCollection<TestRunResultResponse> results,
+    TestRunResponse run)
+{
+    if (run.Status == "Failed" || !string.IsNullOrWhiteSpace(run.ErrorMessage))
+    {
+        return InfrastructureErrorExitCode;
+    }
+
+    if (results.Any(result => result.Status == "Error"))
+    {
+        return InfrastructureErrorExitCode;
+    }
+
+    return results.Any(result => result.Status == "Fail")
+        ? AssertionFailureExitCode
+        : 0;
+}
+
 var rootCommand = new RootCommand("Promptly CLI - LLM Black-Box Test Harness");
 
 // Trigger command
@@ -139,17 +161,17 @@ triggerCommand.SetHandler(async (context) =>
                 {
                     Console.WriteLine($"  - {result.TestCaseExternalId} ({result.TestCaseName}): {result.Status}");
                 }
-                context.ExitCode = 1;
+                context.ExitCode = GetResultExitCode(results, completedRun);
                 return;
             }
 
-            context.ExitCode = 0;
+            context.ExitCode = GetResultExitCode(results, completedRun);
         }
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        context.ExitCode = 1;
+        context.ExitCode = InfrastructureErrorExitCode;
     }
 });
 
@@ -227,16 +249,16 @@ waitCommand.SetHandler(async (context) =>
             {
                 Console.WriteLine($"  - {result.TestCaseExternalId} ({result.TestCaseName}): {result.Status}");
             }
-            context.ExitCode = 1;
+            context.ExitCode = GetResultExitCode(results, run);
             return;
         }
 
-        context.ExitCode = 0;
+        context.ExitCode = GetResultExitCode(results, run);
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        context.ExitCode = 1;
+        context.ExitCode = InfrastructureErrorExitCode;
     }
 });
 

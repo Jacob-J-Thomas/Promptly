@@ -18,6 +18,7 @@ public class TestRunProcessor : ITestRunProcessor
     private readonly IMappingService _mappingService;
     private readonly IExpectationEvaluator _expectationEvaluator;
     private readonly IPythonEvalClient _pythonEvalClient;
+    private readonly IExpectationValidator _expectationValidator;
     private readonly ILogger<TestRunProcessor> _logger;
 
     public TestRunProcessor(
@@ -27,7 +28,8 @@ public class TestRunProcessor : ITestRunProcessor
         IMappingService mappingService,
         IExpectationEvaluator expectationEvaluator,
         IPythonEvalClient pythonEvalClient,
-        ILogger<TestRunProcessor> logger)
+        ILogger<TestRunProcessor> logger,
+        IExpectationValidator? expectationValidator = null)
     {
         _dbContext = dbContext;
         _testRunWorkerStore = testRunWorkerStore;
@@ -35,6 +37,7 @@ public class TestRunProcessor : ITestRunProcessor
         _mappingService = mappingService;
         _expectationEvaluator = expectationEvaluator;
         _pythonEvalClient = pythonEvalClient;
+        _expectationValidator = expectationValidator ?? new ExpectationDslValidator();
         _logger = logger;
     }
 
@@ -214,6 +217,7 @@ public class TestRunProcessor : ITestRunProcessor
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+
             // Step 1: Execute HTTP request
             var executionResult = await _endpointExecutor.ExecuteAsync(
                 run.Endpoint!,
@@ -261,34 +265,120 @@ public class TestRunProcessor : ITestRunProcessor
             var trace = mappingResult.Trace;
             var traceJson = JsonSerializer.Serialize(trace);
 
-            // Step 3: Evaluate expectations
-            var expectations = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(testCase.ExpectationsJson);
-            if (expectations == null || expectations.Count == 0)
+            // Step 3: Parse the persisted array, then validate each expectation
+            // independently. API intake rejects an invalid document as a whole,
+            // but legacy rows can contain a mix of valid assertions and bad
+            // entries; those entries must remain visible as durable Errors while
+            // valid assertions still produce their real Pass/Fail outcomes.
+            List<ExpectationEntry> expectationEntries;
+            try
             {
-                return new ProcessedTestCase(
-                    new TestRunResult
+                using var expectationsDocument = JsonDocument.Parse(testCase.ExpectationsJson);
+                if (expectationsDocument.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    return InvalidTestCase(
+                        run.Id,
+                        testCase.Id,
+                        [new ExpectationValidationIssue(
+                            "invalid_expectations_json",
+                            "$",
+                            "Expectations JSON must be an array")],
+                        traceJson,
+                        trace.Usage);
+                }
+
+                expectationEntries = [];
+                var index = 0;
+                foreach (var element in expectationsDocument.RootElement.EnumerateArray())
+                {
+                    if (element.ValueKind != JsonValueKind.Object)
                     {
-                        Id = Guid.NewGuid(),
-                        RunId = run.Id,
-                        TestCaseId = testCase.Id,
-                        Status = TestResultStatus.Pass,
-                        TraceJson = traceJson,
-                        MetricsJson = JsonSerializer.Serialize(new { passed = 0, failed = 0 }),
-                        CreatedAt = DateTime.UtcNow
-                    },
+                        expectationEntries.Add(new(
+                            null,
+                            [new ExpectationValidationIssue(
+                                "invalid_expectation",
+                                $"$[{index}]",
+                                "Each expectation must be an object")]));
+                    }
+                    else
+                    {
+                        var expectation = JsonSerializer.Deserialize<Dictionary<string, object>>(
+                            element.GetRawText());
+                        expectationEntries.Add(expectation is null
+                            ? new(
+                                null,
+                                [new ExpectationValidationIssue(
+                                    "invalid_expectation",
+                                    $"$[{index}]",
+                                    "Each expectation must be an object")])
+                            : new(expectation, []));
+                    }
+
+                    index++;
+                }
+            }
+            catch (JsonException)
+            {
+                return InvalidTestCase(
+                    run.Id,
+                    testCase.Id,
+                    [new ExpectationValidationIssue(
+                        "invalid_expectations_json",
+                        "$",
+                        "Expectations JSON is invalid")],
+                    traceJson,
                     trace.Usage);
             }
 
-            var expectationResults = new List<ExpectationResult>();
+            if (expectationEntries.Count == 0)
+            {
+                return InvalidTestCase(
+                    run.Id,
+                    testCase.Id,
+                    [new ExpectationValidationIssue(
+                        "no_expectations",
+                        "$",
+                        "At least one expectation is required")],
+                    traceJson,
+                    trace.Usage);
+            }
+
+            var expectationResults = new List<ExpectationResult>(expectationEntries.Count);
             int passed = 0;
             int failed = 0;
             int errors = 0;
             var failureReasons = new List<string>();
 
-            foreach (var exp in expectations)
+            foreach (var entry in expectationEntries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var expType = exp.ContainsKey("type") ? exp["type"].ToString() : "";
+                var exp = entry.Expectation;
+                if (exp is null)
+                {
+                    var invalidResult = InvalidExpectationResult("invalid", entry.Issues);
+                    expectationResults.Add(invalidResult);
+                    errors++;
+                    failureReasons.Add(
+                        $"[{invalidResult.ExpectationType}:{invalidResult.ErrorCode}] {invalidResult.Reason}");
+                    continue;
+                }
+
+                var validation = entry.Issues.Count > 0
+                    ? new ExpectationValidationResult(entry.Issues)
+                    : _expectationValidator.ValidateExpectation(exp);
+                if (!validation.IsValid)
+                {
+                    var invalidResult = InvalidExpectationResult(
+                        GetExpectationType(exp),
+                        validation.Issues);
+                    expectationResults.Add(invalidResult);
+                    errors++;
+                    failureReasons.Add(
+                        $"[{invalidResult.ExpectationType}:{invalidResult.ErrorCode}] {invalidResult.Reason}");
+                    continue;
+                }
+
+                var expType = GetExpectationType(exp);
                 ExpectationResult expResult;
 
                 // Deterministic expectations
@@ -340,7 +430,7 @@ public class TestRunProcessor : ITestRunProcessor
                 passed,
                 failed,
                 errors,
-                total = expectations.Count,
+                total = expectationEntries.Count,
                 expectationResults
             });
 
@@ -384,6 +474,82 @@ public class TestRunProcessor : ITestRunProcessor
         }
     }
 
+    private static ProcessedTestCase InvalidTestCase(
+        Guid runId,
+        Guid testCaseId,
+        IReadOnlyList<ExpectationValidationIssue> issues,
+        string traceJson,
+        Usage? usage)
+    {
+        var expectationResults = issues.Select(issue => new ExpectationResult
+        {
+            ExpectationType = "invalid",
+            Passed = false,
+            Score = 0,
+            ErrorCode = issue.Code,
+            Reason = $"{issue.Path}: {issue.Message}"
+        }).ToList();
+
+        var failureReasons = expectationResults
+            .Select(result => $"[{result.ExpectationType}:{result.ErrorCode}] {result.Reason}")
+            .ToList();
+
+        return new ProcessedTestCase(
+            new TestRunResult
+            {
+                Id = Guid.NewGuid(),
+                RunId = runId,
+                TestCaseId = testCaseId,
+                Status = TestResultStatus.Error,
+                TraceJson = traceJson,
+                MetricsJson = JsonSerializer.Serialize(new
+                {
+                    passed = 0,
+                    failed = 0,
+                    errors = expectationResults.Count,
+                    total = expectationResults.Count,
+                    expectationResults
+                }),
+                FailureReasonsJson = JsonSerializer.Serialize(failureReasons),
+                CreatedAt = DateTime.UtcNow
+            },
+            Usage: usage);
+    }
+
+    private static ExpectationResult InvalidExpectationResult(
+        string expectationType,
+        IReadOnlyList<ExpectationValidationIssue> issues)
+    {
+        var firstIssue = issues[0];
+        return new ExpectationResult
+        {
+            ExpectationType = expectationType,
+            Passed = false,
+            Score = 0,
+            ErrorCode = firstIssue.Code,
+            Reason = string.Join(
+                "; ",
+                issues.Select(issue => $"{issue.Path}: {issue.Message}"))
+        };
+    }
+
+    private static string GetExpectationType(IReadOnlyDictionary<string, object> expectation)
+    {
+        if (expectation.TryGetValue("type", out var value)
+            && value is JsonElement element)
+        {
+            return element.ValueKind == JsonValueKind.String
+                ? element.GetString() ?? "invalid"
+                : "invalid";
+        }
+
+        return value?.ToString() ?? "invalid";
+    }
+
+    private sealed record ExpectationEntry(
+        Dictionary<string, object>? Expectation,
+        IReadOnlyList<ExpectationValidationIssue> Issues);
+
     private sealed record ProcessedTestCase(TestRunResult Result, Usage? Usage);
 
     private async Task<ExpectationResult> EvaluateLlmJudgeAsync(
@@ -394,7 +560,7 @@ public class TestRunProcessor : ITestRunProcessor
         try
         {
             var rubric = exp.ContainsKey("rubric") ? exp["rubric"].ToString() : "";
-            var minScore = exp.ContainsKey("min_score") && double.TryParse(exp["min_score"].ToString(), out var ms) ? ms : 0.7;
+            var minScore = exp.ContainsKey("min_score") && double.TryParse(exp["min_score"]?.ToString(), out var ms) ? ms : 0.8;
             var model = exp.ContainsKey("model") ? exp["model"].ToString() : null;
             var provider = exp.ContainsKey("provider") ? exp["provider"].ToString() : null;
 
@@ -451,9 +617,23 @@ public class TestRunProcessor : ITestRunProcessor
     {
         try
         {
-            var minScore = exp.ContainsKey("min_score") && double.TryParse(exp["min_score"].ToString(), out var ms) ? ms : 0.7;
+            var minScore = exp.ContainsKey("min_score") && double.TryParse(exp["min_score"]?.ToString(), out var ms) ? ms : 0.8;
             var model = exp.ContainsKey("model") ? exp["model"].ToString() : null;
             var provider = exp.ContainsKey("provider") ? exp["provider"].ToString() : null;
+
+            // A score of zero from the worker is a truthful assertion failure when
+            // no evidence is available. Guard this locally as well so a legacy
+            // row cannot turn the absence of documents into Pass at min_score=0.
+            if (trace.RetrievedDocs is null || trace.RetrievedDocs.Count == 0)
+            {
+                return new ExpectationResult
+                {
+                    ExpectationType = "groundedness",
+                    Passed = false,
+                    Score = 0.0,
+                    Reason = "No retrieved documents available for groundedness evaluation"
+                };
+            }
 
             var result = await _pythonEvalClient.EvaluateGroundednessAsync(
                 minScore,

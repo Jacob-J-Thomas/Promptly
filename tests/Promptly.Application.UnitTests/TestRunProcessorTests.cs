@@ -147,7 +147,7 @@ public sealed class TestRunProcessorTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+            ValidExpectationJson(expectationType)));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var pythonEvalClient = new BlockingPythonEvalClient(expectationType);
@@ -178,7 +178,7 @@ public sealed class TestRunProcessorTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+            ValidExpectationJson(expectationType)));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var processor = CreateProcessor(
@@ -301,6 +301,12 @@ public sealed class TestRunProcessorTests
             ExpectationsJson = expectationsJson
         };
     }
+
+    private static string ValidExpectationJson(string expectationType) => expectationType switch
+    {
+        "llm_judge" => "[{\"type\":\"llm_judge\",\"rubric\":\"Be helpful\"}]",
+        _ => JsonSerializer.Serialize(new[] { new { type = expectationType } })
+    };
 
     private static ExpectationResult UnusedExpectationResult()
     {

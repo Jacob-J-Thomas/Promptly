@@ -107,7 +107,7 @@ const apiError = (message: string) => new AxiosError(
 const renderDialog = () => {
   const onClose = vi.fn();
   const onRunStarted = vi.fn();
-  render(
+  const rendered = render(
     <RunConfigDialog
       open
       onClose={onClose}
@@ -116,7 +116,7 @@ const renderDialog = () => {
       onRunStarted={onRunStarted}
     />,
   );
-  return { onClose, onRunStarted };
+  return { ...rendered, onClose, onRunStarted };
 };
 
 const choose = async (label: string, optionName: string | RegExp) => {
@@ -161,6 +161,65 @@ describe('RunConfigDialog', () => {
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Mapping Spec' }))
       .toHaveTextContent('Preferred mapping'));
+  });
+
+  it('filters resource responses to the active project resource graph', async () => {
+    const unrelatedEnvironment = { ...environmentOne, id: 'other-environment', projectId: 'other-project' };
+    const unrelatedEndpoint = { ...endpointOne, id: 'other-endpoint', environmentId: unrelatedEnvironment.id };
+    const unrelatedMapping = { ...mappingOne, id: 'other-mapping', endpointId: unrelatedEndpoint.id };
+    vi.mocked(environmentsApi.getByProject).mockResolvedValue([unrelatedEnvironment, environmentOne]);
+    vi.mocked(endpointsApi.getByEnvironment).mockResolvedValue([unrelatedEndpoint, endpointOne]);
+    vi.mocked(mappingApi.getByEndpoint).mockResolvedValue([unrelatedMapping, mappingOne]);
+    const { onRunStarted } = renderDialog();
+
+    await waitForReadySelection();
+    expect(screen.queryByText('other-environment')).not.toBeInTheDocument();
+    expect(screen.queryByText(/other-endpoint/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/other-mapping/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start Run' }));
+    await waitFor(() => expect(runsApi.queue).toHaveBeenCalledWith({
+      suiteId: 'suite-1',
+      environmentId: environmentOne.id,
+      endpointId: endpointOne.id,
+      mappingSpecId: mappingOne.id,
+      gitCommitHash: undefined,
+    }));
+    expect(onRunStarted).toHaveBeenCalledWith('run-1');
+  });
+
+  it('clears the old dialog context before loading a changed project and suite', async () => {
+    let resolveProjectTwo: ((value: Environment[]) => void) | undefined;
+    const projectTwoEnvironment: Environment = {
+      ...environmentTwo,
+      projectId: 'project-2',
+      name: 'Project Two',
+    };
+    vi.mocked(environmentsApi.getByProject).mockImplementation((projectId) => {
+      if (projectId === 'project-2') {
+        return new Promise((resolve) => { resolveProjectTwo = resolve; });
+      }
+      return Promise.resolve([environmentOne]);
+    });
+    vi.mocked(endpointsApi.getByEnvironment).mockImplementation((environmentId) => (
+      Promise.resolve(environmentId === endpointTwo.environmentId ? [endpointTwo] : [endpointOne])
+    ));
+    const { rerender } = renderDialog();
+    await waitForReadySelection();
+
+    rerender(
+      <RunConfigDialog
+        open
+        onClose={vi.fn()}
+        projectId="project-2"
+        suiteId="suite-2"
+        onRunStarted={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: 'Environment' })).not.toHaveTextContent('Development');
+    expect(screen.getByRole('combobox', { name: 'Endpoint' })).not.toHaveTextContent('Chat endpoint');
+    resolveProjectTwo?.([projectTwoEnvironment]);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Environment' }))
+      .toHaveTextContent('Project Two'));
   });
 
   it('clears dependent selections and ignores stale endpoint responses', async () => {
@@ -298,6 +357,38 @@ describe('RunConfigDialog', () => {
     resolveQueue?.(queuedRun);
     await waitFor(() => expect(onRunStarted).toHaveBeenCalledWith('run-1'));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('does not navigate from a queue response after close and reopen', async () => {
+    let resolveQueue: ((value: typeof queuedRun) => void) | undefined;
+    vi.mocked(runsApi.queue).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveQueue = resolve;
+    }));
+    const { rerender, onRunStarted } = renderDialog();
+    await waitForReadySelection();
+    fireEvent.click(screen.getByRole('button', { name: 'Start Run' }));
+
+    rerender(
+      <RunConfigDialog
+        open={false}
+        onClose={vi.fn()}
+        projectId="project-1"
+        suiteId="suite-1"
+        onRunStarted={onRunStarted}
+      />,
+    );
+    rerender(
+      <RunConfigDialog
+        open
+        onClose={vi.fn()}
+        projectId="project-1"
+        suiteId="suite-1"
+        onRunStarted={onRunStarted}
+      />,
+    );
+    resolveQueue?.(queuedRun);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onRunStarted).not.toHaveBeenCalled();
   });
 
   it('shows the queue API error and allows a retry', async () => {

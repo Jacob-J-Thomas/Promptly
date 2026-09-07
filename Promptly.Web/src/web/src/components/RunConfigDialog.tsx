@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -58,6 +58,43 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
   const environmentRequest = useRef(0);
   const endpointRequest = useRef(0);
   const mappingRequest = useRef(0);
+  const dialogSession = useRef(0);
+  const submissionId = useRef(0);
+  const submissionInFlight = useRef(false);
+
+  const resetState = useCallback(() => {
+    setEnvironments([]);
+    setEndpoints([]);
+    setMappings([]);
+    setSelectedEnv('');
+    setSelectedEndpoint('');
+    setSelectedMapping('');
+    setGitCommit('');
+    setEnvironmentLoading(false);
+    setEndpointLoading(false);
+    setMappingLoading(false);
+    setEnvironmentError('');
+    setEndpointError('');
+    setMappingError('');
+    setSubmitError('');
+    setSubmitting(false);
+  }, []);
+
+  const invalidateSession = useCallback(() => {
+    environmentRequest.current += 1;
+    endpointRequest.current += 1;
+    mappingRequest.current += 1;
+    dialogSession.current += 1;
+    submissionId.current += 1;
+    submissionInFlight.current = false;
+  }, []);
+
+  const contextKey = `${projectId}:${suiteId}`;
+
+  useLayoutEffect(() => {
+    invalidateSession();
+    resetState();
+  }, [contextKey, invalidateSession, open, resetState]);
 
   const loadEnvironments = useCallback(async () => {
     const requestId = ++environmentRequest.current;
@@ -69,8 +106,9 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
       if (requestId !== environmentRequest.current) {
         return;
       }
-      setEnvironments(values);
-      setSelectedEnv(values.length === 1 ? values[0].id : '');
+      const scopedValues = values.filter((environment) => environment.projectId === projectId);
+      setEnvironments(scopedValues);
+      setSelectedEnv(scopedValues.length === 1 ? scopedValues[0].id : '');
     } catch (error: unknown) {
       if (requestId === environmentRequest.current) {
         setEnvironments([]);
@@ -94,8 +132,9 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
       if (requestId !== endpointRequest.current) {
         return;
       }
-      setEndpoints(values);
-      setSelectedEndpoint(values[0]?.id ?? '');
+      const scopedValues = values.filter((endpoint) => endpoint.environmentId === environmentId);
+      setEndpoints(scopedValues);
+      setSelectedEndpoint(scopedValues[0]?.id ?? '');
     } catch (error: unknown) {
       if (requestId === endpointRequest.current) {
         setEndpoints([]);
@@ -119,8 +158,9 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
       if (requestId !== mappingRequest.current) {
         return;
       }
-      setMappings(values);
-      const selected = values.find((mapping) => mapping.isDefault) ?? values[0];
+      const scopedValues = values.filter((mapping) => mapping.endpointId === endpointId);
+      setMappings(scopedValues);
+      const selected = scopedValues.find((mapping) => mapping.isDefault) ?? scopedValues[0];
       setSelectedMapping(selected?.id ?? '');
     } catch (error: unknown) {
       if (requestId === mappingRequest.current) {
@@ -139,7 +179,7 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
     if (open && projectId) {
       void loadEnvironments();
     }
-  }, [loadEnvironments, open, projectId]);
+  }, [loadEnvironments, open, projectId, suiteId]);
 
   useEffect(() => {
     endpointRequest.current += 1;
@@ -210,10 +250,14 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
   };
 
   const handleStartRun = async () => {
-    if (submitting || !selectedEnv || !selectedEndpoint || !selectedMapping) {
+    if (submissionInFlight.current || !selectedEnv || !selectedEndpoint || !selectedMapping) {
       return;
     }
 
+    const sessionAtStart = dialogSession.current;
+    const submissionAtStart = ++submissionId.current;
+    const onRunStartedAtStart = onRunStarted;
+    submissionInFlight.current = true;
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -224,12 +268,22 @@ const RunConfigDialog: React.FC<RunConfigDialogProps> = ({
         mappingSpecId: selectedMapping,
         gitCommitHash: gitCommit.trim() || undefined,
       });
-      onRunStarted(run.id);
+      if (dialogSession.current !== sessionAtStart) {
+        return;
+      }
+      onRunStartedAtStart(run.id);
       handleClose();
     } catch (error: unknown) {
-      setSubmitError(getApiErrorMessage(error, 'Failed to start run'));
+      if (dialogSession.current === sessionAtStart) {
+        setSubmitError(getApiErrorMessage(error, 'Failed to start run'));
+      }
     } finally {
-      setSubmitting(false);
+      if (submissionId.current === submissionAtStart) {
+        submissionInFlight.current = false;
+        if (dialogSession.current === sessionAtStart) {
+          setSubmitting(false);
+        }
+      }
     }
   };
 

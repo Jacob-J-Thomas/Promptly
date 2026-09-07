@@ -229,7 +229,9 @@ jobs:
           $packages = @($coverage.coverage.packages.package)
           $expectedAssemblies = @(
             "Promptly.Application"
+            "Promptly.Cli"
             "Promptly.Infrastructure"
+            "Promptly.Sdk.DotNet"
             "Promptly.Server"
           ) | Sort-Object
           $actualAssemblies = @(
@@ -274,6 +276,7 @@ jobs:
           $expectedApplicationSources = @(
             "Promptly.Application/Data/ExecutableRunQueries.cs"
             "Promptly.Application/Data/TenantOwnedQueries.cs"
+            "Promptly.Application/Interfaces/IExpectationValidator.cs"
             "Promptly.Application/Models/EndpointDestinationPolicy.cs"
             "Promptly.Application/Models/EndpointEgressOptions.cs"
             "Promptly.Application/Models/EndpointTargetPolicy.cs"
@@ -282,6 +285,7 @@ jobs:
             "Promptly.Application/Services/EndpointExecutor.cs"
             "Promptly.Application/Services/EndpointService.cs"
             "Promptly.Application/Services/EnvironmentService.cs"
+            "Promptly.Application/Services/ExpectationDslValidator.cs"
             "Promptly.Application/Services/ExpectationEvaluator.cs"
             "Promptly.Application/Services/MappingService.cs"
             "Promptly.Application/Services/ProjectService.cs"
@@ -303,6 +307,40 @@ jobs:
             $actualApplicationSources
           if ($applicationDifference) {
             throw "Unexpected scoped Application coverage cohort: $($applicationDifference | Out-String)"
+          }
+
+          $expectedCliSources = @(
+            "Promptly.Cli/RunExitCodePolicy.cs"
+          ) | Sort-Object
+          $cliPackage = $packages |
+            Where-Object { $_.name -eq "Promptly.Cli" } |
+            Select-Object -First 1
+          $actualCliSources = @(
+            $cliPackage.classes.class |
+              ForEach-Object { Get-RepositoryRelativePath ([string]$_.filename) }
+          ) | Sort-Object -Unique
+          $cliDifference = Compare-Object `
+            $expectedCliSources `
+            $actualCliSources
+          if ($cliDifference) {
+            throw "Unexpected scoped CLI coverage cohort: $($cliDifference | Out-String)"
+          }
+
+          $expectedSdkSources = @(
+            "Promptly.Sdk.DotNet/StatusStringConverters.cs"
+          ) | Sort-Object
+          $sdkPackage = $packages |
+            Where-Object { $_.name -eq "Promptly.Sdk.DotNet" } |
+            Select-Object -First 1
+          $actualSdkSources = @(
+            $sdkPackage.classes.class |
+              ForEach-Object { Get-RepositoryRelativePath ([string]$_.filename) }
+          ) | Sort-Object -Unique
+          $sdkDifference = Compare-Object `
+            $expectedSdkSources `
+            $actualSdkSources
+          if ($sdkDifference) {
+            throw "Unexpected scoped SDK coverage cohort: $($sdkDifference | Out-String)"
           }
 
           $expectedServerSources = @(
@@ -341,7 +379,7 @@ jobs:
             throw "Unexpected scoped Server coverage cohort: $($serverDifference | Out-String)"
           }
 
-          foreach ($package in @($applicationPackage, $infrastructurePackage, $serverPackage)) {
+          foreach ($package in @($applicationPackage, $cliPackage, $infrastructurePackage, $sdkPackage, $serverPackage)) {
             $lineRate = [double]::Parse(
               [string]$package.'line-rate',
               [Globalization.CultureInfo]::InvariantCulture)
@@ -371,7 +409,10 @@ jobs:
             "Promptly.Application.Services.EndpointExecutor"
             "Promptly.Application.Services.EndpointService"
             "Promptly.Application.Services.EnvironmentService"
+            "Promptly.Application.Services.ExpectationDslValidator"
             "Promptly.Application.Services.ExpectationEvaluator"
+            "Promptly.Application.Interfaces.ExpectationValidationIssue"
+            "Promptly.Application.Interfaces.ExpectationValidationResult"
             "Promptly.Application.Services.MappingService"
             "Promptly.Application.Services.MappingSpecValidationException"
             "Promptly.Application.Services.ProjectService"
@@ -392,6 +433,73 @@ jobs:
           }
           foreach ($className in $requiredApplicationClasses) {
             $class = @($applicationPackage.classes.class) |
+              Where-Object { $_.name -eq $className } |
+              Select-Object -First 1
+            if (-not $class) {
+              throw "Required covered class is missing: $className"
+            }
+            $classLineRate = [double]::Parse(
+              [string]$class.'line-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            $classBranchRate = [double]::Parse(
+              [string]$class.'branch-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            if ($classLineRate -lt 0.90 -or $classBranchRate -lt 0.90) {
+              throw "Coverage for $className is below 90%: line=$classLineRate branch=$classBranchRate"
+            }
+            Write-Host "${className}: line=$('{0:P2}' -f $classLineRate) branch=$('{0:P2}' -f $classBranchRate)"
+          }
+
+          $requiredCliClasses = @(
+            "Promptly.Cli.RunExitCodePolicy"
+          ) | Sort-Object
+          $actualTopLevelCliClasses = @(
+            $cliPackage.classes.class |
+              Where-Object { ([string]$_.name) -notmatch '/' } |
+              ForEach-Object { [string]$_.name }
+          ) | Sort-Object -Unique
+          $cliClassDifference = Compare-Object `
+            $requiredCliClasses `
+            $actualTopLevelCliClasses
+          if ($cliClassDifference) {
+            throw "Unexpected top-level CLI coverage class cohort: $($cliClassDifference | Out-String)"
+          }
+          foreach ($className in $requiredCliClasses) {
+            $class = @($cliPackage.classes.class) |
+              Where-Object { $_.name -eq $className } |
+              Select-Object -First 1
+            if (-not $class) {
+              throw "Required covered class is missing: $className"
+            }
+            $classLineRate = [double]::Parse(
+              [string]$class.'line-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            $classBranchRate = [double]::Parse(
+              [string]$class.'branch-rate',
+              [Globalization.CultureInfo]::InvariantCulture)
+            if ($classLineRate -lt 0.90 -or $classBranchRate -lt 0.90) {
+              throw "Coverage for $className is below 90%: line=$classLineRate branch=$classBranchRate"
+            }
+            Write-Host "${className}: line=$('{0:P2}' -f $classLineRate) branch=$('{0:P2}' -f $classBranchRate)"
+          }
+
+          $requiredSdkClasses = @(
+            "Promptly.Sdk.DotNet.TestResultStatusStringConverter"
+            "Promptly.Sdk.DotNet.TestRunStatusStringConverter"
+          ) | Sort-Object
+          $actualTopLevelSdkClasses = @(
+            $sdkPackage.classes.class |
+              Where-Object { ([string]$_.name) -notmatch '/' } |
+              ForEach-Object { [string]$_.name }
+          ) | Sort-Object -Unique
+          $sdkClassDifference = Compare-Object `
+            $requiredSdkClasses `
+            $actualTopLevelSdkClasses
+          if ($sdkClassDifference) {
+            throw "Unexpected top-level SDK coverage class cohort: $($sdkClassDifference | Out-String)"
+          }
+          foreach ($className in $requiredSdkClasses) {
+            $class = @($sdkPackage.classes.class) |
               Where-Object { $_.name -eq $className } |
               Select-Object -First 1
             if (-not $class) {
@@ -552,6 +660,22 @@ jobs:
 
           foreach ($sourcePath in $expectedApplicationSources) {
             $sourceCoverage = Get-SourceCoverage "Promptly.Application" $sourcePath
+            if ($sourceCoverage.LineRate -lt 0.90 -or $sourceCoverage.BranchRate -lt 0.90) {
+              throw "Coverage for $sourcePath is below 90%: line=$($sourceCoverage.LineRate) branch=$($sourceCoverage.BranchRate)"
+            }
+            Write-Host "${sourcePath}: line=$('{0:P2}' -f $sourceCoverage.LineRate) branch=$('{0:P2}' -f $sourceCoverage.BranchRate)"
+          }
+
+          foreach ($sourcePath in $expectedCliSources) {
+            $sourceCoverage = Get-SourceCoverage "Promptly.Cli" $sourcePath
+            if ($sourceCoverage.LineRate -lt 0.90 -or $sourceCoverage.BranchRate -lt 0.90) {
+              throw "Coverage for $sourcePath is below 90%: line=$($sourceCoverage.LineRate) branch=$($sourceCoverage.BranchRate)"
+            }
+            Write-Host "${sourcePath}: line=$('{0:P2}' -f $sourceCoverage.LineRate) branch=$('{0:P2}' -f $sourceCoverage.BranchRate)"
+          }
+
+          foreach ($sourcePath in $expectedSdkSources) {
+            $sourceCoverage = Get-SourceCoverage "Promptly.Sdk.DotNet" $sourcePath
             if ($sourceCoverage.LineRate -lt 0.90 -or $sourceCoverage.BranchRate -lt 0.90) {
               throw "Coverage for $sourcePath is below 90%: line=$($sourceCoverage.LineRate) branch=$($sourceCoverage.BranchRate)"
             }

@@ -487,6 +487,11 @@
         "resolved": "7.2.0",
         "contentHash": "hgrXeKzyp5OGN8qVvL7A+vhmU7mDJTfGpiMBRL66IcfLOyna8UTLtn3cC3CghamXpRDufcc9ciklTszUGEQK0w=="
       },
+      "System.CommandLine": {
+        "type": "Transitive",
+        "resolved": "2.0.0-beta4.22272.1",
+        "contentHash": "1uqED/q2H0kKoLJ4+hI2iPSBSEdTuhfCYADeJrAqERmiGQ2NNacYKRNEQ+gFbU4glgVyK8rxI+ZOe1onEtr/Pg=="
+      },
       "System.IdentityModel.Tokens.Jwt": {
         "type": "Transitive",
         "resolved": "8.0.1",
@@ -591,6 +596,13 @@
           "Promptly.Domain": "[1.0.0, )"
         }
       },
+      "promptly.cli": {
+        "type": "Project",
+        "dependencies": {
+          "Promptly.Sdk.DotNet": "[1.0.0, )",
+          "System.CommandLine": "[2.0.0-beta4.22272.1, )"
+        }
+      },
       "promptly.domain": {
         "type": "Project",
         "dependencies": {
@@ -608,6 +620,9 @@
           "Promptly.Domain": "[1.0.0, )",
           "YamlDotNet": "[16.3.0, )"
         }
+      },
+      "promptly.sdk.dotnet": {
+        "type": "Project"
       },
       "promptly.server": {
         "type": "Project",

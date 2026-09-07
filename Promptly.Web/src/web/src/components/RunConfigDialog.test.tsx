@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AxiosError, AxiosHeaders } from 'axios';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { endpointsApi, type Endpoint } from '../api/endpoints';
 import { environmentsApi, type Environment } from '../api/environments';
@@ -108,13 +109,15 @@ const renderDialog = () => {
   const onClose = vi.fn();
   const onRunStarted = vi.fn();
   const rendered = render(
-    <RunConfigDialog
-      open
-      onClose={onClose}
-      projectId="project-1"
-      suiteId="suite-1"
-      onRunStarted={onRunStarted}
-    />,
+    <MemoryRouter>
+      <RunConfigDialog
+        open
+        onClose={onClose}
+        projectId="project-1"
+        suiteId="suite-1"
+        onRunStarted={onRunStarted}
+      />
+    </MemoryRouter>,
   );
   return { ...rendered, onClose, onRunStarted };
 };

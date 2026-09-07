@@ -22,9 +22,7 @@ public static class RunExitCodePolicy
             return InfrastructureError;
         }
 
-        // A completed run with no result payload is not a failed assertion. It
-        // is a transport or API contract failure and must be visible to CI.
-        if (results is null)
+        if (run.Status != "Completed" || results is null || results.Count == 0)
         {
             return InfrastructureError;
         }

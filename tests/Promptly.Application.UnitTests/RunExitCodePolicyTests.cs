@@ -36,11 +36,11 @@ public sealed class RunExitCodePolicyTests
     }
 
     [Fact]
-    public void A_completed_run_with_zero_results_is_successful()
+    public void A_completed_run_with_zero_results_is_an_infrastructure_error()
     {
         var exitCode = RunExitCodePolicy.GetExitCode([], CompletedRun());
 
-        Assert.Equal(RunExitCodePolicy.Success, exitCode);
+        Assert.Equal(RunExitCodePolicy.InfrastructureError, exitCode);
     }
 
     [Fact]
@@ -51,9 +51,21 @@ public sealed class RunExitCodePolicyTests
         Assert.Equal(RunExitCodePolicy.InfrastructureError, exitCode);
     }
 
+    [Fact]
+    public void An_unknown_result_status_is_an_infrastructure_error()
+    {
+        var exitCode = RunExitCodePolicy.GetExitCode(
+            [Result("Unexpected")],
+            CompletedRun());
+
+        Assert.Equal(RunExitCodePolicy.InfrastructureError, exitCode);
+    }
+
     [Theory]
     [InlineData("Failed", null)]
     [InlineData("Completed", "run result unavailable")]
+    [InlineData("Queued", null)]
+    [InlineData("Unknown", null)]
     public void Run_level_errors_return_infrastructure_error_two(
         string status,
         string? errorMessage)

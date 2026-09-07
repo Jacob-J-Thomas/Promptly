@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveFixedE2EPaths } from './harness-safety.mjs';
+import { evaluatePhaseReceipts } from './phase-verification.mjs';
 
 const {
   artifactsRoot,
@@ -102,9 +103,15 @@ for (const phase of phases) {
   results.push({ phase, exitCode: result.code, receipt, error: result.error ?? null });
 }
 
-const failed = results.filter(({ exitCode, receipt }) => (
-  exitCode !== 0 || receipt.status !== 'passed' || receipt.uploadIsSafe !== true
-));
+const phaseVerification = evaluatePhaseReceipts(results, phases);
+const passedPhaseCount = results.filter(({ exitCode, receipt }) => (
+  exitCode === 0
+  && receipt.schema === 1
+  && receipt.status === 'passed'
+  && receipt.uploadIsSafe === true
+  && receipt.cleanupCommandPassed === true
+  && receipt.cleanupVerificationPassed === true
+)).length;
 await writeFile(
   path.join(artifactsRoot, 'phase-receipts.json'),
   `${JSON.stringify({ schema: 1, requiredPhases: phases, phases: results }, null, 2)}\n`,
@@ -114,11 +121,15 @@ await writeFile(
   path.join(artifactsRoot, 'run-metadata.json'),
   `${JSON.stringify({
     schema: 1,
-    status: failed.length === 0 ? 'passed' : 'failed',
+    status: phaseVerification.passed ? 'passed' : 'failed',
     requiredPhaseCount: phases.length,
-    passedPhaseCount: phases.length - failed.length,
-    errorCount: failed.length,
-    errorCategories: failed.map(({ phase }) => `${phase}-phase`),
+    passedPhaseCount,
+    errorCount: phaseVerification.failures.length,
+    errorCategories: phaseVerification.failures.map((failure) => (
+      failure.split(' ', 1)[0] === 'proxy' || failure.split(' ', 1)[0] === 'direct'
+        ? `${failure.split(' ', 1)[0]}-phase`
+        : 'phase-verification'
+    )),
   }, null, 2)}\n`,
   { mode: 0o600 },
 );
@@ -126,7 +137,7 @@ await writeFile(
   path.join(artifactsRoot, 'cleanup-attestation.json'),
   `${JSON.stringify({
     schema: 1,
-    allRequiredPhasesCompleted: failed.length === 0,
+    allRequiredPhasesCompleted: phaseVerification.passed,
     phases: results.map(({ phase, receipt }) => ({
       phase,
       cleanupCommandPassed: receipt.cleanupCommandPassed ?? null,
@@ -149,8 +160,8 @@ await writeFile(
   { mode: 0o600 },
 );
 
-if (failed.length > 0) {
-  throw new Error(`Composed E2E phase verification failed: ${failed.map(({ phase }) => phase).join(', ')}`);
+if (!phaseVerification.passed) {
+  throw new Error(`Composed E2E phase verification failed: ${phaseVerification.failures.join('; ')}`);
 }
 
 await writeFile(path.join(artifactsRoot, 'upload-safe.json'), '{"schema":1,"safe":true}\n', { mode: 0o600 });

@@ -19,6 +19,7 @@ import {
   createSafeRunMetadata,
   resolveFixedE2EPaths,
 } from './harness-safety.mjs';
+import { assertDirectFixtureBoundary } from './phase-verification.mjs';
 
 const {
   artifactsRoot: baseArtifactsRoot,
@@ -456,6 +457,39 @@ const writeDirectTopologyAttestation = async () => {
   if (JSON.stringify(ingressMembers) !== JSON.stringify(['promptly-ingress-gateway'])) {
     throw new Error(`Unexpected direct ingress-network membership: ${ingressMembers.join(',')}`);
   }
+  assertDirectFixtureBoundary({
+    fixture: {
+      host: 'run-suite-provider-stub',
+      port: '8080',
+      cidr: '172.30.0.2/32',
+      network: 'promptly-run-suite',
+      address: providerNetwork.ipv4_address,
+    },
+    server: {
+      requireProxy: serverEnvironment.EndpointEgress__RequireProxy === 'true',
+      proxyUrl: Object.hasOwn(serverEnvironment, 'EndpointEgress__ProxyUrl')
+        ? serverEnvironment.EndpointEgress__ProxyUrl
+        : null,
+      allowlistHost: serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Host,
+      allowlistPort: serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Port,
+      allowlistCidr: serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Cidrs__0,
+      ambientProxyCleared: [
+        'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+        'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+      ].every((key) => serverEnvironment[key] === ''),
+    },
+    provider: {
+      network: 'promptly-run-suite',
+      address: providerNetwork.ipv4_address,
+      attachedToEgress: Object.hasOwn(
+        services['run-suite-provider-stub'].networks ?? {},
+        'promptly-egress',
+      ),
+      publishedPort: (services['run-suite-provider-stub'].ports ?? []).length > 0,
+    },
+    egressMembers,
+    ingressMembers,
+  });
   await writeFile(path.join(artifactsRoot, 'topology-attestation.json'), `${JSON.stringify({
     schema: 1,
     phase,

@@ -253,7 +253,7 @@ public sealed class YamlServiceTests
                 $"  input: {scalar}\n",
                 StringComparison.Ordinal)
             : yaml.Replace(
-                "  expectations:\n    - type: contains_text\n      text: hello\n",
+                "  expectations:\n    - type: contains_text\n      text: hello",
                 $"  expectations: {scalar}\n",
                 StringComparison.Ordinal);
 
@@ -337,8 +337,10 @@ public sealed class YamlServiceTests
     [Fact]
     public void DeserializeTests_rejects_depth_before_loading_trailing_invalid_content()
     {
-        var exact = BuildNestedYaml(TestSpecificationValidator.MaxDepth - 2);
-        var firstOverLimit = BuildNestedYaml(TestSpecificationValidator.MaxDepth - 1);
+        var exact = BuildNestedYaml(TestSpecificationValidator.MaxDepth - 3);
+        var firstOverLimit = BuildNestedYaml(TestSpecificationValidator.MaxDepth - 2);
+
+        Assert.Single(_service.DeserializeTests(exact, Guid.NewGuid()));
 
         var exactException = Assert.Throws<TestSpecificationValidationException>(() =>
             _service.DeserializeTests(exact + "\n  trailing: [", Guid.NewGuid()));

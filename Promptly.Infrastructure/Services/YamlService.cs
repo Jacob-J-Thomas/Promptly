@@ -398,6 +398,7 @@ public class YamlService : IYamlService
                         break;
                     case MappingStart:
                     case SequenceStart:
+                    case Scalar:
                         if (depth > TestSpecificationValidator.MaxDepth)
                         {
                             return
@@ -409,7 +410,10 @@ public class YamlService : IYamlService
                             ];
                         }
 
-                        depth++;
+                        if (parser.Current is not Scalar)
+                        {
+                            depth++;
+                        }
                         break;
                     case MappingEnd:
                     case SequenceEnd:

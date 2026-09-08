@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import * as monaco from 'monaco-editor';
 import ConfiguredMonacoEditor from './configuredMonacoEditor';
 
 const { loaderConfig, editorWorker, jsonWorker } = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ vi.mock('@monaco-editor/react', () => ({
   loader: { config: loaderConfig },
 }));
 
+vi.mock('monaco-editor', () => ({ editor: {} }));
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({
   default: editorWorker,
 }));
@@ -62,7 +64,7 @@ describe('configured Monaco adapter', () => {
     const editor = screen.getByRole('textbox', { name: 'Test YAML' });
     expect(editor).toHaveAttribute('data-language', 'yaml');
     expect(editor).toHaveValue('- id: case-1');
-    expect(loaderConfig).toHaveBeenCalledWith({ monaco: expect.anything() });
+    expect(loaderConfig).toHaveBeenCalledWith({ monaco });
 
     fireEvent.change(editor, { target: { value: '- id: repaired' } });
     expect(onChange).toHaveBeenCalledWith('- id: repaired');

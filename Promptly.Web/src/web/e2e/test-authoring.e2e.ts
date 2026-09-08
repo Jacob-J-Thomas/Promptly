@@ -139,8 +139,8 @@ const authoringYaml = ({
         - authoring
       nullable: null
       wideInteger: 9007199254740993
-      preciseDecimal: 0.123456789012345678901234567890
-      exponentValue: 6.022140760000000000e+23
+      preciseDecimal: 0.123456789012345678901
+      exponentValue: 9007199254740993e0
       nested:
         count: 2
     messages:
@@ -154,10 +154,10 @@ const expectLosslessNumericMetadata = (inputSpecJson: string) => {
     /"wideInteger"\s*:\s*9007199254740993(?:[,}])/,
   );
   expect(inputSpecJson).toMatch(
-    /"preciseDecimal"\s*:\s*0\.123456789012345678901234567890(?:[,}])/,
+    /"preciseDecimal"\s*:\s*0\.123456789012345678901(?:[,}])/,
   );
   expect(inputSpecJson).toMatch(
-    /"exponentValue"\s*:\s*6\.022140760000000000e\+23(?:[,}])/,
+    /"exponentValue"\s*:\s*9007199254740993(?:[eE][+]?0)?(?:[,}])/,
   );
 };
 

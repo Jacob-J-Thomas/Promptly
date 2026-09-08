@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import {
   lstat,
   mkdir,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveFixedE2EPaths } from './harness-safety.mjs';
+import { createPhaseProcessRunner } from './orchestrator-lifecycle.mjs';
 import { evaluatePhaseReceipts } from './phase-verification.mjs';
 
 const {
@@ -51,16 +51,6 @@ const prepareArtifactsDirectory = async () => {
   await mkdir(artifactsRoot, { recursive: true, mode: 0o700 });
 };
 
-const runPhase = (phase) => new Promise((resolve) => {
-  const child = spawn(process.execPath, [phaseRunner], {
-    cwd: repositoryRoot,
-    env: { ...process.env, PROMPTLY_E2E_PHASE: phase },
-    stdio: 'inherit',
-  });
-  child.once('error', (error) => resolve({ code: -1, error: error.message }));
-  child.once('close', (code) => resolve({ code: code ?? -1 }));
-});
-
 const readPhaseReceipt = async (phase) => {
   const receiptPath = path.join(artifactsRoot, phase, 'phase-receipt.json');
   try {
@@ -97,13 +87,24 @@ const collectFiles = async (directory, relative = '') => {
 await prepareArtifactsDirectory();
 
 const results = [];
+const phaseProcessRunner = createPhaseProcessRunner({
+  phaseRunner,
+  repositoryRoot,
+});
 for (const phase of phases) {
-  const result = await runPhase(phase);
+  const result = await phaseProcessRunner.runPhase(phase);
   const receipt = await readPhaseReceipt(phase);
   results.push({ phase, exitCode: result.code, receipt, error: result.error ?? null });
+  if (result.cancelled) {
+    break;
+  }
 }
 
-const phaseVerification = evaluatePhaseReceipts(results, phases);
+const phaseVerification = evaluatePhaseReceipts(
+  results,
+  phases,
+  phaseProcessRunner.cancellationSignal,
+);
 const passedPhaseCount = results.filter(({ exitCode, receipt }) => (
   exitCode === 0
   && receipt.schema === 1
@@ -161,8 +162,20 @@ await writeFile(
 );
 
 if (!phaseVerification.passed) {
+  phaseProcessRunner.dispose();
   throw new Error(`Composed E2E phase verification failed: ${phaseVerification.failures.join('; ')}`);
 }
 
-await writeFile(path.join(artifactsRoot, 'upload-safe.json'), '{"schema":1,"safe":true}\n', { mode: 0o600 });
+const uploadMarkerPath = path.join(artifactsRoot, 'upload-safe.json');
+if (phaseProcessRunner.cancellationSignal) {
+  phaseProcessRunner.dispose();
+  throw new Error(`Composed E2E verification cancelled by ${phaseProcessRunner.cancellationSignal}`);
+}
+await writeFile(uploadMarkerPath, '{"schema":1,"safe":true}\n', { mode: 0o600 });
+if (phaseProcessRunner.cancellationSignal) {
+  await rm(uploadMarkerPath, { force: true });
+  phaseProcessRunner.dispose();
+  throw new Error(`Composed E2E verification cancelled by ${phaseProcessRunner.cancellationSignal}`);
+}
+phaseProcessRunner.dispose();
 console.log(`Composed E2E verification passed; artifacts: ${artifactsRoot}`);

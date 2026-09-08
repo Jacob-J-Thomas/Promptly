@@ -83,10 +83,18 @@ export const assertProviderEvidence = (
   return true;
 };
 
-export const evaluatePhaseReceipts = (results, requiredPhases = ['proxy', 'direct']) => {
+export const evaluatePhaseReceipts = (
+  results,
+  requiredPhases = ['proxy', 'direct'],
+  cancellationSignal = null,
+) => {
   const failures = [];
   if (!Array.isArray(results)) {
     return { passed: false, failures: ['phase results are not an array'] };
+  }
+
+  if (cancellationSignal) {
+    failures.push(`orchestrator received ${cancellationSignal}; aggregate cannot pass`);
   }
 
   const observedPhases = results.map((result) => result?.phase);

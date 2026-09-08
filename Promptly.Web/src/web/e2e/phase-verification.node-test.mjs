@@ -25,6 +25,12 @@ test('accepts exactly two successful, upload-safe, cleaned phases', () => {
   assert.deepEqual(evaluatePhaseReceipts(validPhaseResults()), { passed: true, failures: [] });
 });
 
+test('cancellation prevents a successful aggregate even when phase receipts passed', () => {
+  const result = evaluatePhaseReceipts(validPhaseResults(), ['proxy', 'direct'], 'SIGTERM');
+  assert.equal(result.passed, false);
+  assert.match(result.failures.join('; '), /orchestrator received SIGTERM/);
+});
+
 for (const [name, results, expected] of [
   [
     'missing direct receipt',

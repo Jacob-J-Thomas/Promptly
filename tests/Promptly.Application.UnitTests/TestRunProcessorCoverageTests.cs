@@ -227,6 +227,57 @@ public sealed class TestRunProcessorCoverageTests
     }
 
     [Theory]
+    [InlineData("not-json", "invalid_json")]
+    [InlineData("{\"messages\":[]}", "required")]
+    public async Task ProcessRunAsync_rejects_invalid_legacy_input_before_endpoint_execution(
+        string inputSpecJson,
+        string expectedErrorCode)
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = suiteId,
+            ExternalId = "legacy-invalid-input",
+            Name = "Legacy invalid input",
+            InputSpecJson = inputSpecJson,
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"response\"}]"
+        });
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"contains_text\",\"text\":\"response\"}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var endpointExecutor = new DelegateEndpointExecutor((_, _, _, _) =>
+            Task.FromResult(new ExecutionResult { Success = true, ResponseJson = "{}" }));
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            endpointExecutor: endpointExecutor);
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var results = await dbContext.TestRunResults
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, results.Count);
+        var errorResult = Assert.Single(results, result => result.Status == TestResultStatus.Error);
+        Assert.Single(results, result => result.Status == TestResultStatus.Pass);
+        Assert.Equal(1, endpointExecutor.CallCount);
+        using var summary = JsonDocument.Parse(
+            Assert.IsType<string>(runStore.StatusUpdates[^1].SummaryJson));
+        Assert.Equal(1, summary.RootElement.GetProperty("passed").GetInt32());
+        Assert.Equal(0, summary.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, summary.RootElement.GetProperty("errors").GetInt32());
+        Assert.Equal(2, summary.RootElement.GetProperty("total").GetInt32());
+        Assert.Contains(expectedErrorCode, errorResult.FailureReasonsJson, StringComparison.Ordinal);
+        Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
+    }
+
+    [Theory]
     [InlineData("42")]
     [InlineData("null")]
     public async Task ProcessRunAsync_handles_injected_validator_legacy_non_string_expectation_types(
@@ -826,7 +877,7 @@ public sealed class TestRunProcessorCoverageTests
             SuiteId = suiteId,
             ExternalId = Guid.NewGuid().ToString("N"),
             Name = "Processor coverage",
-            InputSpecJson = "{}",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"coverage input\"}]}",
             ExpectationsJson = expectationsJson
         };
     }

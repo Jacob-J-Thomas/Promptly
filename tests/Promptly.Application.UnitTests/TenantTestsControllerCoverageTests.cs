@@ -90,6 +90,29 @@ public sealed class TenantTestsControllerCoverageTests
         Assert.All(results, result => Assert.IsType<NotFoundObjectResult>(result));
     }
 
+    [Fact]
+    public async Task Validation_failures_are_returned_as_safe_structured_bad_requests()
+    {
+        var service = new StubTestCaseService
+        {
+            Failure = new TestSpecificationValidationException(
+                [new ExpectationValidationIssue(
+                    "invalid_type",
+                    "inputSpecJson.messages",
+                    "Messages must be a non-empty array")])
+        };
+        var controller = CreateController(service);
+
+        var result = Assert.IsType<BadRequestObjectResult>(await controller.CreateTestCase(
+            Guid.NewGuid(),
+            CreateRequest()));
+
+        var body = JsonSerializer.Serialize(result.Value);
+        Assert.Contains("invalid_type", body, StringComparison.Ordinal);
+        Assert.Contains("inputSpecJson.messages", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("TestSpecificationValidationException", body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(TestAction.Create)]
     [InlineData(TestAction.List)]
@@ -130,9 +153,9 @@ public sealed class TenantTestsControllerCoverageTests
 
         var createPayload = JsonSerializer.Serialize(create.Value);
         var updatePayload = JsonSerializer.Serialize(update.Value);
-        Assert.Contains("Invalid expectations", createPayload, StringComparison.Ordinal);
+        Assert.Contains("Invalid test specification", createPayload, StringComparison.Ordinal);
         Assert.Contains("invalid_expectation", createPayload, StringComparison.Ordinal);
-        Assert.Contains("Invalid expectations", updatePayload, StringComparison.Ordinal);
+        Assert.Contains("Invalid test specification", updatePayload, StringComparison.Ordinal);
         Assert.Contains("invalid_expectation", updatePayload, StringComparison.Ordinal);
     }
 
@@ -163,8 +186,8 @@ public sealed class TenantTestsControllerCoverageTests
         ExternalId = "external",
         Name = "test name",
         Description = "description",
-        InputSpecJson = "{\"prompt\":\"hello\"}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private static UpdateTestCaseRequest UpdateRequest() => new()
@@ -172,8 +195,8 @@ public sealed class TenantTestsControllerCoverageTests
         ExternalId = "external-updated",
         Name = "updated test name",
         Description = "updated description",
-        InputSpecJson = "{\"prompt\":\"updated\"}",
-        ExpectationsJson = "[{\"type\":\"contains\",\"value\":\"ok\"}]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"updated\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"updated\"}]"
     };
 
     private static TestCase CreateTestCase() => new()
@@ -183,8 +206,8 @@ public sealed class TenantTestsControllerCoverageTests
         ExternalId = "external",
         Name = "test name",
         Description = "description",
-        InputSpecJson = "{\"prompt\":\"hello\"}",
-        ExpectationsJson = "[]",
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]",
         CreatedAt = new DateTime(2026, 8, 12, 1, 2, 3, DateTimeKind.Utc)
     };
 

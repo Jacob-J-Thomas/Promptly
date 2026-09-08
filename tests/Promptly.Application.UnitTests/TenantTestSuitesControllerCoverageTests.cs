@@ -1,11 +1,13 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
 using Promptly.Domain.Entities;
+using Promptly.Infrastructure.Services;
 using Promptly.Server.Controllers;
 using Promptly.Server.Security;
 
@@ -145,10 +147,22 @@ public sealed class TenantTestSuitesControllerCoverageTests
         Assert.IsType<NotFoundObjectResult>(
             await ImportAsync(controller, suite.Id, "tests: []"));
 
-        yaml.DeserializeFailure = new InvalidOperationException("invalid yaml");
+        yaml.DeserializeFailure = new TestSpecificationValidationException(
+            [new ExpectationValidationIssue("invalid_yaml", "$", "YAML document is invalid")]);
         var invalid = Assert.IsType<BadRequestObjectResult>(
             await ImportAsync(controller, suite.Id, "invalid"));
-        Assert.Contains("invalid yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("invalid_yaml", JsonSerializer.Serialize(invalid.Value), StringComparison.Ordinal);
+
+        yaml.DeserializeFailure = null;
+        testCases.BulkFailure = new TestSpecificationValidationException(
+            [new ExpectationValidationIssue(
+                "duplicate_external_id",
+                "rows[0].id",
+                "External ID already exists in this suite")]);
+        var persistenceValidation = Assert.IsType<BadRequestObjectResult>(
+            await ImportAsync(controller, suite.Id, "valid"));
+        Assert.Contains("duplicate_external_id", JsonSerializer.Serialize(persistenceValidation.Value), StringComparison.Ordinal);
+        Assert.DoesNotContain("DbUpdateException", JsonSerializer.Serialize(persistenceValidation.Value), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,6 +179,27 @@ public sealed class TenantTestSuitesControllerCoverageTests
 
         Assert.Equal("[]", Encoding.UTF8.GetString(result.FileContents));
         Assert.Empty(Assert.IsType<List<TestCase>>(yaml.LastSerializedTests));
+    }
+
+    [Fact]
+    public async Task Import_rejects_declared_and_streamed_yaml_over_the_size_limit()
+    {
+        var suite = CreateSuite();
+        var controller = CreateController(
+            new StubTestSuiteService { Loaded = suite },
+            new StubTestCaseService(),
+            new StubYamlService());
+        var oversized = new string('x', YamlService.MaxYamlBytes + 1);
+
+        var declaredOversized = Assert.IsType<BadRequestObjectResult>(
+            await ImportAsync(controller, suite.Id, oversized));
+        Assert.Contains("too_large", JsonSerializer.Serialize(declaredOversized.Value), StringComparison.Ordinal);
+
+        var streamedOversized = Assert.IsType<BadRequestObjectResult>(
+            await controller.ImportTests(
+                suite.Id,
+                new DeclaredLengthFormFile(oversized, YamlService.MaxYamlBytes)));
+        Assert.Contains("too_large", JsonSerializer.Serialize(streamedOversized.Value), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -217,13 +252,22 @@ public sealed class TenantTestSuitesControllerCoverageTests
         StubTestSuiteService suiteService,
         StubTestCaseService testCaseService,
         StubYamlService yamlService,
-        bool hasScope = true) =>
-        new(
+        bool hasScope = true)
+    {
+        var controller = new TestSuitesController(
             suiteService,
             testCaseService,
             yamlService,
             new StubScopeAccessor(hasScope),
-            NullLogger<TestSuitesController>.Instance);
+            NullLogger<TestSuitesController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        return controller;
+    }
 
     private static TestSuite CreateSuite() => new()
     {
@@ -241,8 +285,8 @@ public sealed class TenantTestSuitesControllerCoverageTests
         ExternalId = externalId,
         Name = $"name-{externalId}",
         Description = "description",
-        InputSpecJson = "{}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private static async Task<IActionResult> ImportAsync(
@@ -254,6 +298,32 @@ public sealed class TenantTestSuitesControllerCoverageTests
         using var stream = new MemoryStream(bytes);
         var file = new FormFile(stream, 0, bytes.Length, "file", "tests.yaml");
         return await controller.ImportTests(suiteId, file);
+    }
+
+    private sealed class DeclaredLengthFormFile(string content, long declaredLength) : IFormFile
+    {
+        private readonly byte[] _bytes = Encoding.UTF8.GetBytes(content);
+
+        public string ContentType => "application/x-yaml";
+        public string ContentDisposition => "form-data; name=\"file\"; filename=\"tests.yaml\"";
+        public IHeaderDictionary Headers { get; } = new HeaderDictionary();
+        public long Length => declaredLength;
+        public string Name => "file";
+        public string FileName => "tests.yaml";
+
+        public Stream OpenReadStream() => new MemoryStream(_bytes, writable: false);
+
+        public void CopyTo(Stream target)
+        {
+            using var source = OpenReadStream();
+            source.CopyTo(target);
+        }
+
+        public async Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
+        {
+            await using var source = OpenReadStream();
+            await source.CopyToAsync(target, cancellationToken);
+        }
     }
 
     public enum SuiteAction
@@ -323,6 +393,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
     {
         public IReadOnlyList<TestCase>? Listed { get; init; }
         public IReadOnlyList<TestCase>? BulkCreated { get; init; }
+        public Exception? BulkFailure { get; set; }
         public TenantAccessScope? LastScope { get; private set; }
 
         public Task<TestCase?> CreateTestCaseAsync(
@@ -359,6 +430,11 @@ public sealed class TenantTestSuitesControllerCoverageTests
             TenantAccessScope scope)
         {
             LastScope = scope;
+            if (BulkFailure is not null)
+            {
+                throw BulkFailure;
+            }
+
             return Task.FromResult(BulkCreated);
         }
     }

@@ -146,7 +146,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "foreign-create",
             "foreign-create",
             null,
-            "{}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var updated = await service.UpdateTestCaseAsync(
@@ -154,7 +154,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "tampered",
             "tampered",
             null,
-            "{}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var deleted = await service.DeleteTestCaseAsync(graph.SiblingTestCaseId, scope);
@@ -189,8 +189,8 @@ public sealed class TenantSuiteAndTestServiceTests
             SuiteId = suppliedSuiteId,
             ExternalId = "imported",
             Name = "imported",
-            InputSpecJson = "{}",
-            ExpectationsJson = "[]"
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
         };
 
         var result = await service.BulkCreateTestsAsync(
@@ -202,6 +202,145 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.Equal(suppliedId, supplied.Id);
         Assert.Equal(suppliedSuiteId, supplied.SuiteId);
         Assert.DoesNotContain(dbContext.TestCases, testCase => testCase.ExternalId == "imported");
+    }
+
+    [Fact]
+    public async Task Invalid_later_bulk_row_is_atomic_and_does_not_mutate_callers()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var first = new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = Guid.NewGuid(),
+            ExternalId = "bulk-first",
+            Name = "first",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
+        };
+        var invalidLater = new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = Guid.NewGuid(),
+            ExternalId = "bulk-invalid",
+            Name = "invalid later",
+            InputSpecJson = "{\"messages\":[]}",
+            ExpectationsJson = "[]"
+        };
+        var firstId = first.Id;
+        var firstSuiteId = first.SuiteId;
+        var invalidId = invalidLater.Id;
+        var invalidSuiteId = invalidLater.SuiteId;
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, [first, invalidLater], scope));
+
+        Assert.Contains(exception.Issues, issue => issue.Path.StartsWith("rows[1]", StringComparison.Ordinal));
+        Assert.Equal(firstId, first.Id);
+        Assert.Equal(firstSuiteId, first.SuiteId);
+        Assert.Equal(invalidId, invalidLater.Id);
+        Assert.Equal(invalidSuiteId, invalidLater.SuiteId);
+        Assert.DoesNotContain(dbContext.TestCases, testCase =>
+            testCase.ExternalId is "bulk-first" or "bulk-invalid");
+    }
+
+    [Fact]
+    public async Task Test_case_identity_validation_rejects_missing_and_duplicate_ids_without_mutation()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        const string input = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
+        const string expectations = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]";
+
+        var missing = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "",
+                "",
+                null,
+                input,
+                expectations,
+                scope));
+        Assert.Contains(missing.Issues, issue => issue.Code == "required" && issue.Path == "externalId");
+        Assert.Contains(missing.Issues, issue => issue.Code == "required" && issue.Path == "name");
+
+        var duplicateCreate = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "allowed case",
+                "replacement",
+                null,
+                input,
+                expectations,
+                scope));
+        Assert.Contains(duplicateCreate.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "externalId");
+
+        var existingOther = await service.CreateTestCaseAsync(
+            graph.AllowedSuiteId,
+            "other case",
+            "other case",
+            null,
+            input,
+            expectations,
+            scope);
+        Assert.NotNull(existingOther);
+
+        var duplicateUpdate = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.UpdateTestCaseAsync(
+                graph.AllowedTestCaseId,
+                "other case",
+                "replacement",
+                null,
+                input,
+                expectations,
+                scope));
+        Assert.Contains(duplicateUpdate.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "externalId");
+
+        var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(persisted);
+        Assert.Equal("allowed case", persisted.ExternalId);
+        Assert.Equal("allowed case", persisted.Name);
+        Assert.DoesNotContain(dbContext.TestCases, testCase => testCase.Name == "replacement");
+    }
+
+    [Fact]
+    public async Task Bulk_import_reports_row_identity_and_existing_id_issues_before_persisting()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        const string input = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
+        const string expectations = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]";
+        var rows = new List<TestCase>
+        {
+            new() { ExternalId = "", Name = "", InputSpecJson = input, ExpectationsJson = expectations },
+            new() { ExternalId = "allowed case", Name = "existing", InputSpecJson = input, ExpectationsJson = expectations },
+            new() { ExternalId = "allowed case", Name = "in-file duplicate", InputSpecJson = input, ExpectationsJson = expectations }
+        };
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, rows, scope));
+
+        Assert.Contains(exception.Issues, issue => issue.Code == "required" && issue.Path == "rows[0].id");
+        Assert.Contains(exception.Issues, issue => issue.Code == "required" && issue.Path == "rows[0].name");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "rows[1].id");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "rows[2].id");
+        Assert.Equal(3, await dbContext.TestCases.CountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -219,7 +358,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "created",
             "created",
             null,
-            "{}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         Assert.NotNull(created);
@@ -228,7 +367,7 @@ public sealed class TenantSuiteAndTestServiceTests
             "updated",
             "updated",
             "updated",
-            "{\"messages\":[]}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
             "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var imported = await service.BulkCreateTestsAsync(
@@ -237,8 +376,8 @@ public sealed class TenantSuiteAndTestServiceTests
             {
                 ExternalId = "imported",
                 Name = "imported",
-                InputSpecJson = "{}",
-                ExpectationsJson = "[]"
+                InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
             }],
             scope);
         var listed = await service.GetTestCasesBySuiteAsync(graph.AllowedSuiteId, scope);
@@ -270,7 +409,7 @@ public sealed class TenantSuiteAndTestServiceTests
                 "invalid",
                 "invalid",
                 null,
-                "{}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
                 "[]",
                 scope));
 
@@ -293,21 +432,23 @@ public sealed class TenantSuiteAndTestServiceTests
 
         var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
         Assert.NotNull(existing);
+        var originalName = existing.Name;
+        var originalExpectations = existing.ExpectationsJson;
         var exception = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
             service.UpdateTestCaseAsync(
                 graph.AllowedTestCaseId,
                 "updated",
                 "updated",
                 null,
-                "{}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
                 "[]",
                 scope));
 
         Assert.NotEmpty(exception.Issues);
         var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
         Assert.NotNull(persisted);
-        Assert.Equal(existing!.Name, persisted!.Name);
-        Assert.Equal(existing.ExpectationsJson, persisted.ExpectationsJson);
+        Assert.Equal(originalName, persisted.Name);
+        Assert.Equal(originalExpectations, persisted.ExpectationsJson);
     }
 
     [Fact]
@@ -356,6 +497,52 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.NotNull(persisted);
         Assert.Equal(originalName, persisted.Name);
         Assert.Equal(originalExpectations, persisted.ExpectationsJson);
+    }
+
+    [Fact]
+    public async Task Bulk_import_uses_the_supplied_specification_validator_and_maps_public_issue_paths()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var validator = new RecordingSpecificationValidator();
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance,
+            specificationValidator: validator);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var rows = new List<TestCase>
+        {
+            new()
+            {
+                ExternalId = "spec-validator-one",
+                Name = "first",
+                InputSpecJson = "input-one",
+                ExpectationsJson = "expectations-one"
+            },
+            new()
+            {
+                ExternalId = "spec-validator-two",
+                Name = "second",
+                InputSpecJson = "input-two",
+                ExpectationsJson = "expectations-two"
+            }
+        };
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, rows, scope));
+
+        Assert.Equal(["input-one", "input-two"], validator.InputDocuments);
+        Assert.Equal(["expectations-one", "expectations-two"], validator.ExpectationDocuments);
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "input_issue" && issue.Path == "rows[0].input.messages");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "expectation_issue" && issue.Path == "rows[0].expectations[0].type");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "input_issue" && issue.Path == "rows[1].input.messages");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "expectation_issue" && issue.Path == "rows[1].expectations[0].type");
+        Assert.DoesNotContain(dbContext.TestCases, testCase =>
+            testCase.ExternalId.StartsWith("spec-validator-", StringComparison.Ordinal));
     }
 
     private static PromptlyDbContext CreateDbContext()
@@ -434,8 +621,8 @@ public sealed class TenantSuiteAndTestServiceTests
         SuiteId = suite.Id,
         ExternalId = name,
         Name = name,
-        InputSpecJson = "{}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private sealed class RecordingRejectingValidator : IExpectationValidator
@@ -454,6 +641,26 @@ public sealed class TenantSuiteAndTestServiceTests
 
         public ExpectationValidationResult ValidateExpectation(
             IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
+    }
+
+    private sealed class RecordingSpecificationValidator : ITestSpecificationValidator
+    {
+        public List<string> InputDocuments { get; } = [];
+        public List<string> ExpectationDocuments { get; } = [];
+
+        public ExpectationValidationResult Validate(string inputSpecJson, string expectationsJson)
+        {
+            InputDocuments.Add(inputSpecJson);
+            ExpectationDocuments.Add(expectationsJson);
+            return new ExpectationValidationResult(
+            [
+                new("input_issue", "inputSpecJson.messages", "Input was rejected"),
+                new("expectation_issue", "expectationsJson[0].type", "Expectation was rejected")
+            ]);
+        }
+
+        public ExpectationValidationResult ValidateInput(string inputSpecJson) =>
             ExpectationValidationResult.Valid;
     }
 

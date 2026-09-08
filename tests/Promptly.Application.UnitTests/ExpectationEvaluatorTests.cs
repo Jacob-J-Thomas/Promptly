@@ -484,6 +484,233 @@ public sealed class ExpectationEvaluatorTests
         Assert.Contains("Evaluation error", result.Reason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task EvaluateAsync_uses_the_public_validator_boundary_for_a_legacy_type()
+    {
+        var evaluator = PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, [])));
+
+        var result = await evaluator.EvaluateAsync(
+            Expectation("legacy_expectation"),
+            Trace("hello"));
+
+        Assert.False(result.Passed);
+        Assert.Equal("legacy_expectation", result.ExpectationType);
+        Assert.Null(result.ErrorCode);
+        Assert.Equal("Unknown expectation type: legacy_expectation", result.Reason);
+    }
+
+    [Theory]
+    [InlineData("contains_text", true)]
+    [InlineData("banned_text", false)]
+    public async Task EvaluateAsync_uses_empty_defaults_for_missing_text(
+        string expectationType,
+        bool expectedPassed)
+    {
+        var result = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation(expectationType),
+                Trace("response"));
+
+        Assert.Equal(expectedPassed, result.Passed);
+        Assert.Equal(0.0, result.Score);
+    }
+
+    [Theory]
+    [InlineData("regex_match")]
+    [InlineData("link_pattern")]
+    public async Task EvaluateAsync_reports_missing_pattern_at_the_evaluation_boundary(
+        string expectationType)
+    {
+        var result = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation(expectationType),
+                Trace("response"));
+
+        Assert.False(result.Passed);
+        Assert.Equal("invalid_regex_pattern", result.ErrorCode);
+    }
+
+    public static IEnumerable<object[]> RegexStatuses()
+    {
+        yield return [BoundedRegexStatus.InvalidPattern, "invalid_regex_pattern"];
+        yield return [BoundedRegexStatus.UnsupportedPattern, "unsupported_regex_construct"];
+        yield return [BoundedRegexStatus.PatternTooLong, "regex_pattern_too_long"];
+        yield return [BoundedRegexStatus.InputTooLong, "regex_input_too_long"];
+        yield return [BoundedRegexStatus.TimedOut, "regex_timeout"];
+        yield return [(BoundedRegexStatus)999, "regex_evaluation_error"];
+    }
+
+    [Theory]
+    [MemberData(nameof(RegexStatuses))]
+    public async Task EvaluateAsync_maps_each_regex_status_from_the_matcher(
+        BoundedRegexStatus status,
+        string expectedCode)
+    {
+        var result = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(status, [], null))).EvaluateAsync(
+                Expectation("regex_match", ("pattern", "a+")),
+                Trace("aaa"));
+
+        Assert.False(result.Passed);
+        Assert.Equal(expectedCode, result.ErrorCode);
+        Assert.Equal("Regex evaluation failed", result.Reason);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_maps_link_url_extraction_failure()
+    {
+        var result = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(
+                BoundedRegexStatus.TimedOut,
+                [],
+                "URL scan timed out"))).EvaluateAsync(
+                    Expectation("link_pattern", ("pattern", "example")),
+                    Trace("https://example.com"));
+
+        Assert.Equal("regex_timeout", result.ErrorCode);
+        Assert.Equal("URL scan timed out", result.Reason);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_maps_link_candidate_failure_after_url_extraction()
+    {
+        var matcher = new StubRegexMatcher(
+            new BoundedRegexMatchResult(
+                BoundedRegexStatus.Completed,
+                [new BoundedRegexCapture("https://example.com", 0)]),
+            new BoundedRegexCandidateResult(
+                BoundedRegexStatus.UnsupportedPattern,
+                [],
+                "candidate matcher rejected pattern"));
+
+        var result = await PermissiveEvaluator(matcher).EvaluateAsync(
+            Expectation("link_pattern", ("pattern", "example")),
+            Trace("https://example.com"));
+
+        Assert.Equal("unsupported_regex_construct", result.ErrorCode);
+        Assert.Equal("candidate matcher rejected pattern", result.Reason);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_preserves_missing_regex_error_message_fallback()
+    {
+        var result = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult((BoundedRegexStatus)999, [], null))).EvaluateAsync(
+                Expectation("regex_match", ("pattern", "a+")),
+                Trace("aaa"));
+
+        Assert.Equal("regex_evaluation_error", result.ErrorCode);
+        Assert.Equal("Regex evaluation failed", result.Reason);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_handles_json_and_native_value_conversion_edges()
+    {
+        using var json = JsonDocument.Parse(
+            """{"type":"tool_called","tool_name":42}""");
+        var jsonExpectation = JsonSerializer.Deserialize<Dictionary<string, object>>(
+            json.RootElement.GetRawText())!;
+        var jsonResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                jsonExpectation,
+                TraceWithTools("search"));
+        var nativeResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation("tool_called", ("tool_name", null!)),
+                TraceWithTools("search"));
+
+        Assert.False(jsonResult.Passed);
+        Assert.False(nativeResult.Passed);
+        Assert.Null(jsonResult.ErrorCode);
+        Assert.Null(nativeResult.ErrorCode);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_handles_json_and_native_boolean_conversion_edges()
+    {
+        using var json = JsonDocument.Parse(
+            """{"type":"contains_text","text":"HELLO","case_insensitive":false}""");
+        var jsonExpectation = JsonSerializer.Deserialize<Dictionary<string, object>>(
+            json.RootElement.GetRawText())!;
+        var jsonResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                jsonExpectation,
+                Trace("hello"));
+        var nativeResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation("contains_text", ("text", "HELLO"), ("case_insensitive", "yes")),
+                Trace("hello"));
+
+        Assert.False(jsonResult.Passed);
+        Assert.True(nativeResult.Passed);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_handles_empty_tool_sequences_from_json_and_native_values()
+    {
+        using var json = JsonDocument.Parse(
+            """{"type":"tool_sequence","sequence":[]}""");
+        var jsonExpectation = JsonSerializer.Deserialize<Dictionary<string, object>>(
+            json.RootElement.GetRawText())!;
+        var jsonResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                jsonExpectation,
+                TraceWithTools("search"));
+        var nativeResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation("tool_sequence", ("sequence", null!)),
+                TraceWithTools("search"));
+        var missingResult = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation("tool_sequence"),
+                TraceWithTools("search"));
+
+        Assert.Equal("invalid_tool_sequence", jsonResult.ErrorCode);
+        Assert.Equal("invalid_tool_sequence", nativeResult.ErrorCode);
+        Assert.Equal("invalid_tool_sequence", missingResult.ErrorCode);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_reports_an_empty_actual_subsequence_as_a_failed_assertion()
+    {
+        var result = await PermissiveEvaluator(new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
+                Expectation(
+                    "tool_sequence",
+                    ("sequence", new List<string> { "search" }),
+                    ("exact_sequence", false)),
+                Trace());
+
+        Assert.False(result.Passed);
+        Assert.Null(result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_handles_regex_input_budget_exhaustion_and_truncation()
+    {
+        var exhaustionMatcher = new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []));
+        await PermissiveEvaluator(exhaustionMatcher).EvaluateAsync(
+            Expectation("regex_match", ("pattern", "a")),
+            Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 1), "later"));
+
+        var truncationMatcher = new StubRegexMatcher(
+            new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []));
+        await PermissiveEvaluator(truncationMatcher).EvaluateAsync(
+            Expectation("regex_match", ("pattern", "a")),
+            Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 2)));
+
+        Assert.Equal(BoundedRegexMatcher.MaxInputLength + 1, exhaustionMatcher.LastInput!.Length);
+        Assert.Equal(BoundedRegexMatcher.MaxInputLength + 1, truncationMatcher.LastInput!.Length);
+    }
+
+    private static ExpectationEvaluator PermissiveEvaluator(IBoundedRegexMatcher matcher) =>
+        new(
+            NullLogger<ExpectationEvaluator>.Instance,
+            matcher,
+            new PermissiveValidator());
+
     private static Dictionary<string, object> Expectation(
         string type,
         params (string Key, object Value)[] values)
@@ -522,9 +749,21 @@ public sealed class ExpectationEvaluatorTests
         public override string ToString() => throw new InvalidOperationException("boom");
     }
 
-    private sealed class StubRegexMatcher(BoundedRegexMatchResult result) : IBoundedRegexMatcher
+    private sealed class StubRegexMatcher : IBoundedRegexMatcher
     {
+        private readonly BoundedRegexMatchResult _result;
+        private readonly BoundedRegexCandidateResult? _candidateResult;
+
+        public StubRegexMatcher(
+            BoundedRegexMatchResult result,
+            BoundedRegexCandidateResult? candidateResult = null)
+        {
+            _result = result;
+            _candidateResult = candidateResult;
+        }
+
         public int CallCount { get; private set; }
+        public string? LastInput { get; private set; }
 
         public BoundedRegexMatchResult FindMatches(
             string pattern,
@@ -533,7 +772,8 @@ public sealed class ExpectationEvaluatorTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
-            return result;
+            LastInput = input;
+            return _result;
         }
 
         public BoundedRegexCandidateResult FindMatchingCandidates(
@@ -542,8 +782,21 @@ public sealed class ExpectationEvaluatorTests
             bool caseInsensitive = false,
             CancellationToken cancellationToken = default)
         {
-            return new BoundedRegexCandidateResult(result.Status, [], result.ErrorMessage);
+            return _candidateResult ?? new BoundedRegexCandidateResult(
+                _result.Status,
+                [],
+                _result.ErrorMessage);
         }
+    }
+
+    private sealed class PermissiveValidator : IExpectationValidator
+    {
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson) =>
+            ExpectationValidationResult.Valid;
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
     }
 
     private sealed class TestExpectationEvaluator

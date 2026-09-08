@@ -263,7 +263,7 @@ public sealed class TenantSuiteAndTestServiceTests
             NullLogger<TestCaseService>.Instance);
         var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
 
-        await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+        var exception = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
             service.CreateTestCaseAsync(
                 graph.AllowedSuiteId,
                 "invalid",
@@ -273,9 +273,40 @@ public sealed class TenantSuiteAndTestServiceTests
                 "[]",
                 scope));
 
+        Assert.NotEmpty(exception.Issues);
+        Assert.Equal("no_expectations", exception.Issues[0].Code);
         Assert.DoesNotContain(
             dbContext.TestCases,
             testCase => testCase.ExternalId == "invalid");
+    }
+
+    [Fact]
+    public async Task Owned_test_case_update_rejects_invalid_expectations_without_mutating_the_row()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+
+        var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(existing);
+        var exception = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.UpdateTestCaseAsync(
+                graph.AllowedTestCaseId,
+                "updated",
+                "updated",
+                null,
+                "{}",
+                "[]",
+                scope));
+
+        Assert.NotEmpty(exception.Issues);
+        var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(persisted);
+        Assert.Equal(existing!.Name, persisted!.Name);
+        Assert.Equal(existing.ExpectationsJson, persisted.ExpectationsJson);
     }
 
     private static PromptlyDbContext CreateDbContext()
@@ -327,7 +358,8 @@ public sealed class TenantSuiteAndTestServiceTests
             otherProject.Id,
             allowedSuite.Id,
             siblingSuite.Id,
-            siblingCase.Id);
+            siblingCase.Id,
+            allowedCase.Id);
     }
 
     private static Project Project(User owner, string name) => new()
@@ -364,5 +396,6 @@ public sealed class TenantSuiteAndTestServiceTests
         Guid OtherProjectId,
         Guid AllowedSuiteId,
         Guid SiblingSuiteId,
-        Guid SiblingTestCaseId);
+        Guid SiblingTestCaseId,
+        Guid AllowedTestCaseId);
 }

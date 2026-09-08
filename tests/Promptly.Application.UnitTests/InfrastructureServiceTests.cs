@@ -423,6 +423,28 @@ public sealed class YamlServiceTests
     }
 
     [Fact]
+    public void SerializeTests_round_trips_empty_and_whitespace_nested_object_keys()
+    {
+        const string inputJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"metadata\":{\"\":true,\" \":false}}";
+        var original = new TestCase
+        {
+            ExternalId = "empty-key",
+            Name = "Empty key",
+            InputSpecJson = inputJson,
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
+        };
+
+        var yaml = _service.SerializeTests([original]);
+        var roundTripped = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        using var expected = System.Text.Json.JsonDocument.Parse(inputJson);
+        using var actual = System.Text.Json.JsonDocument.Parse(roundTripped.InputSpecJson);
+        Assert.True(System.Text.Json.JsonElement.DeepEquals(expected.RootElement, actual.RootElement));
+        Assert.True(actual.RootElement.GetProperty("metadata").GetProperty("").GetBoolean());
+        Assert.False(actual.RootElement.GetProperty("metadata").GetProperty(" ").GetBoolean());
+    }
+
+    [Fact]
     public void Empty_documents_round_trip_as_an_empty_test_collection()
     {
         var yaml = _service.SerializeTests([]);

@@ -275,14 +275,17 @@ test('test authoring persists through Form and YAML and runs through the real st
     (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
       .replace(/\s+/g, ' ')
   )).toContain('Created through the browser editor with keyboard editing');
-  await expect.poll(async () => (
-    (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
-      .replace(/\s+/g, ' ')
-  )).toContain('Form message 12');
+  await createDialog.getByRole('tab', { name: 'Form' }).click();
+  await expect.poll(() => createDialog.getByRole('alert').allTextContents()).toEqual([]);
+  await expect(createDialog.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
+  await expect(createDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
+  await expect(createDialog.getByLabel('Content for message 12')).toHaveValue('Form message 12');
+  await createDialog.getByRole('tab', { name: 'YAML' }).click();
   expect(externalMonacoRequests).toEqual([]);
   await replaceYaml(page, '- id: [broken');
   await createDialog.getByRole('tab', { name: 'Form' }).click();
   await expect(createDialog.getByText(/Repair the YAML errors before returning to Form/)).toBeVisible();
+  await expect(createDialog.getByRole('tab', { name: 'YAML' })).toHaveAttribute('aria-selected', 'true');
   await createDialog.getByRole('tab', { name: 'YAML' }).click();
   await replaceYaml(page, authoringYaml({
     externalId: `authoring-${unique.slice(0, 8)}`,
@@ -296,6 +299,8 @@ test('test authoring persists through Form and YAML and runs through the real st
     enabled: true,
   }));
   await createDialog.getByRole('tab', { name: 'Form' }).click();
+  await expect.poll(() => createDialog.getByRole('alert').allTextContents()).toEqual([]);
+  await expect(createDialog.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
   await expect(createDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
   expect(await createDialog.getByLabel('Content for message 1').inputValue()).toContain(correlation);
   await expect(createDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
@@ -425,6 +430,8 @@ test('test authoring persists through Form and YAML and runs through the real st
     caseInsensitive: false,
   }));
   await yamlEditDialog.getByRole('tab', { name: 'Form' }).click();
+  await expect.poll(() => yamlEditDialog.getByRole('alert').allTextContents()).toEqual([]);
+  await expect(yamlEditDialog.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
   await expect(yamlEditDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
   await expect(yamlEditDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
 

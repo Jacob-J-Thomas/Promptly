@@ -307,7 +307,7 @@ describe('ExpectationListEditor', () => {
     expect(screen.getByText(/Stored fields that this editor does not use will be retained/))
       .toBeInTheDocument();
     expect(screen.getByLabelText('Minimum score for expectation 7')).toHaveValue(null);
-    expect(screen.getByLabelText('Minimum score for expectation 10')).toHaveValue(null);
+    expect(screen.getByLabelText('Minimum score for expectation 10')).toHaveValue(0.8);
   });
 
   it('repairs a sequence, clears an existing score, and changes type through controlled state', () => {

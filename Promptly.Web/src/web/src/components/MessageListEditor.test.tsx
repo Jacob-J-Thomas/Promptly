@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { MessageListEditor } from './MessageListEditor';
@@ -82,7 +82,7 @@ describe('MessageListEditor', () => {
     render(<StatefulMessageEditor />);
 
     const firstContent = screen.getByLabelText('Content for message 1');
-    firstContent.focus();
+    act(() => firstContent.focus());
     fireEvent.change(firstContent, { target: { value: 'System guidance' } });
     expect(document.activeElement).toBe(firstContent);
 
@@ -90,7 +90,7 @@ describe('MessageListEditor', () => {
     expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(4);
     const addedRow = screen.getByRole('group', { name: 'Message 4' });
     const addedRole = within(addedRow).getByRole('combobox');
-    addedRole.focus();
+    act(() => addedRole.focus());
     fireEvent.keyDown(addedRole, { key: 'ArrowDown' });
     fireEvent.click(screen.getByRole('option', { name: 'assistant' }));
     fireEvent.change(screen.getByLabelText('Content for message 4'), {
@@ -99,7 +99,7 @@ describe('MessageListEditor', () => {
 
     const moveAddedUp = within(screen.getByRole('group', { name: 'Message 4' }))
       .getByRole('button', { name: 'Move message 4 up' });
-    moveAddedUp.focus();
+    act(() => moveAddedUp.focus());
     fireEvent.click(moveAddedUp);
     const movedRow = screen.getByRole('group', { name: 'Message 3' });
     expect(within(movedRow).getByLabelText('Content for message 3')).toHaveValue('Follow-up');

@@ -3,6 +3,7 @@ import {
   MAX_MESSAGE_COUNT,
   parseInputSpecJson,
   serializeInputSpec,
+  validateMessages,
   type ConversationMessage,
 } from './messageSpec';
 import {
@@ -167,6 +168,33 @@ describe('message input-spec helpers', () => {
     }));
     expect(tooLong.valid).toBe(false);
     expect(tooLong.errors[0]?.code).toBe('too_large');
+  });
+
+  it('reports direct editor limits and malformed message entries', () => {
+    expect(validateMessages([{
+      role: 'user',
+      content: 'x'.repeat(MAX_JSON_SCALAR_LENGTH + 1),
+    }])).toEqual([{
+      code: 'too_large',
+      path: 'messages[0].content',
+      message: 'Message content cannot exceed 16384 characters.',
+    }]);
+
+    const scalarMessage = parseInputSpecJson('{"messages":[null]}');
+    expect(scalarMessage.messages).toBeNull();
+    expect(scalarMessage.errors[0]).toEqual({
+      code: 'invalid_shape',
+      path: 'inputSpecJson.messages[0]',
+      message: 'Each message must be an object.',
+    });
+
+    const blankMessage = parseInputSpecJson('{"messages":[{"role":"user","content":"  "}]}');
+    expect(blankMessage.messages).toBeNull();
+    expect(blankMessage.errors[0]).toEqual({
+      code: 'required',
+      path: 'inputSpecJson.messages[0].content',
+      message: 'Message content is required.',
+    });
   });
 
   it('returns a warning for a valid assistant-only conversation', () => {

@@ -140,6 +140,15 @@ describe('MessageListEditor', () => {
     expect(screen.getByRole('button', { name: 'Delete message 1' })).toBeDisabled();
   });
 
+  it('ignores attempted moves beyond the first and last message boundaries', () => {
+    const onChange = renderEditor(initialMessages);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move message 1 up' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move message 3 down' }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('keeps ten or more rows within the responsive editor structure', () => {
     const messages = Array.from({ length: 12 }, (_, index) => ({
       role: index % 2 === 0 ? 'user' : 'assistant',

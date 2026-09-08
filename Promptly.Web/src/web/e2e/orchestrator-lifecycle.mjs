@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createSignalRegistration } from './signal-registration.mjs';
 
 /**
  * Runs the serial phase children and owns cancellation propagation. The child
@@ -16,7 +17,6 @@ export const createPhaseProcessRunner = ({
 } = {}) => {
   let cancellationSignal = null;
   let active = null;
-  const handlers = new Map();
 
   const handleSignal = (signal) => {
     cancellationSignal ??= signal;
@@ -26,11 +26,10 @@ export const createPhaseProcessRunner = ({
     }
   };
 
-  for (const signal of ['SIGINT', 'SIGTERM']) {
-    const handler = () => handleSignal(signal);
-    handlers.set(signal, handler);
-    signalSource.on(signal, handler);
-  }
+  const signalRegistration = createSignalRegistration({
+    onSignal: handleSignal,
+    signalSource,
+  });
 
   const runPhase = (phase) => {
     if (cancellationSignal) {
@@ -108,10 +107,7 @@ export const createPhaseProcessRunner = ({
   };
 
   const dispose = () => {
-    for (const [signal, handler] of handlers) {
-      signalSource.removeListener(signal, handler);
-    }
-    handlers.clear();
+    signalRegistration.dispose();
   };
 
   return {

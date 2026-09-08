@@ -130,6 +130,10 @@ const authoringYaml = ({
       '      case_insensitive: true\n    - type: banned_text',
       '      case_insensitive: false\n    - type: banned_text',
     );
+  const messages = [
+    message,
+    ...Array.from({ length: 11 }, (_, index) => `YAML round-trip message ${index + 2}`),
+  ];
   return `- id: ${externalId}
   name: ${name}
   description: ${description}
@@ -147,8 +151,7 @@ const authoringYaml = ({
       nested:
         count: 2
     messages:
-      - role: user
-        content: ${JSON.stringify(message)}
+${messages.map((content) => `      - role: user\n        content: ${JSON.stringify(content)}`).join('\n')}
 ${expectations}`;
 };
 
@@ -235,6 +238,12 @@ test('test authoring persists through Form and YAML and runs through the real st
     integrationCorrelation: correlation,
     prompt: 'Hello from authoring',
   }));
+  for (let index = 2; index <= 12; index += 1) {
+    await createDialog.getByRole('button', { name: 'Add message' }).click();
+    await createDialog.getByLabel(`Content for message ${index}`).fill(`Form message ${index}`);
+  }
+  await expect(createDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
+  await expect(createDialog.getByLabel('Content for message 12')).toHaveValue('Form message 12');
   await createDialog.getByRole('button', { name: 'Add expectation' }).click();
   await page.getByRole('menuitem', { name: 'Contains text', exact: true }).click();
   await createDialog.getByLabel('Text for expectation 1').fill('Deterministically accurate');
@@ -266,6 +275,10 @@ test('test authoring persists through Form and YAML and runs through the real st
     (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
       .replace(/\s+/g, ' ')
   )).toContain('Created through the browser editor with keyboard editing');
+  await expect.poll(async () => (
+    (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
+      .replace(/\s+/g, ' ')
+  )).toContain('Form message 12');
   expect(externalMonacoRequests).toEqual([]);
   await replaceYaml(page, '- id: [broken');
   await createDialog.getByRole('tab', { name: 'Form' }).click();
@@ -283,7 +296,9 @@ test('test authoring persists through Form and YAML and runs through the real st
     enabled: true,
   }));
   await createDialog.getByRole('tab', { name: 'Form' }).click();
+  await expect(createDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
   expect(await createDialog.getByLabel('Content for message 1').inputValue()).toContain(correlation);
+  await expect(createDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
   await expect(createDialog.getByLabel('Text for expectation 1')).toHaveValue('Deterministically accurate');
   await expect(createDialog.getByLabel('Text for expectation 2')).toHaveValue('forbidden');
   await expect(createDialog.getByLabel('Pattern for expectation 3')).toHaveValue('Deterministically');
@@ -314,6 +329,12 @@ test('test authoring persists through Form and YAML and runs through the real st
       nested: { count: 2 },
     },
   });
+  const createdInput = JSON.parse(createdBody.inputSpecJson) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  expect(createdInput.messages).toHaveLength(12);
+  expect(createdInput.messages[0]?.content).toContain(correlation);
+  expect(createdInput.messages[11]?.content).toBe('YAML round-trip message 12');
   expectLosslessNumericMetadata(createdBody.inputSpecJson);
   await expect(createDialog).toBeHidden();
   expect(createdBody.inputSpecJson).toContain(correlation);
@@ -343,6 +364,8 @@ test('test authoring persists through Form and YAML and runs through the real st
   await expect(editDialog.getByLabel('Rubric for expectation 7')).toHaveValue('Helpful human judge');
   await expect(editDialog.getByLabel('Minimum score for expectation 7')).toHaveValue('0.8');
   await expect(editDialog.getByLabel('Minimum score for expectation 8')).toHaveValue('0.8');
+  await expect(editDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
+  await expect(editDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
   const loadedTests = await api(page, `/api/suites/${suiteId}/tests`, 'GET');
   expect(loadedTests.status).toBe(200);
   const loadedTest = (loadedTests.body as Array<{ inputSpecJson: string; expectationsJson: string }>)[0];
@@ -360,6 +383,7 @@ test('test authoring persists through Form and YAML and runs through the real st
     integrationCorrelation: correlation,
     prompt: 'Edited authoring prompt',
   }));
+  await editDialog.getByLabel('Content for message 12').fill('Edited final message from Form');
   await editDialog.getByLabel('Case-insensitive for expectation 1').uncheck();
 
   const formOnlyUpdateRequest = page.waitForRequest((request) => (
@@ -373,6 +397,12 @@ test('test authoring persists through Form and YAML and runs through the real st
   };
   expect(formEditedBody.name).toBe('Edited authored response');
   expect(formEditedBody.inputSpecJson).toContain('Edited authoring prompt');
+  const formEditedInput = JSON.parse(formEditedBody.inputSpecJson) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  expect(formEditedInput.messages).toHaveLength(12);
+  expect(formEditedInput.messages[0]?.content).toContain(correlation);
+  expect(formEditedInput.messages[11]?.content).toBe('Edited final message from Form');
   expectLosslessNumericMetadata(formEditedBody.inputSpecJson);
   await expect(editDialog).toBeHidden();
 
@@ -395,6 +425,8 @@ test('test authoring persists through Form and YAML and runs through the real st
     caseInsensitive: false,
   }));
   await yamlEditDialog.getByRole('tab', { name: 'Form' }).click();
+  await expect(yamlEditDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
+  await expect(yamlEditDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
 
   const updateRequest = page.waitForRequest((request) => (
     request.method() === 'PUT' && new URL(request.url()).pathname.startsWith('/api/tests/')
@@ -417,6 +449,12 @@ test('test authoring persists through Form and YAML and runs through the real st
     },
   });
   expect(updatedBody.inputSpecJson).toContain('Edited authoring prompt');
+  const updatedInput = JSON.parse(updatedBody.inputSpecJson) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  expect(updatedInput.messages).toHaveLength(12);
+  expect(updatedInput.messages[0]?.content).toContain(correlation);
+  expect(updatedInput.messages[11]?.content).toBe('YAML round-trip message 12');
   expectLosslessNumericMetadata(updatedBody.inputSpecJson);
   expect(JSON.parse(updatedBody.expectationsJson)).toEqual([
     { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
@@ -435,6 +473,8 @@ test('test authoring persists through Form and YAML and runs through the real st
   await expect(reloadedDialog.getByLabel('Content for message 1')).toHaveValue(
     JSON.stringify({ integrationCorrelation: correlation, prompt: 'Edited authoring prompt' }),
   );
+  await expect(reloadedDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
+  await expect(reloadedDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
   await expect(reloadedDialog.getByLabel('Case-insensitive for expectation 1')).not.toBeChecked();
   await reloadedDialog.getByRole('button', { name: 'Cancel' }).click();
 

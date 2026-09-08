@@ -7,8 +7,13 @@ const {
   e2eRoot,
   webRoot,
 } = resolveFixedE2EPaths(import.meta.url);
-const reportPath = path.join(artifactsRoot, 'results.json');
-const verificationPath = path.join(artifactsRoot, 'verification.json');
+const phase = process.env.PROMPTLY_E2E_PHASE;
+if (phase !== 'proxy' && phase !== 'direct') {
+  throw new Error('PROMPTLY_E2E_PHASE must be proxy or direct');
+}
+const phaseArtifactsRoot = path.join(artifactsRoot, phase);
+const reportPath = path.join(phaseArtifactsRoot, 'results.json');
+const verificationPath = path.join(phaseArtifactsRoot, 'verification.json');
 const inventoryPath = path.join(e2eRoot, 'required-tests.json');
 
 const normalizeFile = (file, relativeRoot = webRoot) => {
@@ -71,7 +76,10 @@ try {
   if (inventory.schema !== 1 || !Array.isArray(inventory.tests)) {
     violations.push('Required-test inventory must use schema 1 with a tests array');
   } else {
-    requiredTests = inventory.tests;
+    if (inventory.tests.some((test) => test.phase !== 'proxy' && test.phase !== 'direct')) {
+      violations.push('Every required test must name the proxy or direct phase');
+    }
+    requiredTests = inventory.tests.filter((test) => test.phase === phase);
   }
 
   if (requiredTests.length === 0) {

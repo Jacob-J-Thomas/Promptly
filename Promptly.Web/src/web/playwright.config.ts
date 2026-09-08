@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const artifactsRoot = path.resolve(webRoot, '../../../artifacts/test-results/e2e');
+const phase = process.env.PROMPTLY_E2E_PHASE;
+if (phase !== 'proxy' && phase !== 'direct') {
+  throw new Error('PROMPTLY_E2E_PHASE must be proxy or direct');
+}
 const baseURL = process.env.PROMPTLY_E2E_WEB_ORIGIN;
 
 if (!baseURL) {
@@ -13,7 +17,10 @@ if (!baseURL) {
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.e2e.ts',
-  outputDir: path.join(artifactsRoot, 'playwright-output'),
+  grep: phase === 'proxy'
+    ? /anonymous protected routes redirect to login|registration logout and login traverse the real stack|an expired signed session receives 401 and clears stored authentication/
+    : /persisted Run Suite configuration queues a run and loads its result/,
+  outputDir: path.join(artifactsRoot, phase, 'playwright-output'),
   fullyParallel: false,
   forbidOnly: true,
   repeatEach: 1,
@@ -25,9 +32,9 @@ export default defineConfig({
   },
   reporter: [
     ['list'],
-    ['junit', { outputFile: path.join(artifactsRoot, 'junit.xml') }],
-    ['json', { outputFile: path.join(artifactsRoot, 'results.json') }],
-    ['html', { outputFolder: path.join(artifactsRoot, 'html'), open: 'never' }],
+    ['junit', { outputFile: path.join(artifactsRoot, phase, 'junit.xml') }],
+    ['json', { outputFile: path.join(artifactsRoot, phase, 'results.json') }],
+    ['html', { outputFolder: path.join(artifactsRoot, phase, 'html'), open: 'never' }],
   ],
   use: {
     baseURL,

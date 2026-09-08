@@ -1,0 +1,57 @@
+services:
+  run-suite-provider-stub:
+    image: ${PROMPTLY_E2E_WORKER_IMAGE:?PROMPTLY_E2E_WORKER_IMAGE must be set}
+    entrypoint:
+      - python
+      - /provider_stub.py
+      - --bind-all
+      - --record-evidence
+    working_dir: /tmp
+    volumes:
+      - ../Promptly.Worker/scripts/provider_stub.py:/provider_stub.py:ro
+    networks:
+      promptly-run-suite:
+        ipv4_address: 172.30.0.2
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import socket;
+          connection=socket.create_connection(('127.0.0.1',8080),timeout=2);
+          connection.close()
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+    restart: "no"
+
+  promptly-server:
+    environment:
+      EndpointEgress__RequireProxy: "false"
+      EndpointEgress__ProxyUrl: !reset null
+      EndpointEgress__AllowedNonPublicDestinations__0__Host: run-suite-provider-stub
+      EndpointEgress__AllowedNonPublicDestinations__0__Port: "8080"
+      EndpointEgress__AllowedNonPublicDestinations__0__Cidrs__0: 172.30.0.2/32
+    networks:
+      - promptly-control
+      - promptly-run-suite
+    depends_on:
+      run-suite-provider-stub:
+        condition: service_healthy
+
+networks:
+  promptly-run-suite:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/29
+          gateway: 172.30.0.1

@@ -19,14 +19,29 @@ import {
   createSafeRunMetadata,
   resolveFixedE2EPaths,
 } from './harness-safety.mjs';
+import {
+  assertDirectFixtureBoundary,
+  assertProviderEvidence,
+} from './phase-verification.mjs';
+import { createSignalRegistration } from './signal-registration.mjs';
 
 const {
-  artifactsRoot,
+  artifactsRoot: baseArtifactsRoot,
   e2eRoot,
   repositoryRoot,
   webRoot,
 } = resolveFixedE2EPaths(import.meta.url);
-const composeFile = path.join(repositoryRoot, 'docker/docker-compose.e2e.yml');
+const phase = process.env.PROMPTLY_E2E_PHASE;
+if (phase !== 'proxy' && phase !== 'direct') {
+  throw new Error('PROMPTLY_E2E_PHASE must be proxy or direct');
+}
+const artifactsRoot = path.join(baseArtifactsRoot, phase);
+const composeFiles = [
+  path.join(repositoryRoot, 'docker/docker-compose.e2e.yml'),
+  ...(phase === 'direct'
+    ? [path.join(repositoryRoot, 'docker/docker-compose.e2e.run-suite.yml')]
+    : []),
+];
 
 const prepareArtifactsDirectory = async () => {
   let current = repositoryRoot;
@@ -64,7 +79,7 @@ await prepareArtifactsDirectory();
 
 const startedAt = new Date();
 const runLogPath = path.join(artifactsRoot, 'runner.log');
-const projectName = `promptly-e2e-${process.pid}-${randomBytes(6).toString('hex')}`;
+const projectName = `promptly-e2e-${phase}-${process.pid}-${randomBytes(6).toString('hex')}`;
 const databasePassword = randomBytes(32).toString('base64url');
 const jwtKey = randomBytes(64).toString('base64');
 const secrets = [databasePassword, jwtKey];
@@ -80,13 +95,12 @@ const projectImages = [
 const processAbortController = new AbortController();
 let receivedSignal = null;
 let logWriteError = null;
-
-for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => {
+const signalRegistration = createSignalRegistration({
+  onSignal: (signal) => {
     receivedSignal = signal;
     processAbortController.abort(new Error(`Received ${signal}`));
-  });
-}
+  },
+});
 
 const redact = (value) => {
   let redacted = value;
@@ -259,7 +273,12 @@ const composeEnvironment = {
   PROMPTLY_E2E_JWT_KEY: jwtKey,
   PROMPTLY_E2E_WORKER_IMAGE: workerImage,
 };
-const composeArguments = ['compose', '--file', composeFile, '--project-name', projectName];
+const composeArguments = [
+  'compose',
+  ...composeFiles.flatMap((composeFile) => ['--file', composeFile]),
+  '--project-name',
+  projectName,
+];
 const errors = [];
 const errorCategories = new Set();
 let stackStarted = false;
@@ -267,6 +286,8 @@ let apiOrigin = null;
 let apiPort = null;
 let webOrigin = null;
 let webPort = null;
+let cleanupCommandPassed = null;
+let cleanupVerificationPassed = null;
 
 const configureCandidatePorts = () => {
   apiPort = randomInt(49_152, 65_536);
@@ -318,7 +339,188 @@ const resolvePublishedPort = async (service, target) => {
   return port;
 };
 
+const writeDirectTopologyAttestation = async () => {
+  const configured = await run(
+    'docker',
+    [...composeArguments, 'config', '--format', 'json'],
+    { captureOnly: true, env: composeEnvironment },
+  );
+  const topology = JSON.parse(configured.stdout);
+  const services = topology.services ?? {};
+  const expectedServiceNames = [
+    'postgres',
+    'promptly-egress-proxy',
+    'promptly-eval',
+    'promptly-ingress-gateway',
+    'promptly-server',
+    'promptly-web',
+    'provider-stub',
+    'run-suite-provider-stub',
+  ];
+  const actualServiceNames = Object.keys(services).sort();
+  if (JSON.stringify(actualServiceNames) !== JSON.stringify(expectedServiceNames)) {
+    throw new Error(`Unexpected direct Compose service inventory: ${actualServiceNames.join(',')}`);
+  }
+  for (const [name, service] of Object.entries(services)) {
+    if (service.container_name != null) {
+      throw new Error(`${name} must not use a fixed container_name`);
+    }
+    if ((service.ports ?? []).length > 0 && name !== 'promptly-ingress-gateway') {
+      throw new Error(`${name} unexpectedly publishes a host port`);
+    }
+  }
+  const expectedServiceNetworks = {
+    postgres: ['promptly-control'],
+    'promptly-egress-proxy': ['promptly-control', 'promptly-egress'],
+    'promptly-eval': ['promptly-control'],
+    'promptly-ingress-gateway': ['promptly-control', 'promptly-ingress'],
+    'promptly-server': ['promptly-control', 'promptly-run-suite'],
+    'promptly-web': ['promptly-control'],
+    'provider-stub': ['promptly-control'],
+    'run-suite-provider-stub': ['promptly-run-suite'],
+  };
+  for (const [serviceName, expectedNetworksForService] of Object.entries(expectedServiceNetworks)) {
+    const actualNetworksForService = Object.keys(services[serviceName].networks ?? {}).sort();
+    if (JSON.stringify(actualNetworksForService) !== JSON.stringify(expectedNetworksForService)) {
+      throw new Error(`${serviceName} has unexpected direct network membership`);
+    }
+  }
+  const directNetwork = topology.networks?.['promptly-run-suite'];
+  if (
+    directNetwork?.internal !== true
+    || directNetwork.ipam?.config?.length !== 1
+    || directNetwork.ipam.config[0]?.subnet !== '172.30.0.0/29'
+    || directNetwork.ipam.config[0]?.gateway !== '172.30.0.1'
+  ) {
+    throw new Error('Direct fixture network must be a fixed internal /29');
+  }
+  const expectedNetworks = ['promptly-control', 'promptly-egress', 'promptly-ingress', 'promptly-run-suite'];
+  if (JSON.stringify(Object.keys(topology.networks ?? {}).sort()) !== JSON.stringify(expectedNetworks)) {
+    throw new Error('Direct Compose network inventory drifted');
+  }
+  for (const networkName of expectedNetworks) {
+    const network = topology.networks[networkName];
+    if (network.external === true || network.name !== `${projectName}_${networkName}`) {
+      throw new Error(`${networkName} must be direct-profile scoped and non-external`);
+    }
+  }
+  const expectedVolumes = ['dataprotection-keys', 'postgres-data'];
+  if (JSON.stringify(Object.keys(topology.volumes ?? {}).sort()) !== JSON.stringify(expectedVolumes)) {
+    throw new Error('Direct Compose volume inventory drifted');
+  }
+  for (const volumeName of expectedVolumes) {
+    const volume = topology.volumes[volumeName];
+    if (volume.external === true || volume.name !== `${projectName}_${volumeName}`) {
+      throw new Error(`${volumeName} must be direct-profile scoped and non-external`);
+    }
+  }
+  const providerNetwork = services['run-suite-provider-stub'].networks?.['promptly-run-suite'];
+  if (providerNetwork?.ipv4_address !== '172.30.0.2') {
+    throw new Error('Direct fixture provider must use the fixed 172.30.0.2 address');
+  }
+  const expectedFixtureMount = services['run-suite-provider-stub'].volumes ?? [];
+  if (
+    expectedFixtureMount.length !== 1
+    || expectedFixtureMount[0].type !== 'bind'
+    || expectedFixtureMount[0].source !== path.join(repositoryRoot, 'Promptly.Worker/scripts/provider_stub.py')
+    || expectedFixtureMount[0].target !== '/provider_stub.py'
+    || expectedFixtureMount[0].read_only !== true
+  ) {
+    throw new Error('Direct fixture provider mount inventory drifted');
+  }
+  const serverEnvironment = services['promptly-server'].environment ?? {};
+  if (
+    serverEnvironment.EndpointEgress__RequireProxy !== 'false'
+    || Object.hasOwn(serverEnvironment, 'EndpointEgress__ProxyUrl')
+    || serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Host
+      !== 'run-suite-provider-stub'
+    || serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Port !== '8080'
+    || serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Cidrs__0
+      !== '172.30.0.2/32'
+  ) {
+    throw new Error('Direct fixture server must have one exact host, port, and /32 rule');
+  }
+  for (const key of [
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+  ]) {
+    if (serverEnvironment[key] !== '') {
+      throw new Error(`Direct fixture server must clear ambient proxy variable ${key}`);
+    }
+  }
+  const egressMembers = Object.entries(services)
+    .filter(([, service]) => Object.hasOwn(service.networks ?? {}, 'promptly-egress'))
+    .map(([name]) => name);
+  if (JSON.stringify(egressMembers) !== JSON.stringify(['promptly-egress-proxy'])) {
+    throw new Error(`Unexpected direct egress-network membership: ${egressMembers.join(',')}`);
+  }
+  const ingressMembers = Object.entries(services)
+    .filter(([, service]) => Object.hasOwn(service.networks ?? {}, 'promptly-ingress'))
+    .map(([name]) => name);
+  if (JSON.stringify(ingressMembers) !== JSON.stringify(['promptly-ingress-gateway'])) {
+    throw new Error(`Unexpected direct ingress-network membership: ${ingressMembers.join(',')}`);
+  }
+  assertDirectFixtureBoundary({
+    fixture: {
+      host: 'run-suite-provider-stub',
+      port: '8080',
+      cidr: '172.30.0.2/32',
+      network: 'promptly-run-suite',
+      address: providerNetwork.ipv4_address,
+    },
+    server: {
+      requireProxy: serverEnvironment.EndpointEgress__RequireProxy === 'true',
+      proxyUrl: Object.hasOwn(serverEnvironment, 'EndpointEgress__ProxyUrl')
+        ? serverEnvironment.EndpointEgress__ProxyUrl
+        : null,
+      allowlistHost: serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Host,
+      allowlistPort: serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Port,
+      allowlistCidr: serverEnvironment.EndpointEgress__AllowedNonPublicDestinations__0__Cidrs__0,
+      ambientProxyCleared: [
+        'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+        'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+      ].every((key) => serverEnvironment[key] === ''),
+    },
+    provider: {
+      network: 'promptly-run-suite',
+      address: providerNetwork.ipv4_address,
+      attachedToEgress: Object.hasOwn(
+        services['run-suite-provider-stub'].networks ?? {},
+        'promptly-egress',
+      ),
+      publishedPort: (services['run-suite-provider-stub'].ports ?? []).length > 0,
+    },
+    egressMembers,
+    ingressMembers,
+  });
+  await writeFile(path.join(artifactsRoot, 'topology-attestation.json'), `${JSON.stringify({
+    schema: 1,
+    phase,
+    checks: {
+      exactServiceInventory: true,
+      fixedInternalFixtureNetwork: true,
+      exactFixtureHostPort: true,
+      exactFixtureAddress: true,
+      directTransportOnly: true,
+      ambientProxyVariablesCleared: true,
+      onlyProxyHasEgressNetwork: true,
+      onlyGatewayHasIngressNetwork: true,
+    },
+    fixture: {
+      service: 'run-suite-provider-stub',
+      host: 'run-suite-provider-stub',
+      port: 8080,
+      cidr: '172.30.0.2/32',
+      network: 'promptly-run-suite',
+    },
+  }, null, 2)}\n`);
+};
+
 const writeTopologyAttestation = async () => {
+  if (phase === 'direct') {
+    await writeDirectTopologyAttestation();
+    return;
+  }
   const configured = await run(
     'docker',
     [...composeArguments, 'config', '--format', 'json'],
@@ -537,6 +739,26 @@ const writeIngressEgressAttestation = async () => {
         "import socket; socket.create_connection(('provider-stub', 8080), timeout=2).close()",
       ],
     },
+    ...(phase === 'direct'
+      ? [
+        {
+          service: 'promptly-server',
+          controlCommand: [
+            'bash',
+            '-c',
+            'exec 3<>/dev/tcp/run-suite-provider-stub/8080',
+          ],
+        },
+        {
+          service: 'run-suite-provider-stub',
+          controlCommand: [
+            'python',
+            '-c',
+            "import socket; socket.create_connection(('promptly-server',5000), timeout=2).close()",
+          ],
+        },
+      ]
+      : []),
     {
       service: 'promptly-server',
       controlCommand: [
@@ -599,6 +821,7 @@ const writeIngressEgressAttestation = async () => {
   }
   await writeFile(path.join(artifactsRoot, 'ingress-egress-attestation.json'), `${JSON.stringify({
     schema: 1,
+    phase,
     workloadNetwork: 'promptly-control',
     hostIngressNetwork: 'promptly-ingress',
     ingressGateway: 'promptly-ingress-gateway',
@@ -621,7 +844,7 @@ const captureProviderEvidence = async (required) => {
       ...composeArguments,
       'exec',
       '--no-TTY',
-      'provider-stub',
+      phase === 'direct' ? 'run-suite-provider-stub' : 'provider-stub',
       'cat',
       '/tmp/provider-requests.jsonl',
     ],
@@ -647,30 +870,11 @@ const verifyProviderEvidence = async () => {
   const lines = (await readFile(evidencePath, 'utf8'))
     .split('\n')
     .filter((line) => line.trim().length > 0);
-  if (lines.length === 0) {
-    throw new Error('Provider evidence is empty');
-  }
   const records = lines.map((line) => JSON.parse(line));
-  const sequences = new Set();
-  for (const record of records) {
-    const keys = Object.keys(record).sort();
-    const expectedKeys = ['authorized', 'kind', 'method', 'path', 'sequence'];
-    if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
-      throw new Error(`Provider evidence has an unexpected schema: ${keys.join(',')}`);
-    }
-    if (
-      record.authorized !== true
-      || record.kind !== 'models'
-      || record.method !== 'GET'
-      || record.path !== '/v1/models'
-      || !Number.isInteger(record.sequence)
-      || record.sequence < 1
-      || sequences.has(record.sequence)
-    ) {
-      throw new Error('Provider evidence contains an unexpected request');
-    }
-    sequences.add(record.sequence);
-  }
+  assertProviderEvidence(records, {
+    phase,
+    expectedCorrelation: process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? null,
+  });
 };
 
 const collectDiagnostics = async () => {
@@ -942,8 +1146,19 @@ try {
     CI: process.env.CI ?? 'true',
     PROMPTLY_E2E_API_ORIGIN: apiOrigin,
     PROMPTLY_E2E_JWT_KEY: jwtKey,
+    PROMPTLY_E2E_PHASE: phase,
+    PROMPTLY_E2E_PROVIDER_HOST: phase === 'direct'
+      ? 'run-suite-provider-stub'
+      : 'provider-stub',
     PROMPTLY_E2E_WEB_ORIGIN: webOrigin,
   });
+  if (phase === 'direct') {
+    playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION = (
+      process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? ''
+    );
+  } else {
+    delete playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION;
+  }
 
   browserAttempted = true;
   playwrightCode = -1;
@@ -1005,8 +1220,8 @@ try {
     }
   }
 
-  let cleanupCommandPassed = false;
-  let cleanupVerificationPassed = true;
+  cleanupCommandPassed = false;
+  cleanupVerificationPassed = true;
   try {
     const cleanup = await run(
       'docker',
@@ -1168,6 +1383,23 @@ try {
   }
 }
 
+try {
+  await writeFile(path.join(artifactsRoot, 'phase-receipt.json'), `${JSON.stringify({
+    schema: 1,
+    phase,
+    status: uploadIsSafe && errors.length === 0 ? 'passed' : 'failed',
+    uploadIsSafe,
+    errors,
+    projectName,
+    composeFiles,
+    playwrightCode,
+    cleanupCommandPassed,
+    cleanupVerificationPassed,
+  }, null, 2)}\n`);
+} catch (error) {
+  recordError('phase evidence', error);
+}
+
 if (!uploadIsSafe) {
   throw new Error(`Composed E2E artifacts could not be made safe for upload:\n${errors.join('\n')}`);
 }
@@ -1175,4 +1407,5 @@ if (errors.length > 0) {
   throw new Error(`Composed E2E verification failed:\n${errors.join('\n')}`);
 }
 
+signalRegistration.dispose();
 console.log(`Composed E2E verification passed; artifacts: ${artifactsRoot}`);

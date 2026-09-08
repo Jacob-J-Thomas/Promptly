@@ -52,7 +52,7 @@ const renderDialog = (
 };
 
 const fillMinimumDraft = () => {
-  fireEvent.change(screen.getByLabelText('External ID'), { target: { value: 'case-new' } });
+  fireEvent.change(screen.getByLabelText(/^External ID/), { target: { value: 'case-new' } });
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New test' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
   const message = screen.getByRole('group', { name: 'Message 1' });
@@ -119,7 +119,7 @@ describe('TestCaseDialog', () => {
     const saved = { ...persistedTest, id: 'created-all-types' };
     vi.mocked(testsApi.create).mockResolvedValue(saved);
     renderDialog();
-    fireEvent.change(screen.getByLabelText('External ID'), { target: { value: 'all-types' } });
+    fireEvent.change(screen.getByLabelText(/^External ID/), { target: { value: 'all-types' } });
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'All expectation types' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
     fireEvent.change(screen.getByLabelText('Content for message 1'), {
@@ -206,7 +206,7 @@ describe('TestCaseDialog', () => {
     vi.mocked(testsApi.update).mockResolvedValue({ ...persistedTest, name: 'Edited' });
     const callbacks = renderDialog(persistedTest);
 
-    expect(screen.getByLabelText('External ID')).toHaveValue('case-1');
+    expect(screen.getByLabelText(/^External ID/)).toHaveValue('case-1');
     expect(screen.getByLabelText('Name')).toHaveValue('Greeting');
     expect(screen.getByLabelText('Content for message 1')).toHaveValue('Hello');
     expect(screen.getByLabelText('Rubric for expectation 1')).toHaveValue('Helpful');
@@ -325,7 +325,7 @@ describe('TestCaseDialog', () => {
     renderDialog(persistedTest);
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
     const yaml = screen.getByLabelText('Test YAML');
-    expect(yaml).toHaveValue(expect.stringContaining('- id: case-1'));
+    expect((yaml as HTMLTextAreaElement).value).toContain('- id: case-1');
     fireEvent.change(yaml, { target: { value: '- id: [broken' } });
     fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
 
@@ -338,7 +338,7 @@ describe('TestCaseDialog', () => {
     renderDialog();
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
 
-    expect(screen.getByLabelText('Test YAML')).toHaveValue(expect.stringContaining('- id:'));
+    expect((screen.getByLabelText('Test YAML') as HTMLTextAreaElement).value).toContain('- id:');
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(screen.getByText(/Repair the YAML errors before saving this test/)).toBeInTheDocument();

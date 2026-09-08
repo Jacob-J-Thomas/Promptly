@@ -231,7 +231,8 @@ describe('SuiteDetail', () => {
       target: { value: 'abc123' },
     });
     expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Run Test Suite' }))
+      .getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run Test Suite' }))
       .not.toBeInTheDocument());
   });
@@ -308,7 +309,8 @@ describe('SuiteDetail', () => {
     expect(screen.getByLabelText(/External ID/)).toHaveValue('chat-002');
     expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create Test Case' }))
+      .getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create Test Case' }))
       .not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Create Test' }));

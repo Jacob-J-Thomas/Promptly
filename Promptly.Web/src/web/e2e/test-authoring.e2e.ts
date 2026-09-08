@@ -160,7 +160,7 @@ test('test authoring persists through Form and YAML and runs through the real st
     prompt: 'Hello from authoring',
   }));
   await createDialog.getByRole('button', { name: 'Add expectation' }).click();
-  await createDialog.getByRole('menuitem', { name: 'Contains text' }).click();
+  await page.getByRole('menuitem', { name: 'Contains text', exact: true }).click();
   await createDialog.getByLabel('Text for expectation 1').fill('Deterministically accurate');
 
   const description = createDialog.getByLabel('Description');

@@ -169,7 +169,7 @@ public sealed class YamlServiceTests
                 ExternalId = "case-1",
                 Name = "Greeting",
                 Description = "Greets the caller",
-                InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"temperature\":0.5,\"enabled\":true,\"metadata\":{\"tags\":[\"demo\",null]}}",
+                InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"temperature\":0.5,\"count\":42,\"enabled\":true,\"disabled\":false,\"metadata\":{\"tags\":[\"demo\",null]}}",
                 ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"Hello\"}]"
             },
             new()
@@ -194,7 +194,9 @@ public sealed class YamlServiceTests
                 Assert.Equal("Greets the caller", testCase.Description);
                 using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
                 Assert.Equal(0.5, input.RootElement.GetProperty("temperature").GetDouble());
+                Assert.Equal(42, input.RootElement.GetProperty("count").GetInt32());
                 Assert.True(input.RootElement.GetProperty("enabled").GetBoolean());
+                Assert.False(input.RootElement.GetProperty("disabled").GetBoolean());
                 Assert.Null(input.RootElement.GetProperty("metadata").GetProperty("tags")[1].GetString());
                 using var expectations = System.Text.Json.JsonDocument.Parse(testCase.ExpectationsJson);
                 Assert.Equal("contains_text", expectations.RootElement[0].GetProperty("type").GetString());
@@ -272,6 +274,84 @@ public sealed class YamlServiceTests
         Assert.Equal("A 'quoted' value &anchor", testCase.Description);
         Assert.Contains("*alias", testCase.InputSpecJson, StringComparison.Ordinal);
         Assert.Contains("!tag", testCase.InputSpecJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeserializeTests_preserves_marker_characters_in_plain_literal_and_folded_scalars()
+    {
+        const string yaml = """
+            - id: marker-case
+              name: Prompt *literal !tag &anchor
+              description: |
+                Block *literal !literal &literal
+                on a second line.
+              input:
+                messages:
+                  - role: user
+                    content: >-
+                      Folded *literal !literal &literal
+              expectations:
+                - type: contains_text
+                  text: hello
+            """;
+
+        var testCase = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Equal("Prompt *literal !tag &anchor", testCase.Name);
+        Assert.Contains("Block *literal !literal &literal", testCase.Description, StringComparison.Ordinal);
+        using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+        Assert.Equal("Folded *literal !literal &literal",
+            input.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public void DeserializeTests_rejects_punctuation_anchors_aliases_and_complex_keys_safely()
+    {
+        const string punctuationAnchor = """
+            - &.metadata
+              id: anchored
+              name: Anchored
+              input:
+                messages:
+                  - role: user
+                    content: hello
+              expectations:
+                - type: contains_text
+                  text: hello
+            """;
+        const string punctuationAlias = "- *.metadata\n";
+        const string complexKey = """
+            - id: complex-key
+              name: Complex key
+              input:
+                messages:
+                  - role: user
+                    content: hello
+                metadata:
+                  ? [complex, key]
+                  : value
+              expectations:
+                - type: contains_text
+                  text: hello
+            """;
+
+        AssertUnsupported(punctuationAnchor);
+        AssertUnsupported(punctuationAlias);
+
+        var complexKeyException = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(complexKey, Guid.NewGuid()));
+        Assert.Contains(complexKeyException.Issues, issue => issue.Code == "invalid_type");
+        Assert.DoesNotContain("YamlException", complexKeyException.Message, StringComparison.Ordinal);
+
+        void AssertUnsupported(string yaml)
+        {
+            var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+                _service.DeserializeTests(yaml, Guid.NewGuid()));
+            Assert.Contains(
+                exception.Issues,
+                issue => issue.Code == "unsupported_value" && issue.Path == "$");
+            Assert.DoesNotContain("AnchorName", exception.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

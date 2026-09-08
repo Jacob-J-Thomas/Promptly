@@ -106,6 +106,68 @@ jobs:
           }
           Write-Host "No vulnerable .NET dependencies reported"
 
+      - name: Diagnose worker lifecycle fixture eight times
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostic_root="artifacts/test-results/csharp/worker-lifecycle"
+          test_name="Promptly.Application.UnitTests.TestRunWorkerServiceTests.Worker_honors_configured_concurrency_and_stop_waits_for_in_flight_processing"
+          rm -rf "$diagnostic_root"
+          mkdir -p "$diagnostic_root"
+
+          for iteration in $(seq 1 8); do
+            results_dir="$diagnostic_root/run-$iteration"
+            mkdir -p "$results_dir"
+            dotnet test tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj \
+              --configuration Release \
+              --no-build \
+              --no-restore \
+              -p:CollectCoverage=false \
+              --filter "FullyQualifiedName~$test_name" \
+              --logger "trx;LogFileName=worker-lifecycle.trx" \
+              --results-directory "$results_dir"
+
+            trx_path="$results_dir/worker-lifecycle.trx"
+            if [[ ! -s "$trx_path" ]]; then
+              echo "Worker lifecycle diagnostic TRX is missing or empty: $trx_path" >&2
+              exit 1
+            fi
+
+            python3 - "$trx_path" "$test_name" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          trx_path, expected_name = sys.argv[1:]
+          root = ET.parse(trx_path).getroot()
+
+          def local_name(tag):
+              return tag.rsplit("}", 1)[-1]
+
+          counters = next(
+              element for element in root.iter()
+              if local_name(element.tag) == "Counters")
+          count = lambda name: int(counters.attrib.get(name, "0"))
+          results = [
+              element for element in root.iter()
+              if local_name(element.tag) == "UnitTestResult"]
+          if (
+              count("total") != 1
+              or count("executed") != 1
+              or count("passed") != 1
+              or count("failed") != 0
+              or count("notExecuted") != 0
+              or len(results) != 1
+              or results[0].attrib.get("testName") != expected_name
+              or results[0].attrib.get("outcome") != "Passed"
+          ):
+              raise SystemExit(
+                  f"Unexpected worker lifecycle diagnostic result in {trx_path}: "
+                  f"counters={counters.attrib!r}, "
+                  f"results={[result.attrib for result in results]!r}")
+          print(f"Verified one passing worker lifecycle test with no skips: {trx_path}")
+          PY
+          done
+
       - name: Run application unit tests and coverage gate
         run: >-
           dotnet test tests/Promptly.Application.UnitTests/Promptly.Application.UnitTests.csproj

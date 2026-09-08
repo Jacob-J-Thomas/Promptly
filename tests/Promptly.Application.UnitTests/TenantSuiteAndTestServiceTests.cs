@@ -499,6 +499,52 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.Equal(originalExpectations, persisted.ExpectationsJson);
     }
 
+    [Fact]
+    public async Task Bulk_import_uses_the_supplied_specification_validator_and_maps_public_issue_paths()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var validator = new RecordingSpecificationValidator();
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance,
+            specificationValidator: validator);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var rows = new List<TestCase>
+        {
+            new()
+            {
+                ExternalId = "spec-validator-one",
+                Name = "first",
+                InputSpecJson = "input-one",
+                ExpectationsJson = "expectations-one"
+            },
+            new()
+            {
+                ExternalId = "spec-validator-two",
+                Name = "second",
+                InputSpecJson = "input-two",
+                ExpectationsJson = "expectations-two"
+            }
+        };
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, rows, scope));
+
+        Assert.Equal(["input-one", "input-two"], validator.InputDocuments);
+        Assert.Equal(["expectations-one", "expectations-two"], validator.ExpectationDocuments);
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "input_issue" && issue.Path == "rows[0].input.messages");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "expectation_issue" && issue.Path == "rows[0].expectations[0].type");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "input_issue" && issue.Path == "rows[1].input.messages");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "expectation_issue" && issue.Path == "rows[1].expectations[0].type");
+        Assert.DoesNotContain(dbContext.TestCases, testCase =>
+            testCase.ExternalId.StartsWith("spec-validator-", StringComparison.Ordinal));
+    }
+
     private static PromptlyDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<PromptlyDbContext>()
@@ -595,6 +641,26 @@ public sealed class TenantSuiteAndTestServiceTests
 
         public ExpectationValidationResult ValidateExpectation(
             IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
+    }
+
+    private sealed class RecordingSpecificationValidator : ITestSpecificationValidator
+    {
+        public List<string> InputDocuments { get; } = [];
+        public List<string> ExpectationDocuments { get; } = [];
+
+        public ExpectationValidationResult Validate(string inputSpecJson, string expectationsJson)
+        {
+            InputDocuments.Add(inputSpecJson);
+            ExpectationDocuments.Add(expectationsJson);
+            return new ExpectationValidationResult(
+            [
+                new("input_issue", "inputSpecJson.messages", "Input was rejected"),
+                new("expectation_issue", "expectationsJson[0].type", "Expectation was rejected")
+            ]);
+        }
+
+        public ExpectationValidationResult ValidateInput(string inputSpecJson) =>
             ExpectationValidationResult.Valid;
     }
 

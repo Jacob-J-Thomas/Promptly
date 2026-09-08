@@ -36,6 +36,16 @@ public sealed class RunExitCodePolicyTests
     }
 
     [Fact]
+    public void An_evaluator_error_takes_precedence_over_assertion_failures()
+    {
+        var exitCode = RunExitCodePolicy.GetExitCode(
+            [Result("Fail"), Result("Error")],
+            CompletedRun());
+
+        Assert.Equal(RunExitCodePolicy.InfrastructureError, exitCode);
+    }
+
+    [Fact]
     public void A_completed_run_with_zero_results_is_an_infrastructure_error()
     {
         var exitCode = RunExitCodePolicy.GetExitCode([], CompletedRun());

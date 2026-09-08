@@ -8,6 +8,7 @@ using Promptly.Application.Models;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using YamlDotNet.Core;
+using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
 
 namespace Promptly.Infrastructure.Services;
@@ -376,6 +377,18 @@ public class YamlService : IYamlService
                             "YAML document exceeds the maximum node count")
                     ];
                 }
+                if (parser.Current is AnchorAlias
+                    || parser.Current is NodeEvent nodeEvent && !nodeEvent.Anchor.IsEmpty
+                    || parser.Current is NodeEvent taggedNode && !taggedNode.Tag.IsEmpty)
+                {
+                    return
+                    [
+                        new ExpectationValidationIssue(
+                            "unsupported_value",
+                            "$",
+                            "YAML anchors, aliases, and tags are not supported")
+                    ];
+                }
             }
         }
         catch (YamlException)
@@ -383,107 +396,8 @@ public class YamlService : IYamlService
             // The representation-model load below produces the stable invalid_yaml issue.
         }
 
-        var issues = new List<ExpectationValidationIssue>();
-        var inSingleQuote = false;
-        var inDoubleQuote = false;
-        var escaped = false;
-        for (var index = 0; index < yaml.Length; index++)
-        {
-            var character = yaml[index];
-            if (character == '\n')
-            {
-                continue;
-            }
-
-            if (inDoubleQuote)
-            {
-                if (escaped)
-                {
-                    escaped = false;
-                }
-                else if (character == '\\')
-                {
-                    escaped = true;
-                }
-                else if (character == '"')
-                {
-                    inDoubleQuote = false;
-                }
-
-                continue;
-            }
-
-            if (inSingleQuote)
-            {
-                if (character == '\'' && index + 1 < yaml.Length && yaml[index + 1] == '\'')
-                {
-                    index++;
-                }
-                else if (character == '\'')
-                {
-                    inSingleQuote = false;
-                }
-
-                continue;
-            }
-
-            if (character == '#')
-            {
-                while (index + 1 < yaml.Length && yaml[index + 1] != '\n')
-                {
-                    index++;
-                }
-
-                continue;
-            }
-
-            if (character == '"')
-            {
-                inDoubleQuote = true;
-                continue;
-            }
-
-            if (character == '\'')
-            {
-                inSingleQuote = true;
-                continue;
-            }
-
-            if (IsYamlTokenStart(yaml, index)
-                && (character == '&' || character == '*')
-                && index + 1 < yaml.Length
-                && IsYamlNameCharacter(yaml[index + 1]))
-            {
-                issues.Add(new(
-                    "unsupported_value",
-                    "$",
-                    "YAML anchors and aliases are not supported"));
-                return issues;
-            }
-
-            if (IsYamlTokenStart(yaml, index)
-                && character == '!'
-                && index + 1 < yaml.Length
-                && yaml[index + 1] != ' ')
-            {
-                issues.Add(new(
-                    "unsupported_value",
-                    "$",
-                    "YAML tags are not supported"));
-                return issues;
-            }
-        }
-
-        return issues;
+        return [];
     }
-
-    private static bool IsYamlNameCharacter(char character) =>
-        char.IsLetterOrDigit(character) || character is '_' or '-';
-
-    private static bool IsYamlTokenStart(string yaml, int index) =>
-        index == 0
-        || char.IsWhiteSpace(yaml[index - 1])
-        || yaml[index - 1] is ':' or ',' or '[' or ']' or '{' or '}' or '-';
 
     private static void ValidateYamlLimits(
         YamlNode node,

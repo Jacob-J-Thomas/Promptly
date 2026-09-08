@@ -448,24 +448,23 @@ describe('TestCaseDialog', () => {
   });
 
   it('rejects an aggregate expectation payload that crosses the wire limit', () => {
-    const storedExpectations = Array.from({ length: 16 }, () => ({
-      type: 'llm_judge',
-      rubric: 'Helpful',
+    const storedExpectations = Array.from({ length: 8 }, () => ({
+      type: 'groundedness',
       min_score: 0.8,
-      model: 'm'.repeat(16_000),
-      provider: 'p',
+      model: 'm'.repeat(16_384),
+      provider: 'p'.repeat(16_384),
     }));
     const baselineBytes = new TextEncoder().encode(JSON.stringify(storedExpectations)).byteLength;
-    storedExpectations[0].provider = 'p'.repeat(1 + 262_143 - baselineBytes);
+    storedExpectations[0].provider = 'p'.repeat(16_384 + 262_143 - baselineBytes);
     const storedExpectationsJson = JSON.stringify(storedExpectations);
     expect(new TextEncoder().encode(storedExpectationsJson).byteLength).toBe(262_143);
     renderDialog({ ...persistedTest, expectationsJson: storedExpectationsJson });
 
-    fireEvent.change(screen.getByLabelText('Rubric for expectation 1'), {
-      target: { value: 'Helpful++' },
+    fireEvent.change(screen.getByLabelText('Minimum score for expectation 1'), {
+      target: { value: '0.888' },
     });
     const changedExpectations = storedExpectations.map((expectation, index) => (
-      index === 0 ? { ...expectation, rubric: 'Helpful++' } : expectation
+      index === 0 ? { ...expectation, min_score: 0.888 } : expectation
     ));
     expect(new TextEncoder().encode(JSON.stringify(changedExpectations)).byteLength).toBe(262_145);
 
@@ -474,7 +473,7 @@ describe('TestCaseDialog', () => {
     expect(screen.getByText(/Fix the highlighted expectation fields before saving this test/))
       .toBeInTheDocument();
     expect(testsApi.update).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Rubric for expectation 1')).toHaveValue('Helpful++');
+    expect(screen.getByLabelText('Minimum score for expectation 1')).toHaveValue(0.888);
   });
 
   it('ignores a completed save after the suite changes', async () => {

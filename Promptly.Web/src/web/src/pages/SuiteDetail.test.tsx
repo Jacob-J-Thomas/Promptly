@@ -446,8 +446,8 @@ describe('SuiteDetail', () => {
 
     await waitFor(() => expect(testsApi.update).toHaveBeenCalledOnce());
     await waitFor(() => expect(testsApi.getBySuite).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('dialog', { name: 'Edit Test Case' })).toBeInTheDocument();
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Edit Test Case' })).toBe(dialog);
+    expect(within(dialog).getByRole('progressbar')).toBeInTheDocument();
 
     resolveRefresh?.();
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Test Case' }))

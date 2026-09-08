@@ -59,6 +59,50 @@ describe('ExpectationListEditor', () => {
     expect(screen.getByText(/AI expectations are evaluated by the configured worker/)).toBeInTheDocument();
   });
 
+  it('displays omitted evaluator defaults without mutating the wire values until edited', () => {
+    const expectations: ExpectationDraft[] = [
+      { type: 'contains_text', text: 'ready' },
+      { type: 'tool_sequence', sequence: ['search'] },
+      { type: 'llm_judge', rubric: 'Judge clearly' },
+      { type: 'groundedness' },
+      { type: 'contains_text', text: 'explicit false', case_insensitive: false },
+      { type: 'tool_sequence', sequence: ['exact false'], exact_sequence: false },
+      { type: 'llm_judge', rubric: 'zero', min_score: 0 },
+      { type: 'groundedness', min_score: '' },
+    ];
+    const original = expectations.map((expectation) => ({
+      ...expectation,
+      ...(Array.isArray(expectation.sequence) ? { sequence: [...expectation.sequence] } : {}),
+    }));
+    const onChange = renderEditor(expectations);
+
+    expect(screen.getByLabelText('Case-insensitive for expectation 1')).toBeChecked();
+    expect(screen.getByLabelText('Exact sequence for expectation 2')).toBeChecked();
+    expect(screen.getByLabelText('Minimum score for expectation 3')).toHaveValue(0.8);
+    expect(screen.getByLabelText('Minimum score for expectation 4')).toHaveValue(0.8);
+    expect(screen.getByLabelText('Case-insensitive for expectation 5')).not.toBeChecked();
+    expect(screen.getByLabelText('Exact sequence for expectation 6')).not.toBeChecked();
+    expect(screen.getByLabelText('Minimum score for expectation 7')).toHaveValue(0);
+    expect(screen.getByLabelText('Minimum score for expectation 8')).toHaveValue(null);
+    expect(expectations).toEqual(original);
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText('Case-insensitive for expectation 1'));
+    expect(onChange).toHaveBeenLastCalledWith([
+      { type: 'contains_text', text: 'ready', case_insensitive: false },
+      ...original.slice(1),
+    ]);
+    fireEvent.change(screen.getByLabelText('Minimum score for expectation 3'), {
+      target: { value: '0.9' },
+    });
+    expect(onChange).toHaveBeenLastCalledWith([
+      ...original.slice(0, 2),
+      { type: 'llm_judge', rubric: 'Judge clearly', min_score: 0.9 },
+      ...original.slice(3),
+    ]);
+    expect(expectations).toEqual(original);
+  });
+
   it('groups add choices as Text, Tools, and AI and emits explicit defaults', () => {
     const onChange = renderEditor([]);
 

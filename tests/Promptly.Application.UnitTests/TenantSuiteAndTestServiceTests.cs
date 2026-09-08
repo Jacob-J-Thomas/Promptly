@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Data;
+using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
@@ -145,16 +146,16 @@ public sealed class TenantSuiteAndTestServiceTests
             "foreign-create",
             "foreign-create",
             null,
-            "{}",
-            "[]",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var updated = await service.UpdateTestCaseAsync(
             graph.SiblingTestCaseId,
             "tampered",
             "tampered",
             null,
-            "{}",
-            "[]",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var deleted = await service.DeleteTestCaseAsync(graph.SiblingTestCaseId, scope);
 
@@ -188,8 +189,8 @@ public sealed class TenantSuiteAndTestServiceTests
             SuiteId = suppliedSuiteId,
             ExternalId = "imported",
             Name = "imported",
-            InputSpecJson = "{}",
-            ExpectationsJson = "[]"
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
         };
 
         var result = await service.BulkCreateTestsAsync(
@@ -201,6 +202,50 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.Equal(suppliedId, supplied.Id);
         Assert.Equal(suppliedSuiteId, supplied.SuiteId);
         Assert.DoesNotContain(dbContext.TestCases, testCase => testCase.ExternalId == "imported");
+    }
+
+    [Fact]
+    public async Task Invalid_later_bulk_row_is_atomic_and_does_not_mutate_callers()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var first = new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = Guid.NewGuid(),
+            ExternalId = "bulk-first",
+            Name = "first",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
+        };
+        var invalidLater = new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = Guid.NewGuid(),
+            ExternalId = "bulk-invalid",
+            Name = "invalid later",
+            InputSpecJson = "{\"messages\":[]}",
+            ExpectationsJson = "[]"
+        };
+        var firstId = first.Id;
+        var firstSuiteId = first.SuiteId;
+        var invalidId = invalidLater.Id;
+        var invalidSuiteId = invalidLater.SuiteId;
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, [first, invalidLater], scope));
+
+        Assert.Contains(exception.Issues, issue => issue.Path.StartsWith("rows[1]", StringComparison.Ordinal));
+        Assert.Equal(firstId, first.Id);
+        Assert.Equal(firstSuiteId, first.SuiteId);
+        Assert.Equal(invalidId, invalidLater.Id);
+        Assert.Equal(invalidSuiteId, invalidLater.SuiteId);
+        Assert.DoesNotContain(dbContext.TestCases, testCase =>
+            testCase.ExternalId is "bulk-first" or "bulk-invalid");
     }
 
     [Fact]
@@ -218,8 +263,8 @@ public sealed class TenantSuiteAndTestServiceTests
             "created",
             "created",
             null,
-            "{}",
-            "[]",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         Assert.NotNull(created);
         var updated = await service.UpdateTestCaseAsync(
@@ -227,8 +272,8 @@ public sealed class TenantSuiteAndTestServiceTests
             "updated",
             "updated",
             "updated",
-            "{\"messages\":[]}",
-            "[]",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            "[{\"type\":\"contains_text\",\"text\":\"ok\"}]",
             scope);
         var imported = await service.BulkCreateTestsAsync(
             graph.AllowedSuiteId,
@@ -236,8 +281,8 @@ public sealed class TenantSuiteAndTestServiceTests
             {
                 ExternalId = "imported",
                 Name = "imported",
-                InputSpecJson = "{}",
-                ExpectationsJson = "[]"
+                InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
             }],
             scope);
         var listed = await service.GetTestCasesBySuiteAsync(graph.AllowedSuiteId, scope);
@@ -251,6 +296,112 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.NotNull(listed);
         Assert.Contains(listed, testCase => testCase.ExternalId == "imported");
         Assert.True(deleted);
+    }
+
+    [Fact]
+    public async Task Owned_test_case_create_rejects_empty_expectations_before_persisting()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+
+        var exception = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "invalid",
+                "invalid",
+                null,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                "[]",
+                scope));
+
+        Assert.NotEmpty(exception.Issues);
+        Assert.Equal("no_expectations", exception.Issues[0].Code);
+        Assert.DoesNotContain(
+            dbContext.TestCases,
+            testCase => testCase.ExternalId == "invalid");
+    }
+
+    [Fact]
+    public async Task Owned_test_case_update_rejects_invalid_expectations_without_mutating_the_row()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+
+        var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(existing);
+        var originalName = existing.Name;
+        var originalExpectations = existing.ExpectationsJson;
+        var exception = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.UpdateTestCaseAsync(
+                graph.AllowedTestCaseId,
+                "updated",
+                "updated",
+                null,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                "[]",
+                scope));
+
+        Assert.NotEmpty(exception.Issues);
+        var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(persisted);
+        Assert.Equal(originalName, persisted.Name);
+        Assert.Equal(originalExpectations, persisted.ExpectationsJson);
+    }
+
+    [Fact]
+    public async Task Owned_test_case_create_and_update_use_the_supplied_validator()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var validator = new RecordingRejectingValidator();
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance,
+            validator);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(existing);
+        var originalName = existing.Name;
+        var originalExpectations = existing.ExpectationsJson;
+
+        var createException = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "supplied-validator-create",
+                "invalid",
+                null,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                "[]",
+                scope));
+        var updateException = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.UpdateTestCaseAsync(
+                graph.AllowedTestCaseId,
+                "supplied-validator-update",
+                "updated",
+                null,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                "[]",
+                scope));
+
+        Assert.Equal(2, validator.Documents.Count);
+        Assert.All(validator.Documents, document => Assert.Equal("[]", document));
+        Assert.Equal("supplied_validator_rejected", createException.Issues[0].Code);
+        Assert.Equal("supplied_validator_rejected", updateException.Issues[0].Code);
+        Assert.DoesNotContain(
+            dbContext.TestCases,
+            testCase => testCase.ExternalId == "supplied-validator-create");
+        var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(persisted);
+        Assert.Equal(originalName, persisted.Name);
+        Assert.Equal(originalExpectations, persisted.ExpectationsJson);
     }
 
     private static PromptlyDbContext CreateDbContext()
@@ -302,7 +453,8 @@ public sealed class TenantSuiteAndTestServiceTests
             otherProject.Id,
             allowedSuite.Id,
             siblingSuite.Id,
-            siblingCase.Id);
+            siblingCase.Id,
+            allowedCase.Id);
     }
 
     private static Project Project(User owner, string name) => new()
@@ -328,9 +480,28 @@ public sealed class TenantSuiteAndTestServiceTests
         SuiteId = suite.Id,
         ExternalId = name,
         Name = name,
-        InputSpecJson = "{}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
+
+    private sealed class RecordingRejectingValidator : IExpectationValidator
+    {
+        public List<string> Documents { get; } = [];
+
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson)
+        {
+            Documents.Add(expectationsJson);
+            return new ExpectationValidationResult(
+            [new ExpectationValidationIssue(
+                "supplied_validator_rejected",
+                "$",
+                "The supplied validator rejected this document")]);
+        }
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
+    }
 
     private sealed record TenantTestGraph(
         string OwnerId,
@@ -339,5 +510,6 @@ public sealed class TenantSuiteAndTestServiceTests
         Guid OtherProjectId,
         Guid AllowedSuiteId,
         Guid SiblingSuiteId,
-        Guid SiblingTestCaseId);
+        Guid SiblingTestCaseId,
+        Guid AllowedTestCaseId);
 }

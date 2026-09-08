@@ -59,6 +59,13 @@ public record ExpectationResult
 {
     public required string ExpectationType { get; init; }
     public bool Passed { get; init; }
+    /// <summary>
+    /// Stable outcome exposed in persisted run metrics. Error is reserved for
+    /// evaluator/worker/validation failures; a false assertion remains Fail.
+    /// </summary>
+    public string Status => ErrorCode is not null
+        ? "Error"
+        : Passed ? "Pass" : "Fail";
     public double Score { get; init; }
     public required string Reason { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

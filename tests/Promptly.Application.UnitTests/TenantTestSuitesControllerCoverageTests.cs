@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -145,10 +146,22 @@ public sealed class TenantTestSuitesControllerCoverageTests
         Assert.IsType<NotFoundObjectResult>(
             await ImportAsync(controller, suite.Id, "tests: []"));
 
-        yaml.DeserializeFailure = new InvalidOperationException("invalid yaml");
+        yaml.DeserializeFailure = new TestSpecificationValidationException(
+            [new ExpectationValidationIssue("invalid_yaml", "$", "YAML document is invalid")]);
         var invalid = Assert.IsType<BadRequestObjectResult>(
             await ImportAsync(controller, suite.Id, "invalid"));
-        Assert.Contains("invalid yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("invalid_yaml", JsonSerializer.Serialize(invalid.Value), StringComparison.Ordinal);
+
+        yaml.DeserializeFailure = null;
+        testCases.BulkFailure = new TestSpecificationValidationException(
+            [new ExpectationValidationIssue(
+                "duplicate_external_id",
+                "rows[0].id",
+                "External ID already exists in this suite")]);
+        var persistenceValidation = Assert.IsType<BadRequestObjectResult>(
+            await ImportAsync(controller, suite.Id, "valid"));
+        Assert.Contains("duplicate_external_id", JsonSerializer.Serialize(persistenceValidation.Value), StringComparison.Ordinal);
+        Assert.DoesNotContain("DbUpdateException", JsonSerializer.Serialize(persistenceValidation.Value), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -217,13 +230,22 @@ public sealed class TenantTestSuitesControllerCoverageTests
         StubTestSuiteService suiteService,
         StubTestCaseService testCaseService,
         StubYamlService yamlService,
-        bool hasScope = true) =>
-        new(
+        bool hasScope = true)
+    {
+        var controller = new TestSuitesController(
             suiteService,
             testCaseService,
             yamlService,
             new StubScopeAccessor(hasScope),
-            NullLogger<TestSuitesController>.Instance);
+            NullLogger<TestSuitesController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        return controller;
+    }
 
     private static TestSuite CreateSuite() => new()
     {
@@ -241,8 +263,8 @@ public sealed class TenantTestSuitesControllerCoverageTests
         ExternalId = externalId,
         Name = $"name-{externalId}",
         Description = "description",
-        InputSpecJson = "{}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private static async Task<IActionResult> ImportAsync(
@@ -323,6 +345,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
     {
         public IReadOnlyList<TestCase>? Listed { get; init; }
         public IReadOnlyList<TestCase>? BulkCreated { get; init; }
+        public Exception? BulkFailure { get; set; }
         public TenantAccessScope? LastScope { get; private set; }
 
         public Task<TestCase?> CreateTestCaseAsync(
@@ -359,6 +382,11 @@ public sealed class TenantTestSuitesControllerCoverageTests
             TenantAccessScope scope)
         {
             LastScope = scope;
+            if (BulkFailure is not null)
+            {
+                throw BulkFailure;
+            }
+
             return Task.FromResult(BulkCreated);
         }
     }

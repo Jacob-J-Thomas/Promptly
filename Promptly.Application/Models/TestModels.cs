@@ -1,3 +1,5 @@
+using Promptly.Application.Interfaces;
+
 namespace Promptly.Application.Models;
 
 // Test Suite models
@@ -60,4 +62,29 @@ public record ImportTestsResponse
     public int ImportedCount { get; init; }
     public List<string> ImportedTestIds { get; init; } = new();
     public List<string> Errors { get; init; } = new();
+}
+
+/// <summary>
+/// Safe structured validation failure shared by JSON and YAML test-spec writes.
+/// </summary>
+public class TestSpecificationValidationException : ArgumentException
+{
+    public TestSpecificationValidationException(IReadOnlyList<ExpectationValidationIssue> issues)
+        : base(string.Join("; ", issues.Select(issue => $"{issue.Path}: {issue.Message}")))
+    {
+        Issues = issues;
+    }
+
+    public IReadOnlyList<ExpectationValidationIssue> Issues { get; }
+}
+
+/// <summary>
+/// Backward-compatible name for expectation-only service validation failures.
+/// </summary>
+public sealed class ExpectationValidationException : TestSpecificationValidationException
+{
+    public ExpectationValidationException(IReadOnlyList<ExpectationValidationIssue> issues)
+        : base(issues)
+    {
+    }
 }

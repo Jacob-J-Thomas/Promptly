@@ -13,6 +13,9 @@ export const EXPECTATION_TYPES = [
 
 export type ExpectationType = (typeof EXPECTATION_TYPES)[number];
 
+export const MAX_EXPECTATION_COUNT = 100;
+const MAX_PATTERN_LENGTH = 512;
+
 /**
  * An expectation is intentionally open ended at this UI boundary. The server
  * remains authoritative for its persisted contract and may add fields that a
@@ -75,9 +78,10 @@ const issue = (
 
 const mapStrictJsonIssue = (
   strictIssue: StrictJsonIssue,
+  rootPath = 'expectationsJson',
 ): ExpectationSpecIssue => issue(
   strictIssue.code,
-  strictIssue.path.replace(/^inputSpecJson/, 'expectationsJson'),
+  strictIssue.path.replace(/^inputSpecJson/, rootPath),
   strictIssue.message.replaceAll('Input JSON', 'Expectation JSON'),
 );
 
@@ -123,6 +127,22 @@ const requireText = (
     errors.push(issue('invalid_type', path, `${label} must be text.`));
   } else if (value.trim().length === 0) {
     errors.push(issue('required', path, `${label} is required.`));
+  }
+};
+
+const requirePattern = (
+  value: unknown,
+  path: string,
+  label: string,
+  errors: ExpectationSpecIssue[],
+) => {
+  requireText(value, path, label, errors);
+  if (typeof value === 'string' && value.length > MAX_PATTERN_LENGTH) {
+    errors.push(issue(
+      'pattern_too_long',
+      path,
+      'Pattern must be 512 characters or fewer.',
+    ));
   }
 };
 
@@ -200,20 +220,13 @@ const validateExpectation = (
       validateBoolean(value.case_insensitive, `${path}.case_insensitive`, 'Case-insensitive flag', errors);
       break;
     case 'regex_match':
-      requireText(value.pattern, `${path}.pattern`, 'Pattern', errors);
-      if (typeof value.pattern === 'string' && value.pattern.length > 512) {
-        errors.push(issue(
-          'pattern_too_long',
-          `${path}.pattern`,
-          'Pattern must be 512 characters or fewer.',
-        ));
-      }
+      requirePattern(value.pattern, `${path}.pattern`, 'Pattern', errors);
       // Do not instantiate RegExp here. Patterns are .NET syntax and the
       // server's bounded engine is the authority for syntax and capabilities.
       validateBoolean(value.case_insensitive, `${path}.case_insensitive`, 'Case-insensitive flag', errors);
       break;
     case 'link_pattern':
-      requireText(value.pattern, `${path}.pattern`, 'Link pattern', errors);
+      requirePattern(value.pattern, `${path}.pattern`, 'Link pattern', errors);
       break;
     case 'tool_called':
       requireText(value.tool_name, `${path}.tool_name`, 'Tool name', errors);
@@ -251,11 +264,21 @@ const validateExpectation = (
   }
 
   ['model', 'provider'].forEach((property) => {
-    if (value[property] !== undefined && typeof value[property] !== 'string') {
+    const metadata = value[property];
+    if (metadata === undefined || metadata === null) {
+      return;
+    }
+    if (typeof metadata !== 'string') {
       errors.push(issue(
         'invalid_type',
         `${path}.${property}`,
         `${property} must be text when present.`,
+      ));
+    } else if (metadata.trim().length === 0) {
+      errors.push(issue(
+        'required',
+        `${path}.${property}`,
+        `${property} must be a nonblank string when present.`,
       ));
     }
   });
@@ -268,6 +291,13 @@ export const validateExpectations = (expectations: readonly unknown[]): Expectat
       'required',
       'expectations',
       'Add at least one expectation before saving this test.',
+    ));
+  }
+  if (expectations.length > MAX_EXPECTATION_COUNT) {
+    errors.push(issue(
+      'too_large',
+      'expectations',
+      'No more than 100 expectations are allowed.',
     ));
   }
   expectations.forEach((expectation, index) => validateExpectation(expectation, index, errors));
@@ -316,5 +346,38 @@ export const serializeExpectations = (
   if (errors.length > 0) {
     return { valid: false, json: null, errors };
   }
-  return { valid: true, json: JSON.stringify(expectations), errors: [] };
+
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(expectations);
+  } catch {
+    return {
+      valid: false,
+      json: null,
+      errors: [issue(
+        'invalid_json',
+        'expectations',
+        'Expectations contain values that cannot be serialized.',
+      )],
+    };
+  }
+  if (typeof json !== 'string') {
+    return {
+      valid: false,
+      json: null,
+      errors: [issue(
+        'invalid_json',
+        'expectations',
+        'Expectations contain values that cannot be serialized.',
+      )],
+    };
+  }
+
+  // Reuse the same strict preflight as imported JSON so form-created output
+  // cannot bypass the byte, depth, scalar, and finite-number bounds.
+  const bounded = parseBoundedJson(json);
+  if (bounded.issue) {
+    return { valid: false, json: null, errors: [mapStrictJsonIssue(bounded.issue, 'expectations')] };
+  }
+  return { valid: true, json, errors: [] };
 };

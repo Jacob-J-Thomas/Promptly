@@ -339,8 +339,8 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
         var suiteName = $"suite-{secret}";
         var testExternalId = $"test-{nonce}";
         var testName = $"test-name-{secret}";
-        var testInput = $"{{\"prompt\":\"input-{secret}\"}}";
-        var testExpectations = $"[{{\"type\":\"contains\",\"value\":\"expect-{secret}\"}}]";
+        var testInput = $"{{\"messages\":[{{\"role\":\"user\",\"content\":\"input-{secret}\"}}]}}";
+        var testExpectations = $"[{{\"type\":\"contains_text\",\"text\":\"expect-{secret}\"}}]";
         var runConfig = $"{{\"runSecret\":\"config-{secret}\"}}";
         var runSummary = $"{{\"summarySecret\":\"summary-{secret}\"}}";
         var resultTrace = $"{{\"traceSecret\":\"trace-{secret}\"}}";
@@ -1241,8 +1241,8 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
                        externalId = testExternalId,
                        name = "API key created test",
                        description = "created by exact-project API key",
-                       inputSpecJson = "{\"prompt\":\"api-key-created\"}",
-                       expectationsJson = "[{\"type\":\"contains\",\"value\":\"created\"}]"
+                       inputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"api-key-created\"}]}",
+                       expectationsJson = "[{\"type\":\"contains_text\",\"text\":\"created\"}]"
                    },
                    cancellationToken))
         {
@@ -1252,7 +1252,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
             Assert.Equal(suiteId, document.RootElement.GetProperty("suiteId").GetGuid());
             Assert.Equal(testExternalId, document.RootElement.GetProperty("externalId").GetString());
             Assert.Equal(
-                "{\"prompt\":\"api-key-created\"}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"api-key-created\"}]}",
                 document.RootElement.GetProperty("inputSpecJson").GetString());
         }
 
@@ -1305,8 +1305,8 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
                        externalId = updatedExternalId,
                        name = "API key updated test",
                        description = "updated by exact-project API key",
-                       inputSpecJson = "{\"prompt\":\"api-key-updated\"}",
-                       expectationsJson = "[{\"type\":\"contains\",\"value\":\"updated\"}]"
+                       inputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"api-key-updated\"}]}",
+                       expectationsJson = "[{\"type\":\"contains_text\",\"text\":\"updated\"}]"
                    },
                    cancellationToken))
         {
@@ -1316,7 +1316,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
             Assert.Equal(updatedExternalId, document.RootElement.GetProperty("externalId").GetString());
             Assert.Equal("API key updated test", document.RootElement.GetProperty("name").GetString());
             Assert.Equal(
-                "{\"prompt\":\"api-key-updated\"}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"api-key-updated\"}]}",
                 document.RootElement.GetProperty("inputSpecJson").GetString());
         }
 
@@ -1333,7 +1333,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
             Assert.Equal(suiteId, document.RootElement.GetProperty("suiteId").GetGuid());
             Assert.Equal(updatedExternalId, document.RootElement.GetProperty("externalId").GetString());
             Assert.Equal(
-                "[{\"type\":\"contains\",\"value\":\"updated\"}]",
+                "[{\"type\":\"contains_text\",\"text\":\"updated\"}]",
                 document.RootElement.GetProperty("expectationsJson").GetString());
         }
 
@@ -1617,10 +1617,12 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
               name: API key imported test
               description: Imported through exact-project API key
               input:
-                prompt: imported-prompt
+                messages:
+                  - role: user
+                    content: imported-prompt
               expectations:
-                - type: contains
-                  value: imported
+                - type: contains_text
+                  text: imported
             """;
         var multipart = new MultipartFormDataContent();
         var file = new StringContent(yaml, Encoding.UTF8);
@@ -1837,10 +1839,12 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
             - id: attacker-import
               name: Attacker import
               input:
-                prompt: denied
+                messages:
+                  - role: user
+                    content: denied
               expectations:
-                - type: contains
-                  value: denied
+                - type: contains_text
+                  text: denied
             """;
         var multipart = new MultipartFormDataContent();
         var file = new StringContent(yaml, Encoding.UTF8);
@@ -1857,8 +1861,8 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
         externalId,
         name = $"name-{externalId}",
         description = "denied",
-        inputSpecJson = "{\"prompt\":\"denied\"}",
-        expectationsJson = "[]"
+        inputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"denied\"}]}",
+        expectationsJson = "[{\"type\":\"contains_text\",\"text\":\"denied\"}]"
     };
 
     private sealed record DeniedOperation(

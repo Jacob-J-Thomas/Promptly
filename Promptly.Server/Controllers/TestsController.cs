@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Application.Services;
 using Promptly.Server.Security;
 
 namespace Promptly.Server.Controllers;
@@ -64,6 +65,14 @@ public class TestsController : ControllerBase
             };
 
             return CreatedAtAction(nameof(GetTestCase), new { id = testCase.Id }, response);
+        }
+        catch (TestSpecificationValidationException validationException)
+        {
+            return BadRequest(new
+            {
+                message = "Invalid test specification",
+                errors = validationException.Issues
+            });
         }
         catch (Exception ex)
         {
@@ -191,6 +200,14 @@ public class TestsController : ControllerBase
             };
 
             return Ok(response);
+        }
+        catch (TestSpecificationValidationException validationException)
+        {
+            return BadRequest(new
+            {
+                message = "Invalid test specification",
+                errors = validationException.Issues
+            });
         }
         catch (Exception ex)
         {

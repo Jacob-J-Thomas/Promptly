@@ -1,8 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using Promptly.Server.Controllers;
 using Promptly.Server.Security;
@@ -88,6 +90,29 @@ public sealed class TenantTestsControllerCoverageTests
         Assert.All(results, result => Assert.IsType<NotFoundObjectResult>(result));
     }
 
+    [Fact]
+    public async Task Validation_failures_are_returned_as_safe_structured_bad_requests()
+    {
+        var service = new StubTestCaseService
+        {
+            Failure = new TestSpecificationValidationException(
+                [new ExpectationValidationIssue(
+                    "invalid_type",
+                    "inputSpecJson.messages",
+                    "Messages must be a non-empty array")])
+        };
+        var controller = CreateController(service);
+
+        var result = Assert.IsType<BadRequestObjectResult>(await controller.CreateTestCase(
+            Guid.NewGuid(),
+            CreateRequest()));
+
+        var body = JsonSerializer.Serialize(result.Value);
+        Assert.Contains("invalid_type", body, StringComparison.Ordinal);
+        Assert.Contains("inputSpecJson.messages", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("TestSpecificationValidationException", body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(TestAction.Create)]
     [InlineData(TestAction.List)]
@@ -104,6 +129,34 @@ public sealed class TenantTestsControllerCoverageTests
         var result = await InvokeAsync(controller, action);
 
         Assert.Equal(500, Assert.IsType<ObjectResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task Validation_failures_from_create_and_update_return_the_issue_contract()
+    {
+        var service = new StubTestCaseService
+        {
+            ExpectationFailure = new ExpectationValidationException(
+            [new ExpectationValidationIssue(
+                "invalid_expectation",
+                "$[0]",
+                "The expectation is invalid")])
+        };
+        var controller = CreateController(service);
+
+        var create = Assert.IsType<BadRequestObjectResult>(await controller.CreateTestCase(
+            Guid.NewGuid(),
+            CreateRequest()));
+        var update = Assert.IsType<BadRequestObjectResult>(await controller.UpdateTestCase(
+            Guid.NewGuid(),
+            UpdateRequest()));
+
+        var createPayload = JsonSerializer.Serialize(create.Value);
+        var updatePayload = JsonSerializer.Serialize(update.Value);
+        Assert.Contains("Invalid test specification", createPayload, StringComparison.Ordinal);
+        Assert.Contains("invalid_expectation", createPayload, StringComparison.Ordinal);
+        Assert.Contains("Invalid test specification", updatePayload, StringComparison.Ordinal);
+        Assert.Contains("invalid_expectation", updatePayload, StringComparison.Ordinal);
     }
 
     private static Task<IActionResult> InvokeAsync(TestsController controller, TestAction action)
@@ -133,8 +186,8 @@ public sealed class TenantTestsControllerCoverageTests
         ExternalId = "external",
         Name = "test name",
         Description = "description",
-        InputSpecJson = "{\"prompt\":\"hello\"}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private static UpdateTestCaseRequest UpdateRequest() => new()
@@ -142,8 +195,8 @@ public sealed class TenantTestsControllerCoverageTests
         ExternalId = "external-updated",
         Name = "updated test name",
         Description = "updated description",
-        InputSpecJson = "{\"prompt\":\"updated\"}",
-        ExpectationsJson = "[{\"type\":\"contains\",\"value\":\"ok\"}]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"updated\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"updated\"}]"
     };
 
     private static TestCase CreateTestCase() => new()
@@ -153,8 +206,8 @@ public sealed class TenantTestsControllerCoverageTests
         ExternalId = "external",
         Name = "test name",
         Description = "description",
-        InputSpecJson = "{\"prompt\":\"hello\"}",
-        ExpectationsJson = "[]",
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]",
         CreatedAt = new DateTime(2026, 8, 12, 1, 2, 3, DateTimeKind.Utc)
     };
 
@@ -195,6 +248,7 @@ public sealed class TenantTestsControllerCoverageTests
         public TestCase? Loaded { get; init; }
         public TestCase? Updated { get; init; }
         public bool Deleted { get; init; }
+        public ExpectationValidationException? ExpectationFailure { get; init; }
         public Exception? Failure { get; init; }
         public int CallCount { get; private set; }
         public Guid LastId { get; private set; }
@@ -241,6 +295,11 @@ public sealed class TenantTestsControllerCoverageTests
             if (Failure is not null)
             {
                 throw Failure;
+            }
+
+            if (ExpectationFailure is not null)
+            {
+                throw ExpectationFailure;
             }
 
             return Task.FromResult(value);

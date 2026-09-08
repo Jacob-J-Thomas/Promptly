@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Promptly.Sdk.DotNet;
 
@@ -176,6 +177,7 @@ public record TestRunResponse
     public Guid EnvironmentId { get; init; }
     public Guid EndpointId { get; init; }
     public Guid MappingSpecId { get; init; }
+    [JsonConverter(typeof(TestRunStatusStringConverter))]
     public required string Status { get; init; }
     public string? SummaryJson { get; init; }
     public string? GitCommitHash { get; init; }
@@ -192,6 +194,7 @@ public record TestRunResultResponse
     public Guid Id { get; init; }
     public Guid RunId { get; init; }
     public Guid TestCaseId { get; init; }
+    [JsonConverter(typeof(TestResultStatusStringConverter))]
     public required string Status { get; init; }
     public string? TraceJson { get; init; }
     public string? MetricsJson { get; init; }

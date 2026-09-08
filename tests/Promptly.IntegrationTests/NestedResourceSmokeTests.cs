@@ -19,10 +19,12 @@ public sealed class NestedResourceSmokeTests(IntegrationFixture fixture)
               name: YAML integration case
               description: Import persistence smoke
               input:
-                prompt: hello
+                messages:
+                  - role: user
+                    content: hello
               expectations:
-                - type: contains
-                  value: hello
+                - type: contains_text
+                  text: hello
             """;
 
         using var multipart = new MultipartFormDataContent();
@@ -57,7 +59,7 @@ public sealed class NestedResourceSmokeTests(IntegrationFixture fixture)
         Assert.Equal(externalId, imported.GetProperty("externalId").GetString());
         Assert.Equal("YAML integration case", imported.GetProperty("name").GetString());
         Assert.Contains(
-            "\"prompt\":\"hello\"",
+            "\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]",
             imported.GetProperty("inputSpecJson").GetString(),
             StringComparison.Ordinal);
     }

@@ -159,6 +159,8 @@ builder.Services.AddScoped<IJsonPathService, JsonPathService>();
 builder.Services.AddScoped<IMappingService, MappingService>();
 builder.Services.AddScoped<ITestSuiteService, TestSuiteService>();
 builder.Services.AddScoped<ITestCaseService, TestCaseService>();
+builder.Services.AddSingleton<IExpectationValidator, ExpectationDslValidator>();
+builder.Services.AddSingleton<ITestSpecificationValidator, TestSpecificationValidator>();
 builder.Services.AddScoped<IYamlService, YamlService>();
 builder.Services.AddScoped<ITestRunService, TestRunService>();
 builder.Services.AddScoped<ITestRunWorkerStore, TestRunWorkerStore>();

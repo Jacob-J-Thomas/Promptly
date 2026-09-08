@@ -56,23 +56,36 @@ const replaceYaml = async (page: Page, value: string) => {
   await expect(editorSurface).toBeVisible();
   await editorSurface.click();
   await expect(editor).toBeFocused();
-  await editor.press('ControlOrMeta+A');
-  await editor.press('Backspace');
-  await page.keyboard.insertText(value);
-  await editor.press('ControlOrMeta+A');
-  const actualText = await editor.evaluate((element) => {
-    if (element instanceof HTMLTextAreaElement) {
-      return element.value;
-    }
-    const editContext = (element as HTMLElement & {
-      editContext?: { text?: string };
-    }).editContext;
-    if (!editContext || typeof editContext.text !== 'string') {
-      throw new Error('Monaco editor did not expose its native EditContext text.');
-    }
-    return editContext.text;
+  const context = page.context();
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: new URL(page.url()).origin,
   });
-  expect(actualText.replace(/\r\n/g, '\n')).toBe(value.replace(/\r\n/g, '\n'));
+  try {
+    // Native Monaco treats insertText as typing, including auto-indent and
+    // bracket completion. Paste preserves the supplied document verbatim.
+    await page.evaluate(async (text) => navigator.clipboard.writeText(text), value);
+    await editor.press('ControlOrMeta+A');
+    await page.keyboard.press('ControlOrMeta+V');
+    await expect.poll(async () => {
+      // EditContext exposes only the selected lines; select all before reading.
+      await editor.press('ControlOrMeta+A');
+      const actualText = await editor.evaluate((element) => {
+        if (element instanceof HTMLTextAreaElement) {
+          return element.value;
+        }
+        const editContext = (element as HTMLElement & {
+          editContext?: { text?: string };
+        }).editContext;
+        if (!editContext || typeof editContext.text !== 'string') {
+          throw new Error('Monaco editor did not expose its native EditContext text.');
+        }
+        return editContext.text;
+      });
+      return actualText.replace(/\r\n/g, '\n');
+    }).toBe(value.replace(/\r\n/g, '\n'));
+  } finally {
+    await context.clearPermissions();
+  }
   await editor.press('ArrowRight');
 };
 

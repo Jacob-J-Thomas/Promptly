@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Interfaces;
@@ -105,7 +106,7 @@ public sealed class TenantTestsControllerCoverageTests
             Guid.NewGuid(),
             CreateRequest()));
 
-        var body = result.Value!.ToString()!;
+        var body = JsonSerializer.Serialize(result.Value);
         Assert.Contains("invalid_type", body, StringComparison.Ordinal);
         Assert.Contains("inputSpecJson.messages", body, StringComparison.Ordinal);
         Assert.DoesNotContain("TestSpecificationValidationException", body, StringComparison.Ordinal);

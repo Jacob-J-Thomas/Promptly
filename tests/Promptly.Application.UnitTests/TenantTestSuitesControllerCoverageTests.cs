@@ -229,13 +229,22 @@ public sealed class TenantTestSuitesControllerCoverageTests
         StubTestSuiteService suiteService,
         StubTestCaseService testCaseService,
         StubYamlService yamlService,
-        bool hasScope = true) =>
-        new(
+        bool hasScope = true)
+    {
+        var controller = new TestSuitesController(
             suiteService,
             testCaseService,
             yamlService,
             new StubScopeAccessor(hasScope),
-            NullLogger<TestSuitesController>.Instance);
+            NullLogger<TestSuitesController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        return controller;
+    }
 
     private static TestSuite CreateSuite() => new()
     {

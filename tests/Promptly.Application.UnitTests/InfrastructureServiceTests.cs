@@ -184,12 +184,12 @@ public sealed class YamlServiceTests
         var yaml = _service.SerializeTests(original);
         var roundTripped = _service.DeserializeTests(yaml, Guid.NewGuid());
 
-        Assert.Contains("id: case-1", yaml, StringComparison.Ordinal);
         Assert.DoesNotContain("value_kind", yaml, StringComparison.Ordinal);
         Assert.Collection(
             roundTripped,
             testCase =>
             {
+                Assert.Equal("case-1", testCase.ExternalId);
                 Assert.Equal("Greeting", testCase.Name);
                 Assert.Equal("Greets the caller", testCase.Description);
                 using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
@@ -201,6 +201,7 @@ public sealed class YamlServiceTests
             },
             testCase =>
             {
+                Assert.Equal("case-2", testCase.ExternalId);
                 Assert.Null(testCase.Description);
                 using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
                 Assert.True(input.RootElement.GetProperty("metadata").ValueKind == System.Text.Json.JsonValueKind.Null);

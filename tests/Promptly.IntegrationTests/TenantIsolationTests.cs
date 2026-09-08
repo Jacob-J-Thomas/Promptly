@@ -339,7 +339,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
         var suiteName = $"suite-{secret}";
         var testExternalId = $"test-{nonce}";
         var testName = $"test-name-{secret}";
-        var testInput = $"{{\"prompt\":\"input-{secret}\"}}";
+        var testInput = $"{{\"messages\":[{{\"role\":\"user\",\"content\":\"input-{secret}\"}}]}}";
         var testExpectations = $"[{{\"type\":\"contains_text\",\"text\":\"expect-{secret}\"}}]";
         var runConfig = $"{{\"runSecret\":\"config-{secret}\"}}";
         var runSummary = $"{{\"summarySecret\":\"summary-{secret}\"}}";

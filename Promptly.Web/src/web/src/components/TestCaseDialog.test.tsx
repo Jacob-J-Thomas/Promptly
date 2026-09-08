@@ -53,7 +53,7 @@ const renderDialog = (
 
 const fillMinimumDraft = () => {
   fireEvent.change(screen.getByLabelText(/^External ID/), { target: { value: 'case-new' } });
-  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New test' } });
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'New test' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
   const message = screen.getByRole('group', { name: 'Message 1' });
   fireEvent.mouseDown(within(message).getByRole('combobox'));
@@ -120,7 +120,7 @@ describe('TestCaseDialog', () => {
     vi.mocked(testsApi.create).mockResolvedValue(saved);
     renderDialog();
     fireEvent.change(screen.getByLabelText(/^External ID/), { target: { value: 'all-types' } });
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'All expectation types' } });
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'All expectation types' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
     fireEvent.change(screen.getByLabelText('Content for message 1'), {
       target: { value: 'system guidance' },
@@ -207,10 +207,10 @@ describe('TestCaseDialog', () => {
     const callbacks = renderDialog(persistedTest);
 
     expect(screen.getByLabelText(/^External ID/)).toHaveValue('case-1');
-    expect(screen.getByLabelText('Name')).toHaveValue('Greeting');
+    expect(screen.getByLabelText(/^Name/)).toHaveValue('Greeting');
     expect(screen.getByLabelText('Content for message 1')).toHaveValue('Hello');
     expect(screen.getByLabelText('Rubric for expectation 1')).toHaveValue('Helpful');
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Edited' } });
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Edited' } });
     fireEvent.change(screen.getByLabelText('Content for message 1'), {
       target: { value: 'Updated hello' },
     });
@@ -236,12 +236,12 @@ describe('TestCaseDialog', () => {
 
     expect(await screen.findByText('Unable to save this test. Your draft is still here.'))
       .toBeInTheDocument();
-    expect(screen.getByLabelText('Name')).toHaveValue('New test');
+    expect(screen.getByLabelText(/^Name/)).toHaveValue('New test');
     expect(screen.getByLabelText('Content for message 1')).toHaveValue('Hello from dialog');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Cancel' })).toBeEnabled();
     expect(screen.queryByText('database secret should not render')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Cancel' }));
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
 

@@ -309,7 +309,7 @@ describe('SuiteDetail', () => {
     expect(screen.getByLabelText(/External ID/)).toHaveValue('chat-002');
     expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create Test Case' }))
+    fireEvent.click(within(screen.getByRole('alert'))
       .getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create Test Case' }))
       .not.toBeInTheDocument());

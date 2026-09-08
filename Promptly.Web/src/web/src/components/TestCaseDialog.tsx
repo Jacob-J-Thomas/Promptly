@@ -303,6 +303,13 @@ export const TestCaseDialog: React.FC<TestCaseDialogProps> = ({
 
   const saveDraft = async (currentDraft: TestCaseDraft) => {
     const inputSpecJson = serializeInputSpec(currentDraft.messages, currentDraft.inputMetadata);
+    const serializedInput = parseInputSpecJson(inputSpecJson);
+    if (!serializedInput.valid) {
+      setInputErrors(serializedInput.errors);
+      setSaveError('Fix the highlighted input fields before saving this test.');
+      setSaveIssues(formatMessageIssues(serializedInput.errors));
+      return;
+    }
     const serializedExpectations = serializeExpectations(currentDraft.expectations);
     if (!serializedExpectations.valid || !serializedExpectations.json) {
       setSaveError('Fix the highlighted expectation fields before saving this test.');

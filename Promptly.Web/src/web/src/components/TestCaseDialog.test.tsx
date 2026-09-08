@@ -93,6 +93,28 @@ describe('TestCaseDialog', () => {
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
 
+  it('rejects an oversized serialized input aggregate before calling the API', async () => {
+    renderDialog();
+    fillMinimumDraft();
+    const oversizedMessage = 'x'.repeat(16_384);
+    for (let index = 2; index <= 17; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
+      fireEvent.change(screen.getByLabelText(`Content for message ${index}`), {
+        target: { value: oversizedMessage },
+      });
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(testsApi.create).not.toHaveBeenCalled();
+    expect(await screen.findByText('Fix the highlighted input fields before saving this test.'))
+      .toBeInTheDocument();
+    expect(screen.getByText(
+      'input: Input JSON exceeds the 262144-byte limit.',
+    )).toBeInTheDocument();
+    expect(screen.getByLabelText('Content for message 17')).toHaveValue(oversizedMessage);
+  });
+
   it('authors all eight expectation types and preserves ordered message edits', async () => {
     const saved = { ...persistedTest, id: 'created-all-types' };
     vi.mocked(testsApi.create).mockResolvedValue(saved);

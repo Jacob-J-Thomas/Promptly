@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assertDirectFixtureBoundary,
+  assertProviderEvidence,
   evaluatePhaseReceipts,
 } from './phase-verification.mjs';
 
@@ -22,6 +23,12 @@ const validPhaseResults = () => [
 
 test('accepts exactly two successful, upload-safe, cleaned phases', () => {
   assert.deepEqual(evaluatePhaseReceipts(validPhaseResults()), { passed: true, failures: [] });
+});
+
+test('cancellation prevents a successful aggregate even when phase receipts passed', () => {
+  const result = evaluatePhaseReceipts(validPhaseResults(), ['proxy', 'direct'], 'SIGTERM');
+  assert.equal(result.passed, false);
+  assert.match(result.failures.join('; '), /orchestrator received SIGTERM/);
 });
 
 for (const [name, results, expected] of [
@@ -81,6 +88,35 @@ const validFixture = () => ({
 
 test('accepts the exact direct fixture boundary', () => {
   assert.equal(assertDirectFixtureBoundary(validFixture()), true);
+});
+
+const expectedCorrelation = '123e4567-e89b-12d3-a456-426614174000';
+const validProviderRecord = (correlationId = expectedCorrelation) => ({
+  authorized: true,
+  correlation_id: correlationId,
+  kind: 'chat_completion',
+  message_count: 1,
+  method: 'POST',
+  model: 'verification-model',
+  path: '/v1/chat/completions',
+  sequence: 1,
+  valid_json: true,
+});
+
+test('accepts direct provider evidence bound to the runner correlation', () => {
+  assert.equal(assertProviderEvidence([validProviderRecord()], {
+    phase: 'direct',
+    expectedCorrelation,
+  }), true);
+});
+
+test('rejects a different valid UUID from the runner correlation', () => {
+  assert.throws(
+    () => assertProviderEvidence([
+      validProviderRecord('987e6543-e21b-12d3-a456-426614174000'),
+    ], { phase: 'direct', expectedCorrelation }),
+    /correlation does not match the runner scenario/,
+  );
 });
 
 for (const [name, mutate, expected] of [

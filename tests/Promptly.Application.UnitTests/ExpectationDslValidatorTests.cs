@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using Promptly.Application.Interfaces;
 using Promptly.Application.Services;
 using Promptly.Domain.ValueObjects;
 

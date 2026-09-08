@@ -492,7 +492,8 @@ public sealed class ExpectationEvaluatorTests
 
         var result = await evaluator.EvaluateAsync(
             Expectation("legacy_expectation"),
-            Trace("hello"));
+            Trace("hello"),
+            TestContext.Current.CancellationToken);
 
         Assert.False(result.Passed);
         Assert.Equal("legacy_expectation", result.ExpectationType);
@@ -510,10 +511,11 @@ public sealed class ExpectationEvaluatorTests
         var result = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 Expectation(expectationType),
-                Trace("response"));
+                Trace("response"),
+                TestContext.Current.CancellationToken);
 
         Assert.Equal(expectedPassed, result.Passed);
-        Assert.Equal(0.0, result.Score);
+        Assert.Equal(expectedPassed ? 1.0 : 0.0, result.Score);
     }
 
     [Theory]
@@ -525,7 +527,8 @@ public sealed class ExpectationEvaluatorTests
         var result = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 Expectation(expectationType),
-                Trace("response"));
+                Trace("response"),
+                TestContext.Current.CancellationToken);
 
         Assert.False(result.Passed);
         Assert.Equal("invalid_regex_pattern", result.ErrorCode);
@@ -550,7 +553,8 @@ public sealed class ExpectationEvaluatorTests
         var result = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(status, [], null))).EvaluateAsync(
                 Expectation("regex_match", ("pattern", "a+")),
-                Trace("aaa"));
+                Trace("aaa"),
+                TestContext.Current.CancellationToken);
 
         Assert.False(result.Passed);
         Assert.Equal(expectedCode, result.ErrorCode);
@@ -566,7 +570,8 @@ public sealed class ExpectationEvaluatorTests
                 [],
                 "URL scan timed out"))).EvaluateAsync(
                     Expectation("link_pattern", ("pattern", "example")),
-                    Trace("https://example.com"));
+                    Trace("https://example.com"),
+                    TestContext.Current.CancellationToken);
 
         Assert.Equal("regex_timeout", result.ErrorCode);
         Assert.Equal("URL scan timed out", result.Reason);
@@ -586,7 +591,8 @@ public sealed class ExpectationEvaluatorTests
 
         var result = await PermissiveEvaluator(matcher).EvaluateAsync(
             Expectation("link_pattern", ("pattern", "example")),
-            Trace("https://example.com"));
+            Trace("https://example.com"),
+            TestContext.Current.CancellationToken);
 
         Assert.Equal("unsupported_regex_construct", result.ErrorCode);
         Assert.Equal("candidate matcher rejected pattern", result.Reason);
@@ -598,7 +604,8 @@ public sealed class ExpectationEvaluatorTests
         var result = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult((BoundedRegexStatus)999, [], null))).EvaluateAsync(
                 Expectation("regex_match", ("pattern", "a+")),
-                Trace("aaa"));
+                Trace("aaa"),
+                TestContext.Current.CancellationToken);
 
         Assert.Equal("regex_evaluation_error", result.ErrorCode);
         Assert.Equal("Regex evaluation failed", result.Reason);
@@ -614,11 +621,13 @@ public sealed class ExpectationEvaluatorTests
         var jsonResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 jsonExpectation,
-                TraceWithTools("search"));
+                TraceWithTools("search"),
+                TestContext.Current.CancellationToken);
         var nativeResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 Expectation("tool_called", ("tool_name", null!)),
-                TraceWithTools("search"));
+                TraceWithTools("search"),
+                TestContext.Current.CancellationToken);
 
         Assert.False(jsonResult.Passed);
         Assert.False(nativeResult.Passed);
@@ -636,11 +645,13 @@ public sealed class ExpectationEvaluatorTests
         var jsonResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 jsonExpectation,
-                Trace("hello"));
+                Trace("hello"),
+                TestContext.Current.CancellationToken);
         var nativeResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 Expectation("contains_text", ("text", "HELLO"), ("case_insensitive", "yes")),
-                Trace("hello"));
+                Trace("hello"),
+                TestContext.Current.CancellationToken);
 
         Assert.False(jsonResult.Passed);
         Assert.True(nativeResult.Passed);
@@ -656,15 +667,18 @@ public sealed class ExpectationEvaluatorTests
         var jsonResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 jsonExpectation,
-                TraceWithTools("search"));
+                TraceWithTools("search"),
+                TestContext.Current.CancellationToken);
         var nativeResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 Expectation("tool_sequence", ("sequence", null!)),
-                TraceWithTools("search"));
+                TraceWithTools("search"),
+                TestContext.Current.CancellationToken);
         var missingResult = await PermissiveEvaluator(new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []))).EvaluateAsync(
                 Expectation("tool_sequence"),
-                TraceWithTools("search"));
+                TraceWithTools("search"),
+                TestContext.Current.CancellationToken);
 
         Assert.Equal("invalid_tool_sequence", jsonResult.ErrorCode);
         Assert.Equal("invalid_tool_sequence", nativeResult.ErrorCode);
@@ -680,7 +694,8 @@ public sealed class ExpectationEvaluatorTests
                     "tool_sequence",
                     ("sequence", new List<string> { "search" }),
                     ("exact_sequence", false)),
-                Trace());
+                Trace(),
+                TestContext.Current.CancellationToken);
 
         Assert.False(result.Passed);
         Assert.Null(result.ErrorCode);
@@ -693,13 +708,15 @@ public sealed class ExpectationEvaluatorTests
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []));
         await PermissiveEvaluator(exhaustionMatcher).EvaluateAsync(
             Expectation("regex_match", ("pattern", "a")),
-            Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 1), "later"));
+            Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 1), "later"),
+            TestContext.Current.CancellationToken);
 
         var truncationMatcher = new StubRegexMatcher(
             new BoundedRegexMatchResult(BoundedRegexStatus.Completed, []));
         await PermissiveEvaluator(truncationMatcher).EvaluateAsync(
             Expectation("regex_match", ("pattern", "a")),
-            Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 2)));
+            Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 2)),
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(BoundedRegexMatcher.MaxInputLength + 1, exhaustionMatcher.LastInput!.Length);
         Assert.Equal(BoundedRegexMatcher.MaxInputLength + 1, truncationMatcher.LastInput!.Length);

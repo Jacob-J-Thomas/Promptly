@@ -229,7 +229,7 @@ public sealed class TestRunProcessorCoverageTests
     [Theory]
     [InlineData("42")]
     [InlineData("null")]
-    public async Task ProcessRunAsync_handles_legacy_non_string_expectation_types(
+    public async Task ProcessRunAsync_handles_injected_validator_legacy_non_string_expectation_types(
         string serializedType)
     {
         await using var dbContext = CreateDbContext();
@@ -283,7 +283,7 @@ public sealed class TestRunProcessorCoverageTests
     }
 
     [Fact]
-    public async Task ProcessRunAsync_routes_legacy_unknown_types_through_the_fallback_result()
+    public async Task ProcessRunAsync_routes_injected_validator_legacy_unknown_types_through_the_fallback_result()
     {
         await using var dbContext = CreateDbContext();
         var suiteId = Guid.NewGuid();
@@ -595,7 +595,7 @@ public sealed class TestRunProcessorCoverageTests
     }
 
     [Fact]
-    public async Task ProcessRunAsync_evaluates_a_legacy_llm_judge_with_omitted_optional_fields()
+    public async Task ProcessRunAsync_evaluates_an_injected_validator_legacy_llm_judge_with_omitted_optional_fields()
     {
         await using var dbContext = CreateDbContext();
         var suiteId = Guid.NewGuid();

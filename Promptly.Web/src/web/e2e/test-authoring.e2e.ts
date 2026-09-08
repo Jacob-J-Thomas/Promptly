@@ -168,7 +168,8 @@ test('test authoring persists through Form and YAML and runs through the real st
   }
   const externalMonacoRequests: string[] = [];
   page.on('request', (request) => {
-    if (/cdn\.jsdelivr\.net|unpkg\.com/.test(request.url())) {
+    const hostname = new URL(request.url()).hostname;
+    if (hostname === 'cdn.jsdelivr.net' || hostname === 'unpkg.com') {
       externalMonacoRequests.push(request.url());
     }
   });

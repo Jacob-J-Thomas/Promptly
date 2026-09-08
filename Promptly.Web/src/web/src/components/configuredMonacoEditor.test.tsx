@@ -32,10 +32,10 @@ vi.mock('@monaco-editor/react', () => ({
 }));
 
 vi.mock('monaco-editor', () => ({ editor: {} }));
-vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({
+vi.mock('monaco-editor/editor/editor.worker.js?worker', () => ({
   default: editorWorker,
 }));
-vi.mock('monaco-editor/esm/vs/language/json/json.worker?worker', () => ({
+vi.mock('monaco-editor/language/json/json.worker.js?worker', () => ({
   default: jsonWorker,
 }));
 

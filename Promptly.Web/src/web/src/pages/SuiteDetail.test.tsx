@@ -29,6 +29,24 @@ vi.mock('../components/Layout', () => ({
   Layout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('../components/configuredMonacoEditor', () => ({
+  default: ({
+    value,
+    onChange,
+    options,
+  }: {
+    value?: string;
+    onChange?: (value: string | undefined) => void;
+    options?: { ariaLabel?: string };
+  }) => (
+    <textarea
+      aria-label={options?.ariaLabel}
+      value={value ?? ''}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  ),
+}));
+
 vi.mock('../components/RunConfigDialog', () => ({
   RunConfigDialog: ({
     open,

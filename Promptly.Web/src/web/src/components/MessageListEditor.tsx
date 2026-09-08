@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -31,6 +31,27 @@ export const MessageListEditor: React.FC<MessageListEditorProps> = ({
   onChange,
   disabled = false,
 }) => {
+  const nextRowId = useRef(messages.length);
+  const [rowKeys, setRowKeys] = useState<string[]>(() => (
+    messages.map((_, index) => `message-row-${index}`)
+  ));
+  useEffect(() => {
+    setRowKeys((current) => {
+      if (current.length === messages.length) {
+        return current;
+      }
+      if (current.length > messages.length) {
+        return current.slice(0, messages.length);
+      }
+      return [
+        ...current,
+        ...Array.from(
+          { length: messages.length - current.length },
+          () => `message-row-${nextRowId.current++}`,
+        ),
+      ];
+    });
+  }, [messages.length]);
   const issues = validateMessages(messages);
   const messageErrors = (index: number, field: string) => issues.find(
     (issue) => issue.path === `messages[${index}].${field}`,
@@ -39,18 +60,21 @@ export const MessageListEditor: React.FC<MessageListEditorProps> = ({
 
   const updateMessage = (index: number, update: Partial<ConversationMessage>) => {
     onChange(messages.map((message, messageIndex) => (
-      messageIndex === index ? { ...message, ...update } : { ...message }
+      messageIndex === index ? { ...message, ...update } : message
     )));
   };
 
   const addMessage = () => {
+    const rowKey = `message-row-${nextRowId.current++}`;
+    setRowKeys([...rowKeys, rowKey]);
     onChange([
-      ...messages.map((message) => ({ ...message })),
+      ...messages,
       { role: 'user', content: '' },
     ]);
   };
 
   const deleteMessage = (index: number) => {
+    setRowKeys(rowKeys.filter((_, messageIndex) => messageIndex !== index));
     onChange(messages.filter((_, messageIndex) => messageIndex !== index));
   };
 
@@ -60,11 +84,17 @@ export const MessageListEditor: React.FC<MessageListEditorProps> = ({
       return;
     }
 
-    const nextMessages = messages.map((message) => ({ ...message }));
+    const nextMessages = [...messages];
+    const nextRowKeys = [...rowKeys];
     [nextMessages[index], nextMessages[destination]] = [
       nextMessages[destination],
       nextMessages[index],
     ];
+    [nextRowKeys[index], nextRowKeys[destination]] = [
+      nextRowKeys[destination],
+      nextRowKeys[index],
+    ];
+    setRowKeys(nextRowKeys);
     onChange(nextMessages);
   };
 
@@ -120,7 +150,7 @@ export const MessageListEditor: React.FC<MessageListEditorProps> = ({
 
           return (
             <Box
-              key={index}
+              key={rowKeys[index] ?? `message-row-pending-${index}`}
               role="group"
               aria-label={`Message ${index + 1}`}
               sx={{

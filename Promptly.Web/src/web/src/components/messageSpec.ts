@@ -1,4 +1,10 @@
+import {
+  MAX_JSON_SCALAR_LENGTH,
+  parseBoundedJson,
+} from './strictJson';
+
 export const MESSAGE_ROLES = ['system', 'user', 'assistant'] as const;
+export const MAX_MESSAGE_COUNT = 100;
 
 export type MessageRole = (typeof MESSAGE_ROLES)[number];
 
@@ -13,7 +19,10 @@ export type MessageSpecIssueCode =
   | 'required'
   | 'invalid_role'
   | 'invalid_type'
-  | 'unknown_property';
+  | 'unknown_property'
+  | 'duplicate_property'
+  | 'too_large'
+  | 'invalid_number';
 
 export interface MessageSpecIssue {
   code: MessageSpecIssueCode;
@@ -47,6 +56,13 @@ export const validateMessages = (
       message: 'Add at least one message before saving this test.',
     });
   }
+  if (messages.length > MAX_MESSAGE_COUNT) {
+    issues.push({
+      code: 'too_large',
+      path: 'messages',
+      message: `Messages cannot exceed ${MAX_MESSAGE_COUNT} items.`,
+    });
+  }
 
   messages.forEach((message, index) => {
     if (!isMessageRole(message.role)) {
@@ -62,6 +78,12 @@ export const validateMessages = (
         code: 'required',
         path: `messages[${index}].content`,
         message: 'Message content is required.',
+      });
+    } else if (message.content.length > MAX_JSON_SCALAR_LENGTH) {
+      issues.push({
+        code: 'too_large',
+        path: `messages[${index}].content`,
+        message: 'Message content cannot exceed 16384 characters.',
       });
     }
   });
@@ -98,16 +120,15 @@ const invalidResult = (
  * the original text must be preserved and repaired explicitly.
  */
 export const parseInputSpecJson = (inputSpecJson: string): InputSpecParseResult => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(inputSpecJson) as unknown;
-  } catch {
+  const bounded = parseBoundedJson(inputSpecJson);
+  if (bounded.issue) {
     return invalidResult(inputSpecJson, [{
-      code: 'invalid_json',
-      path: 'inputSpecJson',
-      message: 'Input JSON is malformed. Repair it before saving this test.',
+      code: bounded.issue.code,
+      path: bounded.issue.path,
+      message: bounded.issue.message,
     }]);
   }
+  const parsed = bounded.value;
 
   if (!isRecord(parsed)) {
     return invalidResult(inputSpecJson, [{
@@ -184,6 +205,12 @@ export const parseInputSpecJson = (inputSpecJson: string): InputSpecParseResult 
       code: 'required',
       path: 'inputSpecJson.messages',
       message: 'Add at least one message before saving this test.',
+    });
+  } else if (rawMessages.length > MAX_MESSAGE_COUNT) {
+    errors.push({
+      code: 'too_large',
+      path: 'inputSpecJson.messages',
+      message: `Messages cannot exceed ${MAX_MESSAGE_COUNT} items.`,
     });
   }
 

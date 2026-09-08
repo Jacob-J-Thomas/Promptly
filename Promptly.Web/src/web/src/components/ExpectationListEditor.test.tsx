@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ExpectationListEditor } from './ExpectationListEditor';
@@ -189,11 +189,11 @@ describe('ExpectationListEditor', () => {
     expect(expectations[0].type).toBe('contains_text');
   });
 
-  it('runs sequential stateful edits and preserves focus when ordered rows move', () => {
+  it('runs sequential stateful edits and preserves focus when ordered rows move', async () => {
     render(<StatefulExpectationEditor />);
 
     const firstText = screen.getByLabelText('Text for expectation 1');
-    firstText.focus();
+    act(() => firstText.focus());
     fireEvent.change(firstText, { target: { value: 'updated first' } });
     expect(document.activeElement).toBe(firstText);
 
@@ -201,19 +201,21 @@ describe('ExpectationListEditor', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Groundedness' }));
     const addedRow = screen.getByRole('group', { name: 'Expectation 4' });
     const addedType = within(addedRow).getByRole('combobox');
-    addedType.focus();
+    act(() => addedType.focus());
     fireEvent.keyDown(addedType, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(addedType);
-    fireEvent.click(screen.getByRole('option', { name: 'Groundedness' }));
+    const selectedOption = screen.getByRole('option', { name: 'Groundedness' });
+    expect(selectedOption).toHaveFocus();
+    fireEvent.click(selectedOption);
+    await waitFor(() => expect(addedType).toHaveFocus());
 
     const addedScore = within(addedRow).getByRole('spinbutton');
-    addedScore.focus();
+    act(() => addedScore.focus());
     fireEvent.change(addedScore, { target: { value: '0.5' } });
     expect(document.activeElement).toBe(addedScore);
 
     const moveAddedUp = within(screen.getByRole('group', { name: 'Expectation 4' }))
       .getByRole('button', { name: 'Move expectation 4 up' });
-    moveAddedUp.focus();
+    act(() => moveAddedUp.focus());
     fireEvent.click(moveAddedUp);
     const movedRow = screen.getByRole('group', { name: 'Expectation 3' });
     expect(within(movedRow).getByRole('spinbutton')).toHaveValue(0.5);
@@ -247,7 +249,10 @@ describe('ExpectationListEditor', () => {
     expect(screen.getByText('Text must be text.')).toBeInTheDocument();
     expect(screen.getByText('Case-insensitive flag must be true or false.')).toBeInTheDocument();
     expect(screen.getByText('Link pattern must be text.')).toBeInTheDocument();
-    expect(screen.getByText('Tool name must be text.')).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Expectation 4' }))
+      .getByText('Tool name must be text.')).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Expectation 9' }))
+      .getByText('Tool name must be text.')).toBeInTheDocument();
     expect(screen.getByText('Tool name is required.')).toBeInTheDocument();
     expect(screen.getByText('Add at least one tool to the sequence.')).toBeInTheDocument();
     expect(screen.getByText('Exact-sequence flag must be true or false.')).toBeInTheDocument();
@@ -261,36 +266,43 @@ describe('ExpectationListEditor', () => {
     expect(screen.getByLabelText('Minimum score for expectation 10')).toHaveValue(null);
   });
 
-  it('covers sequence repair, cleared optional scores, and non-AI type changes', () => {
+  it('repairs a sequence, clears an existing score, and changes type through controlled state', () => {
     const expectations: ExpectationDraft[] = [
       { type: 'tool_sequence', sequence: [42, '  '], exact_sequence: true },
-      { type: 'llm_judge', rubric: 'No score yet' },
+      { type: 'llm_judge', rubric: 'Score to clear', min_score: 0.8 },
       { type: 'contains_text', text: 'keep', case_insensitive: true },
     ];
-    const onChange = renderEditor(expectations);
+    render(<StatefulExpectationEditor initial={expectations} />);
 
+    fireEvent.change(screen.getByLabelText('Tool 1 for expectation 1'), {
+      target: { value: 'search' },
+    });
     fireEvent.change(screen.getByLabelText('Tool 2 for expectation 1'), {
       target: { value: 'summarize' },
     });
-    expect(onChange).toHaveBeenLastCalledWith([{
-      type: 'tool_sequence', sequence: [42, 'summarize'], exact_sequence: true,
-    }, expectations[1], expectations[2]]);
+    expect(screen.getByLabelText('Tool 1 for expectation 1')).toHaveValue('search');
+    expect(screen.getByLabelText('Tool 2 for expectation 1')).toHaveValue('summarize');
+    expect(within(screen.getByRole('group', { name: 'Expectation 1' }))
+      .queryByText('Tool name is required.')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Minimum score for expectation 2'), {
-      target: { value: '' },
-    });
-    expect(onChange).toHaveBeenLastCalledWith([
-      expectations[0],
-      { type: 'llm_judge', rubric: 'No score yet', min_score: '' },
-      expectations[2],
-    ]);
+    const score = screen.getByLabelText('Minimum score for expectation 2');
+    expect(score).toHaveValue(0.8);
+    fireEvent.change(score, { target: { value: '' } });
+    expect(score).toHaveValue(null);
+    expect(within(screen.getByRole('group', { name: 'Expectation 2' }))
+      .getByText('Score is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tool 2 for expectation 1')).toHaveValue('summarize');
 
     fireEvent.mouseDown(within(screen.getByRole('group', { name: 'Expectation 3' })).getByRole('combobox'));
     fireEvent.click(screen.getByRole('option', { name: 'Banned text' }));
-    expect(onChange).toHaveBeenLastCalledWith([
-      expectations[0],
-      expectations[1],
-      { type: 'banned_text', text: '', case_insensitive: true },
+    expect(within(screen.getByRole('group', { name: 'Expectation 3' }))
+      .getByRole('combobox')).toHaveTextContent('Banned text');
+    expect(screen.getByLabelText('Text for expectation 3')).toHaveValue('');
+    expect(screen.getByLabelText('Case-insensitive for expectation 3')).toBeChecked();
+    expect(expectations).toEqual([
+      { type: 'tool_sequence', sequence: [42, '  '], exact_sequence: true },
+      { type: 'llm_judge', rubric: 'Score to clear', min_score: 0.8 },
+      { type: 'contains_text', text: 'keep', case_insensitive: true },
     ]);
   });
 

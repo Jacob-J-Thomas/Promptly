@@ -299,7 +299,9 @@ public sealed class YamlServiceTests
 
         Assert.Equal("Prompt *literal !tag &anchor", testCase.Name);
         Assert.Contains("Block *literal !literal &literal", testCase.Description, StringComparison.Ordinal);
-        Assert.Contains("Folded *literal !literal &literal", testCase.InputSpecJson, StringComparison.Ordinal);
+        using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+        Assert.Equal("Folded *literal !literal &literal",
+            input.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
     }
 
     [Fact]

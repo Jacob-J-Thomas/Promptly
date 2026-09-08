@@ -204,6 +204,50 @@ public sealed class TenantSuiteAndTestServiceTests
     }
 
     [Fact]
+    public async Task Invalid_later_bulk_row_is_atomic_and_does_not_mutate_callers()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var first = new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = Guid.NewGuid(),
+            ExternalId = "bulk-first",
+            Name = "first",
+            InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
+        };
+        var invalidLater = new TestCase
+        {
+            Id = Guid.NewGuid(),
+            SuiteId = Guid.NewGuid(),
+            ExternalId = "bulk-invalid",
+            Name = "invalid later",
+            InputSpecJson = "{\"messages\":[]}",
+            ExpectationsJson = "[]"
+        };
+        var firstId = first.Id;
+        var firstSuiteId = first.SuiteId;
+        var invalidId = invalidLater.Id;
+        var invalidSuiteId = invalidLater.SuiteId;
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, [first, invalidLater], scope));
+
+        Assert.Contains(exception.Issues, issue => issue.Path.StartsWith("rows[1]", StringComparison.Ordinal));
+        Assert.Equal(firstId, first.Id);
+        Assert.Equal(firstSuiteId, first.SuiteId);
+        Assert.Equal(invalidId, invalidLater.Id);
+        Assert.Equal(invalidSuiteId, invalidLater.SuiteId);
+        Assert.DoesNotContain(dbContext.TestCases, testCase =>
+            testCase.ExternalId is "bulk-first" or "bulk-invalid");
+    }
+
+    [Fact]
     public async Task Owned_test_case_crud_and_bulk_import_succeed()
     {
         await using var dbContext = CreateDbContext();
@@ -353,8 +397,8 @@ public sealed class TenantSuiteAndTestServiceTests
         SuiteId = suite.Id,
         ExternalId = name,
         Name = name,
-        InputSpecJson = "{}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private sealed record TenantTestGraph(

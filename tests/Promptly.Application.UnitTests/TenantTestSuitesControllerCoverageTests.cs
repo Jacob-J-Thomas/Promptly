@@ -150,6 +150,17 @@ public sealed class TenantTestSuitesControllerCoverageTests
         var invalid = Assert.IsType<BadRequestObjectResult>(
             await ImportAsync(controller, suite.Id, "invalid"));
         Assert.Contains("invalid_yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
+
+        yaml.DeserializeFailure = null;
+        testCases.BulkFailure = new TestSpecificationValidationException(
+            [new ExpectationValidationIssue(
+                "duplicate_external_id",
+                "rows[0].id",
+                "External ID already exists in this suite")]);
+        var persistenceValidation = Assert.IsType<BadRequestObjectResult>(
+            await ImportAsync(controller, suite.Id, "valid"));
+        Assert.Contains("duplicate_external_id", persistenceValidation.Value!.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("DbUpdateException", persistenceValidation.Value!.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -242,8 +253,8 @@ public sealed class TenantTestSuitesControllerCoverageTests
         ExternalId = externalId,
         Name = $"name-{externalId}",
         Description = "description",
-        InputSpecJson = "{}",
-        ExpectationsJson = "[]"
+        InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+        ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
 
     private static async Task<IActionResult> ImportAsync(
@@ -324,6 +335,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
     {
         public IReadOnlyList<TestCase>? Listed { get; init; }
         public IReadOnlyList<TestCase>? BulkCreated { get; init; }
+        public Exception? BulkFailure { get; set; }
         public TenantAccessScope? LastScope { get; private set; }
 
         public Task<TestCase?> CreateTestCaseAsync(
@@ -360,6 +372,11 @@ public sealed class TenantTestSuitesControllerCoverageTests
             TenantAccessScope scope)
         {
             LastScope = scope;
+            if (BulkFailure is not null)
+            {
+                throw BulkFailure;
+            }
+
             return Task.FromResult(BulkCreated);
         }
     }

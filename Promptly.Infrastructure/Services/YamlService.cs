@@ -15,6 +15,7 @@ namespace Promptly.Infrastructure.Services;
 public class YamlService : IYamlService
 {
     public const int MaxYamlBytes = 1_048_576;
+    public const int MaxYamlNodes = 100_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ILogger<YamlService> _logger;
     private readonly ITestSpecificationValidator _specificationValidator;
@@ -42,6 +43,12 @@ public class YamlService : IYamlService
 
         try
         {
+            var preflightIssues = PreflightYamlSyntax(yamlContent);
+            if (preflightIssues.Count > 0)
+            {
+                throw new TestSpecificationValidationException(preflightIssues);
+            }
+
             var stream = new YamlStream();
             using var reader = new StringReader(yamlContent);
             stream.Load(reader);
@@ -52,7 +59,7 @@ public class YamlService : IYamlService
 
             var root = stream.Documents[0].RootNode;
             var issues = new List<ExpectationValidationIssue>();
-            ValidateYamlLimits(root, "$", 0, issues);
+            ValidateYamlLimits(root, "$", 0, issues, new HashSet<YamlNode>());
             ValidateOptionalWrapperVersion(root, issues);
             if (root is not YamlSequenceNode rows)
             {
@@ -318,7 +325,8 @@ public class YamlService : IYamlService
         scalar.Style == ScalarStyle.Plain
         && (bool.TryParse(scalar.Value, out _)
             || long.TryParse(scalar.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
-            || decimal.TryParse(scalar.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
+            || decimal.TryParse(scalar.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _)
+            || double.TryParse(scalar.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
 
     private static void ValidateOptionalWrapperVersion(
         YamlNode root,
@@ -350,11 +358,139 @@ public class YamlService : IYamlService
         }
     }
 
+    private static List<ExpectationValidationIssue> PreflightYamlSyntax(string yaml)
+    {
+        try
+        {
+            var parser = new Parser(new StringReader(yaml));
+            var eventCount = 0;
+            while (parser.MoveNext())
+            {
+                if (++eventCount > MaxYamlNodes)
+                {
+                    return
+                    [
+                        new ExpectationValidationIssue(
+                            "too_large",
+                            "$",
+                            "YAML document exceeds the maximum node count")
+                    ];
+                }
+            }
+        }
+        catch (YamlException)
+        {
+            // The representation-model load below produces the stable invalid_yaml issue.
+        }
+
+        var issues = new List<ExpectationValidationIssue>();
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var escaped = false;
+        for (var index = 0; index < yaml.Length; index++)
+        {
+            var character = yaml[index];
+            if (character == '\n')
+            {
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (character == '\\')
+                {
+                    escaped = true;
+                }
+                else if (character == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (inSingleQuote)
+            {
+                if (character == '\'' && index + 1 < yaml.Length && yaml[index + 1] == '\'')
+                {
+                    index++;
+                }
+                else if (character == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (character == '#')
+            {
+                while (index + 1 < yaml.Length && yaml[index + 1] != '\n')
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            if (character == '"')
+            {
+                inDoubleQuote = true;
+                continue;
+            }
+
+            if (character == '\'')
+            {
+                inSingleQuote = true;
+                continue;
+            }
+
+            if (IsYamlTokenStart(yaml, index)
+                && (character == '&' || character == '*')
+                && index + 1 < yaml.Length
+                && IsYamlNameCharacter(yaml[index + 1]))
+            {
+                issues.Add(new(
+                    "unsupported_value",
+                    "$",
+                    "YAML anchors and aliases are not supported"));
+                return issues;
+            }
+
+            if (IsYamlTokenStart(yaml, index)
+                && character == '!'
+                && index + 1 < yaml.Length
+                && yaml[index + 1] != ' ')
+            {
+                issues.Add(new(
+                    "unsupported_value",
+                    "$",
+                    "YAML tags are not supported"));
+                return issues;
+            }
+        }
+
+        return issues;
+    }
+
+    private static bool IsYamlNameCharacter(char character) =>
+        char.IsLetterOrDigit(character) || character is '_' or '-';
+
+    private static bool IsYamlTokenStart(string yaml, int index) =>
+        index == 0
+        || char.IsWhiteSpace(yaml[index - 1])
+        || yaml[index - 1] is ':' or ',' or '[' or ']' or '{' or '}' or '-';
+
     private static void ValidateYamlLimits(
         YamlNode node,
         string path,
         int depth,
-        ICollection<ExpectationValidationIssue> issues)
+        ICollection<ExpectationValidationIssue> issues,
+        ISet<YamlNode> activeNodes)
     {
         if (depth > TestSpecificationValidator.MaxDepth)
         {
@@ -362,56 +498,95 @@ public class YamlService : IYamlService
             return;
         }
 
-        switch (node)
+        if (!activeNodes.Add(node))
         {
-            case YamlScalarNode scalar:
-                if (scalar.Value?.Length > TestSpecificationValidator.MaxScalarLength)
-                {
-                    issues.Add(new("too_large", path, "YAML scalar exceeds the maximum length"));
-                }
+            issues.Add(new("unsupported_value", path, "YAML aliases and recursive values are not supported"));
+            return;
+        }
 
-                break;
-            case YamlMappingNode mapping:
+        try
+        {
+            switch (node)
             {
-                var names = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var child in mapping.Children)
-                {
-                    var key = child.Key is YamlScalarNode scalarKey ? scalarKey.Value : null;
-                    var childPath = key is null ? path : $"{path}.{key}";
-                    if (key is null || !names.Add(key))
+                case YamlScalarNode scalar:
+                    if (scalar.Value?.Length > TestSpecificationValidator.MaxScalarLength)
                     {
-                        issues.Add(new("duplicate_property", childPath, "Duplicate YAML property is not allowed"));
+                        issues.Add(new("too_large", path, "YAML scalar exceeds the maximum length"));
                     }
 
-                    ValidateYamlLimits(child.Value, childPath, depth + 1, issues);
-                }
-
-                break;
-            }
-            case YamlSequenceNode sequence:
-                for (var index = 0; index < sequence.Children.Count; index++)
+                    break;
+                case YamlMappingNode mapping:
                 {
-                    ValidateYamlLimits(sequence.Children[index], $"{path}[{index}]", depth + 1, issues);
-                }
+                    var names = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var child in mapping.Children)
+                    {
+                        var key = child.Key is YamlScalarNode scalarKey ? scalarKey.Value : null;
+                        var childPath = key is null ? path : $"{path}.{key}";
+                        if (key is null || !names.Add(key))
+                        {
+                            issues.Add(new("duplicate_property", childPath, "Duplicate YAML property is not allowed"));
+                        }
 
-                break;
-            default:
-                issues.Add(new("invalid_type", path, "YAML node type is unsupported"));
-                break;
+                        ValidateYamlLimits(
+                            child.Value,
+                            childPath,
+                            depth + 1,
+                            issues,
+                            activeNodes);
+                    }
+
+                    break;
+                }
+                case YamlSequenceNode sequence:
+                    for (var index = 0; index < sequence.Children.Count; index++)
+                    {
+                        ValidateYamlLimits(
+                            sequence.Children[index],
+                            $"{path}[{index}]",
+                            depth + 1,
+                            issues,
+                            activeNodes);
+                    }
+
+                    break;
+                default:
+                    issues.Add(new("invalid_type", path, "YAML node type is unsupported"));
+                    break;
+            }
+        }
+        finally
+        {
+            activeNodes.Remove(node);
         }
     }
 
-    private static JsonNode ToJsonNode(YamlNode node) =>
-        node switch
-        {
-            YamlMappingNode mapping => ToJsonObject(mapping),
-            YamlSequenceNode sequence => ToJsonArray(sequence),
-            YamlScalarNode scalar when IsYamlNull(scalar) => null!,
-            YamlScalarNode scalar => JsonValue.Create(ParseScalar(scalar))!,
-            _ => throw new InvalidOperationException("Unsupported YAML node")
-        };
+    private static JsonNode ToJsonNode(YamlNode node) => ToJsonNode(node, new HashSet<YamlNode>());
 
-    private static JsonObject ToJsonObject(YamlMappingNode mapping)
+    private static JsonNode ToJsonNode(YamlNode node, ISet<YamlNode> activeNodes)
+    {
+        if (!activeNodes.Add(node))
+        {
+            throw new InvalidOperationException("YAML aliases and recursive values are not supported");
+        }
+
+        try
+        {
+            return node switch
+            {
+                YamlMappingNode mapping => ToJsonObject(mapping, activeNodes),
+                YamlSequenceNode sequence => ToJsonArray(sequence, activeNodes),
+                YamlScalarNode scalar when IsYamlNull(scalar) => null!,
+                YamlScalarNode scalar => ParseScalarNode(scalar),
+                _ => throw new InvalidOperationException("Unsupported YAML node")
+            };
+        }
+        finally
+        {
+            activeNodes.Remove(node);
+        }
+    }
+
+    private static JsonObject ToJsonObject(YamlMappingNode mapping, ISet<YamlNode> activeNodes)
     {
         var result = new JsonObject();
         foreach (var child in mapping.Children)
@@ -421,50 +596,89 @@ public class YamlService : IYamlService
                 throw new InvalidOperationException("YAML object keys must be strings");
             }
 
-            result[key.Value] = ToJsonNode(child.Value);
+            result[key.Value] = ToJsonNode(child.Value, activeNodes);
         }
 
         return result;
     }
 
-    private static JsonArray ToJsonArray(YamlSequenceNode sequence)
+    private static JsonArray ToJsonArray(YamlSequenceNode sequence, ISet<YamlNode> activeNodes)
     {
         var result = new JsonArray();
         foreach (var child in sequence.Children)
         {
-            result.Add(ToJsonNode(child));
+            result.Add(ToJsonNode(child, activeNodes));
         }
 
         return result;
     }
 
-    private static object? ParseScalar(YamlScalarNode scalar)
+    private static JsonNode ParseScalarNode(YamlScalarNode scalar)
     {
         var value = scalar.Value ?? string.Empty;
         if (scalar.Style == ScalarStyle.Plain)
         {
             if (IsYamlNull(scalar))
             {
-                return null;
+                return null!;
             }
 
             if (bool.TryParse(value, out var boolean))
             {
-                return boolean;
+                return JsonValue.Create(boolean)!;
             }
 
-            if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer))
+            if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
             {
-                return integer;
+                if (!TryParseJsonNumber(value, out var integerJsonNumber))
+                {
+                    throw new InvalidOperationException("YAML numeric scalar is not a supported JSON number");
+                }
+
+                return integerJsonNumber!;
             }
 
-            if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var decimalValue))
+            if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
             {
-                return decimalValue;
+                if (!TryParseJsonNumber(value, out var jsonNumber))
+                {
+                    throw new InvalidOperationException("YAML numeric scalar is not a supported JSON number");
+                }
+
+                return jsonNumber!;
+            }
+
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+            {
+                if (!TryParseJsonNumber(value, out var wideJsonNumber))
+                {
+                    throw new InvalidOperationException("YAML numeric scalar is not a supported JSON number");
+                }
+
+                return wideJsonNumber!;
             }
         }
 
-        return value;
+        return JsonValue.Create(value)!;
+    }
+
+    private static bool TryParseJsonNumber(string value, out JsonNode? number)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            if (document.RootElement.ValueKind == JsonValueKind.Number)
+            {
+                number = JsonValue.Create(document.RootElement.Clone());
+                return number is not null;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        number = null;
+        return false;
     }
 
     private static bool IsYamlNull(YamlScalarNode scalar) =>

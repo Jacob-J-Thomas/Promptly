@@ -226,6 +226,130 @@ public sealed class YamlServiceTests
     }
 
     [Theory]
+    [InlineData("&case")]
+    [InlineData("*case")]
+    [InlineData("!!str")]
+    public void DeserializeTests_rejects_aliases_and_tags_before_loading_the_node_graph(string marker)
+    {
+        var yaml = marker switch
+        {
+            "&case" => "- &case\n  id: case-1\n  name: Case\n  input:\n    messages:\n      - role: user\n        content: hello\n  expectations:\n    - type: contains_text\n      text: hello\n",
+            "*case" => "- id: case-1\n  name: Case\n  input:\n    messages:\n      - role: user\n        content: hello\n  expectations:\n    - type: contains_text\n      text: hello\n- *case\n",
+            _ => "- id: !!str case-1\n  name: Case\n  input:\n    messages:\n      - role: user\n        content: hello\n  expectations:\n    - type: contains_text\n      text: hello\n"
+        };
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Contains(
+            exception.Issues,
+            issue => issue.Code == "unsupported_value"
+                && issue.Message.Contains("not supported", StringComparison.Ordinal));
+        Assert.DoesNotContain("AnchorName", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeserializeTests_preserves_marker_characters_inside_quoted_scalars_and_comments()
+    {
+        const string yaml = """
+            - id: quoted-case
+              name: "A *quoted !name"
+              description: 'A ''quoted'' value &anchor'
+              input:
+                messages:
+                  - role: user
+                    content: "Hello \"world\" *alias !tag" # marker-like comment
+              expectations:
+                - type: contains_text
+                  text: hello
+            """;
+
+        var testCase = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Equal("A 'quoted' value &anchor", testCase.Description);
+        Assert.Contains("*alias", testCase.InputSpecJson, StringComparison.Ordinal);
+        Assert.Contains("!tag", testCase.InputSpecJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeserializeTests_preserves_wide_json_numbers_as_numbers()
+    {
+        const string yaml = """
+            - id: wide-number
+              name: Wide number
+              input:
+                messages:
+                  - role: user
+                    content: hello
+                score: 1e100
+              expectations:
+                - type: contains_text
+                  text: hello
+            """;
+
+        var testCase = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, input.RootElement.GetProperty("score").ValueKind);
+        Assert.Equal("1e100", input.RootElement.GetProperty("score").GetRawText());
+    }
+
+    [Fact]
+    public void DeserializeTests_rejects_deep_yaml_before_json_conversion()
+    {
+        var nested = new StringBuilder("{");
+        for (var index = 0; index < TestSpecificationValidator.MaxDepth + 1; index++)
+        {
+            nested.Append("\"next\":{");
+        }
+
+        nested.Append("\"value\":true");
+        nested.Append('}', TestSpecificationValidator.MaxDepth + 2);
+        var yaml = "- id: deep\n"
+            + "  name: Deep\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "    metadata: "
+            + nested
+            + "\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n";
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Contains(exception.Issues, issue => issue.Code == "too_large");
+    }
+
+    [Fact]
+    public void DeserializeTests_rejects_a_large_yaml_event_stream_before_materializing_it()
+    {
+        var values = string.Join(",", Enumerable.Repeat("x", YamlService.MaxYamlNodes));
+        var yaml = "- id: node-budget\n"
+            + "  name: Node budget\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "    metadata: ["
+            + values
+            + "]\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n";
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "too_large"
+            && issue.Message.Contains("node count", StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("not-json", "[]")]
     [InlineData("{}", "not-json")]
     public void SerializeTests_returns_safe_invalid_json_issue(

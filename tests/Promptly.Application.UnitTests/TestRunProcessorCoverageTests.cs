@@ -245,12 +245,15 @@ public sealed class TestRunProcessorCoverageTests
             InputSpecJson = inputSpecJson,
             ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"response\"}]"
         });
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"contains_text\",\"text\":\"response\"}]"));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
         var endpointExecutor = new DelegateEndpointExecutor((_, _, _, _) =>
-            throw new InvalidOperationException("invalid input must not reach endpoint"));
+            Task.FromResult(new ExecutionResult { Success = true, ResponseJson = "{}" }));
         var processor = CreateProcessor(
             dbContext,
             runStore,
@@ -258,15 +261,19 @@ public sealed class TestRunProcessorCoverageTests
 
         await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
 
-        var result = await dbContext.TestRunResults.SingleAsync(
-            TestContext.Current.CancellationToken);
-        Assert.Equal(TestResultStatus.Error, result.Status);
-        Assert.Equal(0, endpointExecutor.CallCount);
-        using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
-        Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
-        Assert.Equal(0, metrics.RootElement.GetProperty("failed").GetInt32());
-        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
-        Assert.Contains(expectedErrorCode, result.FailureReasonsJson, StringComparison.Ordinal);
+        var results = await dbContext.TestRunResults
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, results.Count);
+        var errorResult = Assert.Single(results, result => result.Status == TestResultStatus.Error);
+        Assert.Single(results, result => result.Status == TestResultStatus.Pass);
+        Assert.Equal(1, endpointExecutor.CallCount);
+        using var summary = JsonDocument.Parse(
+            Assert.IsType<string>(runStore.StatusUpdates[^1].SummaryJson));
+        Assert.Equal(1, summary.RootElement.GetProperty("passed").GetInt32());
+        Assert.Equal(0, summary.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, summary.RootElement.GetProperty("errors").GetInt32());
+        Assert.Equal(2, summary.RootElement.GetProperty("total").GetInt32());
+        Assert.Contains(expectedErrorCode, errorResult.FailureReasonsJson, StringComparison.Ordinal);
         Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
     }
 

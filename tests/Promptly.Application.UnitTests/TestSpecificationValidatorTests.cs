@@ -89,6 +89,19 @@ public sealed class TestSpecificationValidatorTests
     }
 
     [Fact]
+    public void Exact_input_byte_limit_is_accepted_and_one_more_byte_is_rejected()
+    {
+        var exact = BuildExactSizedInput(TestSpecificationValidator.MaxInputJsonBytes);
+        var over = exact + " ";
+
+        Assert.Equal(TestSpecificationValidator.MaxInputJsonBytes, Encoding.UTF8.GetByteCount(exact));
+        Assert.True(Validator().ValidateInput(exact).IsValid);
+        Assert.Contains(
+            Validator().ValidateInput(over).Issues,
+            issue => issue.Code == "too_large" && issue.Path == "inputSpecJson");
+    }
+
+    [Fact]
     public void Expectation_issues_are_delegated_and_prefixed()
     {
         var result = Validator().Validate(ValidInput, "[{\"type\":\"contains_text\"}]");
@@ -122,20 +135,43 @@ public sealed class TestSpecificationValidatorTests
     }
 
     [Fact]
-    public void Deep_metadata_is_rejected_at_the_documented_limit()
+    public void Exact_depth_limit_is_accepted_and_next_nested_object_is_rejected()
     {
-        var nested = "true";
-        for (var index = 0; index < TestSpecificationValidator.MaxDepth + 1; index++)
+        static string NestedMetadata(int objectCount)
         {
-            nested = "{\"next\":" + nested + "}";
+            var nested = "true";
+            for (var index = 0; index < objectCount; index++)
+            {
+                nested = "{\"next\":" + nested + "}";
+            }
+
+            return "{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"metadata\":"
+                + nested
+                + "}";
         }
 
-        var result = Validator().ValidateInput(
-            "{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"metadata\":" + nested + "}");
+        var exact = Validator().ValidateInput(NestedMetadata(TestSpecificationValidator.MaxDepth - 1));
+        var over = Validator().ValidateInput(NestedMetadata(TestSpecificationValidator.MaxDepth));
 
-        Assert.Contains(result.Issues, issue => issue.Code == "too_large");
+        Assert.DoesNotContain(exact.Issues, issue => issue.Code == "too_large");
+        Assert.Contains(over.Issues, issue => issue.Code == "too_large");
     }
 
     private static ITestSpecificationValidator Validator() =>
         new TestSpecificationValidator(new ExpectationDslValidator());
+
+    private static string BuildExactSizedInput(int byteLength)
+    {
+        const string prefix = "{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"metadata\":[";
+        const string item = "\"x\"";
+        const string suffix = "]}";
+        var fixedLength = Encoding.UTF8.GetByteCount(prefix + item + suffix);
+        var additionalItems = (byteLength - fixedLength) / 4;
+        var remainder = (byteLength - fixedLength) % 4;
+        return prefix
+            + item
+            + string.Concat(Enumerable.Repeat(",\"x\"", additionalItems))
+            + new string(' ', remainder)
+            + suffix;
+    }
 }

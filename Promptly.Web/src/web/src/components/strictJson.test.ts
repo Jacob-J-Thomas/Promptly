@@ -9,6 +9,68 @@ import {
 const validInput = '{"messages":[{"role":"user","content":"hello"}]}';
 
 describe('bounded strict JSON preflight', () => {
+  it('accepts empty containers, literals, nested metadata, escapes, and JSON numbers', () => {
+    const validDocuments = [
+      '{}',
+      '[]',
+      'true',
+      'false',
+      'null',
+      '{"metadata":{"empty":{},"items":[true,false,null]},"messages":[]}',
+      '{"negative":-12.5,"fraction":0.125,"exponent":6.02e-23,"positiveExponent":1E+3}',
+      '{"text":"quote\\" slash\\\\ slash\\/ backspace\\b form\\f newline\\n return\\r tab\\t snowman\\u2603"}',
+    ];
+
+    validDocuments.forEach((document) => {
+      expect(parseBoundedJson(document), document).toMatchObject({
+        issue: null,
+      });
+    });
+  });
+
+  it.each([
+    ['missing object colon', '{"key" 1}'],
+    ['missing object comma', '{"key":1 "next":2}'],
+    ['trailing object comma', '{"key":1,}'],
+    ['mismatched object delimiter', '{"key":1]'],
+    ['missing array comma', '[1 2]'],
+    ['trailing array comma', '[1,]'],
+    ['trailing data', '{"key":1} trailing'],
+    ['unterminated object', '{"key":1'],
+    ['unterminated array', '[1'],
+    ['unterminated string', '"unterminated'],
+    ['unterminated escape', '"\\'],
+    ['invalid short unicode escape', '{"key":"\\u12"}'],
+    ['invalid escape character', '{"key":"\\x"}'],
+    ['invalid number sign', '{"number":-}'],
+    ['invalid leading zero', '{"number":01}'],
+    ['missing fraction digits', '{"number":1.}'],
+    ['missing exponent digits', '{"number":1e}'],
+    ['missing signed exponent digits', '{"number":1e+}'],
+    ['invalid literal', '{"value":tru}'],
+  ])('rejects %s with a safe malformed-input issue', (_name, document) => {
+    const result = parseBoundedJson(document);
+
+    expect(result.value).toBeNull();
+    expect(result.issue?.code).toBe('invalid_json');
+    expect(result.issue?.path).toBe('inputSpecJson');
+    expect(result.issue?.message).not.toMatch(/SyntaxError|stack|line/i);
+  });
+
+  it('rejects raw control characters in strings without exposing parser details', () => {
+    const controlCharacterDocument = `{"key":"before${String.fromCharCode(1)}after"}`;
+    const result = parseBoundedJson(controlCharacterDocument);
+
+    expect(result).toEqual({
+      value: null,
+      issue: {
+        code: 'invalid_json',
+        path: 'inputSpecJson',
+        message: 'Input JSON is malformed. Repair it before saving this test.',
+      },
+    });
+  });
+
   it('rejects duplicate top-level and nested keys, including escaped equivalents', () => {
     const topLevel = parseBoundedJson(
       '{"messages":[{"role":"user","content":"hello"}],"enabled":true,"\\u0065nabled":false}',

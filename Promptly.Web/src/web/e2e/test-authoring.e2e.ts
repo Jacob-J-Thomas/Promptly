@@ -89,6 +89,8 @@ const replaceYaml = async (page: Page, value: string) => {
   await editor.press('ArrowRight');
 };
 
+const aiEvaluationNotice = 'AI expectations are evaluated by the configured worker when a suite runs. Editing does not call a provider.';
+
 const allExpectationYaml = `  expectations:
     - type: contains_text
       text: Deterministically accurate
@@ -327,7 +329,7 @@ test('test authoring persists through Form and YAML and runs through the real st
     enabled: true,
   }));
   await createDialog.getByRole('tab', { name: 'Form' }).click();
-  await expect.poll(() => createDialog.getByRole('alert').allTextContents()).toEqual([]);
+  await expect.poll(() => createDialog.getByRole('alert').allTextContents()).toEqual([aiEvaluationNotice]);
   await expect(createDialog.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
   await expect(createDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
   expect(await createDialog.getByLabel('Content for message 1').inputValue()).toContain(correlation);
@@ -458,7 +460,7 @@ test('test authoring persists through Form and YAML and runs through the real st
     caseInsensitive: false,
   }));
   await yamlEditDialog.getByRole('tab', { name: 'Form' }).click();
-  await expect.poll(() => yamlEditDialog.getByRole('alert').allTextContents()).toEqual([]);
+  await expect.poll(() => yamlEditDialog.getByRole('alert').allTextContents()).toEqual([aiEvaluationNotice]);
   await expect(yamlEditDialog.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
   await expect(yamlEditDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
   await expect(yamlEditDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');

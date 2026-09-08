@@ -43,8 +43,8 @@ const requireCreated = async (
   return response.body as Record<string, unknown>;
 };
 
-const openTestMenu = async (page: Page) => {
-  const menuButton = page.getByTestId('MoreVertIcon').locator('..');
+const openTestMenu = async (page: Page, testName: string) => {
+  const menuButton = page.getByRole('button', { name: `Actions for ${testName}`, exact: true });
   await menuButton.click();
   await expect(page.getByRole('menuitem', { name: 'Edit' })).toBeVisible();
 };
@@ -232,7 +232,7 @@ test('test authoring persists through Form and YAML and runs through the real st
 
   await page.reload();
   await expect(page.getByText('Authored response', { exact: true })).toBeVisible();
-  await openTestMenu(page);
+  await openTestMenu(page, 'Authored response');
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const editDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
   await expect.poll(() => editDialog.evaluate((dialog) => (
@@ -301,7 +301,7 @@ test('test authoring persists through Form and YAML and runs through the real st
 
   await page.goto(`/suites/${suiteId}`);
   await expect(page.getByText('Edited authored response', { exact: true })).toBeVisible();
-  await openTestMenu(page);
+  await openTestMenu(page, 'Edited authored response');
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const reloadedDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
   await expect(reloadedDialog.getByLabel('Name')).toHaveValue('Edited authored response');
@@ -311,7 +311,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   await expect(reloadedDialog.getByLabel('Case-insensitive for expectation 1')).not.toBeChecked();
   await reloadedDialog.getByRole('button', { name: 'Cancel' }).click();
 
-  await openTestMenu(page);
+  await openTestMenu(page, 'Edited authored response');
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const reductionDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
   for (let index = authoredExpectations.length; index >= 2; index -= 1) {

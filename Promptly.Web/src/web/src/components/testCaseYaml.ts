@@ -282,8 +282,14 @@ export const yamlToForm = (text: string): TestCaseYamlParseResult => {
   if (typeof name !== 'string' || name.trim().length === 0) {
     errors.push(yamlIssue('required', 'rows[0].name', 'Test name is required.'));
   }
-  if (row.description !== undefined && typeof row.description !== 'string') {
-    errors.push(yamlIssue('invalid_type', 'rows[0].description', 'Description must be text when present.'));
+  if (row.description !== undefined
+    && row.description !== null
+    && typeof row.description !== 'string') {
+    errors.push(yamlIssue(
+      'invalid_type',
+      'rows[0].description',
+      'Description must be text or null when present.',
+    ));
   }
 
   if (!isRecord(row.input)) {

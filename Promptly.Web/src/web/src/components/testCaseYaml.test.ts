@@ -44,6 +44,19 @@ describe('test-case YAML conversion', () => {
     expect(parsed).toEqual({ valid: true, errors: [], draft });
   });
 
+  it('accepts the nullable description emitted by server YAML export', () => {
+    const parsed = yamlToForm(`${minimalYaml().replace(
+      '  name: Greeting',
+      '  name: Greeting\n  description: null',
+    )}`);
+
+    expect(parsed).toEqual({
+      valid: true,
+      errors: [],
+      draft: expect.objectContaining({ description: '' }),
+    });
+  });
+
   it('round-trips larger ordered drafts without collapsing rows or metadata', () => {
     const largerDraft: TestCaseYamlDraft = {
       ...draft,

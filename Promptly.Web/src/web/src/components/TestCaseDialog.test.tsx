@@ -34,25 +34,70 @@ const persistedTest: TestCase = {
   createdAt: '2026-08-12T00:00:00Z',
 };
 
+const allTypesYaml = `- id: all-types
+  name: All expectation types
+  description: Authored through YAML
+  input:
+    temperature: 0.5
+    enabled: true
+    metadata:
+      nullable: null
+      nested:
+        count: 2
+    messages:
+      - role: system
+        content: system guidance
+      - role: user
+        content: user prompt
+  expectations:
+    - type: contains_text
+      text: contains
+      case_insensitive: true
+    - type: banned_text
+      text: banned
+      case_insensitive: true
+    - type: regex_match
+      pattern: ^answer$
+      case_insensitive: true
+    - type: link_pattern
+      pattern: https://example.invalid/*
+    - type: tool_called
+      tool_name: search
+    - type: tool_sequence
+      sequence:
+        - search
+        - summarize
+      exact_sequence: false
+    - type: llm_judge
+      rubric: Helpful
+      min_score: 0
+    - type: groundedness
+      min_score: 1`;
+
 const makeInputAtByteLimit = () => {
-  const emptyMessages = Array.from({ length: 16 }, (_, index) => ({
-    role: index === 0 ? 'user' : 'assistant',
-    content: '',
-  }));
-  const emptyJson = JSON.stringify({ messages: emptyMessages });
+  const metadataKeys = Array.from({ length: 16 }, (_, index) => `padding${index}`);
+  const emptyMetadata = Object.fromEntries(metadataKeys.map((key) => [key, '']));
+  const emptyJson = JSON.stringify({
+    ...emptyMetadata,
+    messages: [{ role: 'user', content: 'small' }],
+  });
   const targetBytes = 262_144 - 1;
   const emptyBytes = new TextEncoder().encode(emptyJson).byteLength;
   const contentBytes = targetBytes - emptyBytes;
-  const baseLength = Math.floor(contentBytes / emptyMessages.length);
-  const remainder = contentBytes % emptyMessages.length;
-  const messages = emptyMessages.map((message, index) => ({
-    ...message,
-    content: 'x'.repeat(baseLength + (index < remainder ? 1 : 0)),
-  }));
-  const inputSpecJson = JSON.stringify({ messages });
+  const baseLength = Math.floor(contentBytes / metadataKeys.length);
+  const remainder = contentBytes % metadataKeys.length;
+  const inputMetadata = Object.fromEntries(metadataKeys.map((key, index) => [
+    key,
+    'x'.repeat(baseLength + (index < remainder ? 1 : 0)),
+  ]));
+  const inputSpecJson = JSON.stringify({
+    ...inputMetadata,
+    messages: [{ role: 'user', content: 'small' }],
+  });
 
   expect(new TextEncoder().encode(inputSpecJson).byteLength).toBe(targetBytes);
-  return { inputSpecJson, messages };
+  expect(Object.values(inputMetadata).every((value) => value.length <= 16_384)).toBe(true);
+  return { inputSpecJson };
 };
 
 const renderDialog = (
@@ -117,8 +162,11 @@ describe('TestCaseDialog', () => {
   it('rejects a serialized input aggregate that crosses the byte cap on edit', async () => {
     const boundaryInput = makeInputAtByteLimit();
     renderDialog({ ...persistedTest, inputSpecJson: boundaryInput.inputSpecJson });
-    const editedContent = `${boundaryInput.messages[15]?.content ?? ''}xx`;
-    fireEvent.change(screen.getByLabelText('Content for message 16'), {
+    const editedContent = 'smallxx';
+    const editedInput = JSON.parse(boundaryInput.inputSpecJson);
+    editedInput.messages[0].content = editedContent;
+    expect(new TextEncoder().encode(JSON.stringify(editedInput)).byteLength).toBe(262_145);
+    fireEvent.change(screen.getByLabelText('Content for message 1'), {
       target: { value: editedContent },
     });
 
@@ -130,22 +178,20 @@ describe('TestCaseDialog', () => {
     expect(screen.getByText(
       'input: Input JSON exceeds the 262144-byte limit.',
     )).toBeInTheDocument();
-    expect(screen.getByLabelText('Content for message 16')).toHaveValue(editedContent);
+    expect(screen.getByLabelText('Content for message 1')).toHaveValue(editedContent);
   });
 
-  it('authors all eight expectation types and preserves ordered message edits', async () => {
+  it('authors all eight expectation types through YAML and preserves ordered message edits', async () => {
     const saved = { ...persistedTest, id: 'created-all-types' };
-    vi.mocked(testsApi.create).mockResolvedValue(saved);
-    renderDialog();
-    fireEvent.change(screen.getByLabelText(/^External ID/), { target: { value: 'all-types' } });
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'All expectation types' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
-    fireEvent.change(screen.getByLabelText('Content for message 1'), {
-      target: { value: 'system guidance' },
-    });
-    fireEvent.mouseDown(within(screen.getByRole('group', { name: 'Message 1' })).getByRole('combobox'));
-    fireEvent.click(screen.getByRole('option', { name: 'system' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
+    vi.mocked(testsApi.update).mockResolvedValue(saved);
+    renderDialog(persistedTest);
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.change(screen.getByLabelText('Test YAML'), { target: { value: allTypesYaml } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
+
+    expect(screen.getByLabelText(/^External ID/)).toHaveValue('all-types');
+    expect(screen.getByLabelText(/^Name/)).toHaveValue('All expectation types');
+    expect(screen.getByLabelText('Content for message 1')).toHaveValue('system guidance');
     fireEvent.change(screen.getByLabelText('Content for message 2'), {
       target: { value: 'user prompt\nwith two lines' },
     });
@@ -154,39 +200,14 @@ describe('TestCaseDialog', () => {
     fireEvent.click(within(screen.getByRole('group', { name: 'Message 1' }))
       .getByRole('button', { name: 'Delete message 1' }));
 
-    const addExpectation = (label: string) => {
-      fireEvent.click(screen.getByRole('button', { name: 'Add expectation' }));
-      fireEvent.click(screen.getByRole('menuitem', { name: label }));
-    };
-    addExpectation('Contains text');
-    fireEvent.change(screen.getByLabelText('Text for expectation 1'), { target: { value: 'contains' } });
-    addExpectation('Banned text');
-    fireEvent.change(screen.getByLabelText('Text for expectation 2'), { target: { value: 'banned' } });
-    addExpectation('Regex match');
-    fireEvent.change(screen.getByLabelText('Pattern for expectation 3'), { target: { value: '^answer$' } });
-    addExpectation('Link pattern');
-    fireEvent.change(screen.getByLabelText('Link pattern for expectation 4'), {
-      target: { value: 'https://example.invalid/*' },
-    });
-    addExpectation('Tool called');
-    fireEvent.change(screen.getByLabelText('Tool name for expectation 5'), { target: { value: 'search' } });
-    addExpectation('Tool sequence');
-    fireEvent.change(screen.getByLabelText('Tool 1 for expectation 6'), { target: { value: 'search' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add tool to expectation 6' }));
-    fireEvent.change(screen.getByLabelText('Tool 2 for expectation 6'), { target: { value: 'summarize' } });
-    fireEvent.click(screen.getByLabelText('Exact sequence for expectation 6'));
-    addExpectation('LLM judge');
-    fireEvent.change(screen.getByLabelText('Rubric for expectation 7'), { target: { value: 'Helpful' } });
-    fireEvent.change(screen.getByLabelText('Minimum score for expectation 7'), { target: { value: '0' } });
-    addExpectation('Groundedness');
-    fireEvent.change(screen.getByLabelText('Minimum score for expectation 8'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(testsApi.update).toHaveBeenCalledOnce());
 
-    vi.mocked(testsApi.create).mockResolvedValue(saved);
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-    await waitFor(() => expect(testsApi.create).toHaveBeenCalledOnce());
-
-    const [, request] = vi.mocked(testsApi.create).mock.calls[0] ?? [];
+    const [, request] = vi.mocked(testsApi.update).mock.calls[0] ?? [];
     expect(JSON.parse(request?.inputSpecJson ?? '{}')).toEqual({
+      temperature: 0.5,
+      enabled: true,
+      metadata: { nullable: null, nested: { count: 2 } },
       messages: [{ role: 'user', content: 'user prompt\nwith two lines' }],
     });
     expect(JSON.parse(request?.expectationsJson ?? '[]')).toEqual([

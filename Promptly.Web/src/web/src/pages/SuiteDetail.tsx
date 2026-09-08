@@ -324,6 +324,7 @@ export const SuiteDetail: React.FC = () => {
                       <TableCell align="right">
                         <IconButton
                           size="small"
+                          aria-label={`Actions for ${test.name}`}
                           onClick={(e) => handleTestMenu(e, test)}
                         >
                           <MoreVert />

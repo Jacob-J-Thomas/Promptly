@@ -7,6 +7,7 @@ import {
 import {
   createExpectation,
   EXPECTATION_TYPES,
+  MAX_EXPECTATION_COUNT,
   parseExpectationsJson,
   serializeExpectations,
   validateExpectations,
@@ -62,11 +63,18 @@ describe('expectation spec helpers', () => {
     expect(JSON.parse(result.json!)).toEqual([expectation]);
   });
 
-  it('accepts a 512-character pattern and rejects a 513-character pattern', () => {
+  it('accepts 512-character patterns and rejects 513-character patterns', () => {
     const accepted = { type: 'regex_match', pattern: 'a'.repeat(512), case_insensitive: true };
     const rejected = { type: 'regex_match', pattern: 'a'.repeat(513), case_insensitive: true };
     expect(validateExpectations([accepted])).toEqual([]);
     expect(validateExpectations([rejected])).toEqual([
+      expect.objectContaining({ code: 'pattern_too_long', path: 'expectations[0].pattern' }),
+    ]);
+
+    const acceptedLink = { type: 'link_pattern', pattern: 'a'.repeat(512) };
+    const rejectedLink = { type: 'link_pattern', pattern: 'a'.repeat(513) };
+    expect(validateExpectations([acceptedLink])).toEqual([]);
+    expect(validateExpectations([rejectedLink])).toEqual([
       expect.objectContaining({ code: 'pattern_too_long', path: 'expectations[0].pattern' }),
     ]);
   });
@@ -114,6 +122,24 @@ describe('expectation spec helpers', () => {
     ]);
     expect(errors.map((error) => error.code)).toEqual(expect.arrayContaining([
       'invalid_boolean', 'invalid_sequence', 'unknown_property', 'unknown_type', 'invalid_type',
+    ]));
+  });
+
+  it('allows omitted or null AI metadata and rejects blank metadata without trimming it', () => {
+    expect(validateExpectations([
+      { type: 'groundedness', min_score: 0.8, model: undefined, provider: null },
+      { type: 'llm_judge', rubric: 'clear', model: ' stored-model ', provider: 'stored-provider' },
+    ])).toEqual([]);
+
+    const errors = validateExpectations([
+      { type: 'groundedness', model: '   ', provider: '\t' },
+      { type: 'llm_judge', rubric: 'clear', model: 42, provider: {} },
+    ]);
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'required', path: 'expectations[0].model' }),
+      expect.objectContaining({ code: 'required', path: 'expectations[0].provider' }),
+      expect.objectContaining({ code: 'invalid_type', path: 'expectations[1].model' }),
+      expect.objectContaining({ code: 'invalid_type', path: 'expectations[1].provider' }),
     ]));
   });
 
@@ -194,6 +220,26 @@ describe('expectation spec helpers', () => {
     });
   });
 
+  it('accepts at most 100 expectations and rejects the 101st before serialization', () => {
+    const atLimit = Array.from({ length: MAX_EXPECTATION_COUNT }, () => ({
+      type: 'contains_text', text: 'ok', case_insensitive: true,
+    }));
+    const overLimit = [...atLimit, { type: 'contains_text', text: 'too many', case_insensitive: true }];
+
+    expect(parseExpectationsJson(JSON.stringify(atLimit)).valid).toBe(true);
+    expect(parseExpectationsJson(JSON.stringify(overLimit))).toMatchObject({
+      valid: false,
+      expectations: null,
+      errors: [expect.objectContaining({ code: 'too_large', path: 'expectations' })],
+    });
+    expect(serializeExpectations(atLimit).valid).toBe(true);
+    expect(serializeExpectations(overLimit)).toMatchObject({
+      valid: false,
+      json: null,
+      errors: [expect.objectContaining({ code: 'too_large', path: 'expectations' })],
+    });
+  });
+
   it('serializes only valid non-empty lists and does not mutate inputs', () => {
     const original = validExpectations.map((expectation) => ({
       ...expectation,
@@ -208,5 +254,51 @@ describe('expectation spec helpers', () => {
     expect(invalid.valid).toBe(false);
     expect(invalid.json).toBeNull();
     expect(invalid.errors[0]?.path).toBe('expectations');
+  });
+
+  it('applies byte and scalar bounds to form-created output and reports cycles safely', () => {
+    const tooLong = serializeExpectations([{
+      type: 'contains_text', text: 'x'.repeat(MAX_JSON_SCALAR_LENGTH + 1), case_insensitive: true,
+    }]);
+    expect(tooLong).toMatchObject({
+      valid: false,
+      json: null,
+      errors: [expect.objectContaining({ code: 'too_large', path: 'expectations[0].text' })],
+    });
+
+    const tooManyBytes = Array.from({ length: MAX_EXPECTATION_COUNT }, () => ({
+      type: 'contains_text', text: 'x'.repeat(2_600), case_insensitive: true,
+    }));
+    expect(serializeExpectations(tooManyBytes)).toMatchObject({
+      valid: false,
+      json: null,
+      errors: [expect.objectContaining({ code: 'too_large', path: 'expectations' })],
+    });
+
+    let tooDeep: unknown = null;
+    for (let index = 0; index <= 32; index += 1) {
+      tooDeep = { nested: tooDeep };
+    }
+    const deepExpectation: ExpectationDraft = {
+      type: 'contains_text', text: 'ok', case_insensitive: true,
+    };
+    Object.defineProperty(deepExpectation, 'toJSON', { value: () => tooDeep });
+    expect(serializeExpectations([deepExpectation])).toMatchObject({
+      valid: false,
+      json: null,
+      errors: [expect.objectContaining({ code: 'too_large' })],
+    });
+
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    const cyclicExpectation: ExpectationDraft = {
+      type: 'contains_text', text: 'ok', case_insensitive: true,
+    };
+    Object.defineProperty(cyclicExpectation, 'toJSON', { value: () => cycle });
+    expect(serializeExpectations([cyclicExpectation])).toMatchObject({
+      valid: false,
+      json: null,
+      errors: [expect.objectContaining({ code: 'invalid_json', path: 'expectations' })],
+    });
   });
 });

@@ -155,12 +155,21 @@ public sealed class TestRunProcessorTests
             dbContext,
             runStore,
             new StubExpectationEvaluator(UnusedExpectationResult()),
-            pythonEvalClient: pythonEvalClient);
+            pythonEvalClient: pythonEvalClient,
+            includeRetrievedDocs: expectationType == "groundedness");
         using var cancellation = new CancellationTokenSource();
 
         var processing = processor.ProcessRunAsync(runId, cancellation.Token);
-        await pythonEvalClient.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
-        cancellation.Cancel();
+        try
+        {
+            await pythonEvalClient.Entered.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            cancellation.Cancel();
+        }
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
         Assert.Equal(cancellation.Token, pythonEvalClient.ObservedCancellationToken);
@@ -193,7 +202,8 @@ public sealed class TestRunProcessorTests
                     ErrorMessage = "Provider unavailable",
                     ErrorCode = PythonWorkerErrorCodes.Unavailable,
                     WorkerStatusCode = 503
-                }));
+                }),
+            includeRetrievedDocs: expectationType == "groundedness");
 
         await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
 
@@ -277,13 +287,14 @@ public sealed class TestRunProcessorTests
         ITestRunWorkerStore testRunWorkerStore,
         IExpectationEvaluator expectationEvaluator,
         IEndpointExecutor? endpointExecutor = null,
-        IPythonEvalClient? pythonEvalClient = null)
+        IPythonEvalClient? pythonEvalClient = null,
+        bool includeRetrievedDocs = false)
     {
         return new TestRunProcessor(
             dbContext,
             testRunWorkerStore,
             endpointExecutor ?? new StubEndpointExecutor(),
-            new StubMappingService(),
+            new StubMappingService(includeRetrievedDocs),
             expectationEvaluator,
             pythonEvalClient ?? new StubPythonEvalClient(),
             NullLogger<TestRunProcessor>.Instance);
@@ -452,7 +463,7 @@ public sealed class TestRunProcessorTests
         }
     }
 
-    private sealed class StubMappingService : IMappingService
+    private sealed class StubMappingService(bool includeRetrievedDocs) : IMappingService
     {
         public Task<MappingResult> ApplyMappingAsync(string mappingSpecJson, string responseJson) =>
             Task.FromResult(new MappingResult
@@ -460,7 +471,10 @@ public sealed class TestRunProcessorTests
                 Success = true,
                 Trace = new CanonicalTrace
                 {
-                    Messages = [new Message { Role = "assistant", Content = "response" }]
+                    Messages = [new Message { Role = "assistant", Content = "response" }],
+                    RetrievedDocs = includeRetrievedDocs
+                        ? [new RetrievedDoc { Id = "doc-1", Content = "source" }]
+                        : []
                 }
             });
 

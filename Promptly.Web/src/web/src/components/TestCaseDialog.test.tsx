@@ -452,24 +452,29 @@ describe('TestCaseDialog', () => {
       type: 'llm_judge',
       rubric: 'Helpful',
       min_score: 0.8,
-      model: 'm'.repeat(15_000),
+      model: 'm'.repeat(16_000),
       provider: 'p',
     }));
+    const baselineBytes = new TextEncoder().encode(JSON.stringify(storedExpectations)).byteLength;
+    storedExpectations[0].provider = 'p'.repeat(1 + 262_143 - baselineBytes);
     const storedExpectationsJson = JSON.stringify(storedExpectations);
-    expect(new TextEncoder().encode(storedExpectationsJson).byteLength).toBeLessThan(262_144);
+    expect(new TextEncoder().encode(storedExpectationsJson).byteLength).toBe(262_143);
     renderDialog({ ...persistedTest, expectationsJson: storedExpectationsJson });
 
-    for (let index = 1; index <= storedExpectations.length; index += 1) {
-      fireEvent.change(screen.getByLabelText(`Rubric for expectation ${index}`), {
-        target: { value: 'r'.repeat(2_000) },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('Rubric for expectation 1'), {
+      target: { value: 'Helpful++' },
+    });
+    const changedExpectations = storedExpectations.map((expectation, index) => (
+      index === 0 ? { ...expectation, rubric: 'Helpful++' } : expectation
+    ));
+    expect(new TextEncoder().encode(JSON.stringify(changedExpectations)).byteLength).toBe(262_145);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(screen.getByText(/Fix the highlighted expectation fields before saving this test/))
       .toBeInTheDocument();
     expect(testsApi.update).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Rubric for expectation 1')).toHaveValue('Helpful++');
   });
 
   it('ignores a completed save after the suite changes', async () => {

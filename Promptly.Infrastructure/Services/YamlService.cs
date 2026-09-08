@@ -536,12 +536,12 @@ public class YamlService : IYamlService
         var result = new JsonObject();
         foreach (var child in mapping.Children)
         {
-            if (child.Key is not YamlScalarNode key || string.IsNullOrWhiteSpace(key.Value))
+            if (child.Key is not YamlScalarNode { Value: string keyValue })
             {
                 throw new InvalidOperationException("YAML object keys must be strings");
             }
 
-            result[key.Value] = ToJsonNode(child.Value, activeNodes);
+            result[keyValue] = ToJsonNode(child.Value, activeNodes);
         }
 
         return result;

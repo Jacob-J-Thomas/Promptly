@@ -189,6 +189,8 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
                 metadata:
                   enabled: true
                   missing: null
+                  "": true
+                  " ": false
                   nested:
                     also_missing: null
                   wide: 1e100
@@ -204,7 +206,8 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
                 - type: tool_called
                   tool_name: search
                 - type: tool_sequence
-                  sequence: [search]
+                  sequence: [search, summarize]
+                  exact_sequence: true
                 - type: llm_judge
                   rubric: Be helpful
                 - type: groundedness
@@ -253,8 +256,11 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
         Assert.Equal(JsonValueKind.Number, metadata.GetProperty("wide").ValueKind);
         Assert.Equal("1e100", metadata.GetProperty("wide").GetRawText());
         Assert.Equal(JsonValueKind.Null, metadata.GetProperty("nested").GetProperty("also_missing").ValueKind);
+        Assert.True(metadata.GetProperty("").GetBoolean());
+        Assert.False(metadata.GetProperty(" ").GetBoolean());
         Assert.Equal("first", roundTrippedInput.RootElement.GetProperty("ordered")[0].GetString());
         Assert.Equal("second", roundTrippedInput.RootElement.GetProperty("ordered")[1].GetString());
+        Assert.True(roundTrippedExpectations.RootElement[5].GetProperty("exact_sequence").GetBoolean());
     }
 
     [Fact]

@@ -1,4 +1,12 @@
-import { parseDocument, stringify } from 'yaml';
+import {
+  isAlias,
+  isCollection,
+  isNode,
+  isScalar,
+  parseDocument,
+  stringify,
+  visit,
+} from 'yaml';
 import {
   parseInputSpecJson,
   type ConversationMessage,
@@ -38,6 +46,8 @@ export interface TestCaseYamlParseResult {
 }
 
 const MAX_YAML_BYTES = 1_048_576;
+const MAX_YAML_DEPTH = 32;
+const MAX_YAML_SCALAR_LENGTH = 16_384;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -100,6 +110,47 @@ const mapExpectationIssue = (error: ExpectationSpecIssue): YamlValidationIssue =
   error.message,
 );
 
+const preflightYamlDocument = (document: ReturnType<typeof parseDocument>): YamlValidationIssue[] => {
+  const tagDirectives = document.directives?.tags;
+  if (tagDirectives && Object.keys(tagDirectives).some((handle) => handle !== '!!')) {
+    return [yamlIssue('unsupported_value', 'rows', 'YAML tags are not supported')];
+  }
+
+  let issue: YamlValidationIssue | null = null;
+  visit(document, {
+    Node(_key, node, path) {
+      const nodeMetadata = node as { anchor?: unknown; tag?: unknown };
+      if (isAlias(node) || nodeMetadata.anchor !== undefined) {
+        issue ??= yamlIssue('unsupported_value', 'rows', 'YAML anchors and aliases are not supported');
+      }
+      if (typeof nodeMetadata.tag === 'string' && nodeMetadata.tag.length > 0) {
+        issue ??= yamlIssue('unsupported_value', 'rows', 'YAML tags are not supported');
+      }
+
+      const depth = path.reduce(
+        (count, ancestor) => count + (isNode(ancestor) && isCollection(ancestor) ? 1 : 0),
+        0,
+      );
+      if (depth > MAX_YAML_DEPTH) {
+        issue ??= yamlIssue('too_large', 'rows', 'YAML nesting exceeds the maximum depth');
+      }
+
+      if (isScalar(node)) {
+        const scalar = node as { value: unknown; source?: unknown };
+        const length = typeof scalar.value === 'string'
+          ? scalar.value.length
+          : typeof scalar.source === 'string' ? scalar.source.length : 0;
+        if (length > MAX_YAML_SCALAR_LENGTH) {
+          issue ??= yamlIssue('too_large', 'rows', 'YAML scalar exceeds the maximum length');
+        }
+      }
+      return undefined;
+    },
+  });
+
+  return issue ? [issue] : [];
+};
+
 const parseYamlValue = (text: string): { value: unknown; errors: YamlValidationIssue[] } => {
   if (new TextEncoder().encode(text).length > MAX_YAML_BYTES) {
     return {
@@ -129,6 +180,10 @@ const parseYamlValue = (text: string): { value: unknown; errors: YamlValidationI
           'Only YAML version 1.2 is supported by the test editor.',
         )],
       };
+    }
+    const preflightErrors = preflightYamlDocument(document);
+    if (preflightErrors.length > 0) {
+      return { value: null, errors: preflightErrors };
     }
     return { value: document.toJS({ mapAsMap: false, maxAliasCount: 100 }), errors: [] };
   } catch {

@@ -23,6 +23,16 @@ const draft: TestCaseYamlDraft = {
   ],
 };
 
+const minimalYaml = (name = 'Greeting') => `- id: case-1
+  name: ${name}
+  input:
+    messages:
+      - role: user
+        content: Hello
+  expectations:
+    - type: contains_text
+      text: Hello`;
+
 describe('test-case YAML conversion', () => {
   it('round-trips one root row with rich input metadata and ordered options', () => {
     const written = formToYaml(draft);
@@ -109,7 +119,7 @@ describe('test-case YAML conversion', () => {
     ]);
   });
 
-  it('turns recursive aliases into a safe field error instead of throwing', () => {
+  it('rejects anchors and aliases before materializing YAML', () => {
     const parsed = yamlToForm(`- id: case-1
   name: Greeting
   input: &input
@@ -119,9 +129,63 @@ describe('test-case YAML conversion', () => {
     expect(parsed.valid).toBe(false);
     expect(parsed.errors).toEqual([
       {
-        code: 'invalid_shape',
-        path: 'rows[0].input',
-        message: 'Input contains recursive aliases and cannot be edited safely.',
+        code: 'unsupported_value',
+        path: 'rows',
+        message: 'YAML anchors and aliases are not supported',
+      },
+    ]);
+  });
+
+  it('rejects explicit tags before YAML values are materialized', () => {
+    const parsed = yamlToForm(`- id: case-1
+  name: !!str Greeting
+  input:
+    messages:
+      - role: user
+        content: Hello
+  expectations:
+    - type: contains_text
+      text: Hello`);
+    expect(parsed.valid).toBe(false);
+    expect(parsed.errors).toEqual([
+      {
+        code: 'unsupported_value',
+        path: 'rows',
+        message: 'YAML tags are not supported',
+      },
+    ]);
+  });
+
+  it('enforces the YAML nesting limit before converting to JavaScript', () => {
+    let nested = 'true';
+    for (let index = 0; index < 40; index += 1) {
+      nested = `{next: ${nested}}`;
+    }
+    const parsed = yamlToForm(`${minimalYaml().replace(
+      '    messages:',
+      `    metadata: ${nested}\n    messages:`,
+    )}`);
+    expect(parsed.valid).toBe(false);
+    expect(parsed.errors).toEqual([
+      {
+        code: 'too_large',
+        path: 'rows',
+        message: 'YAML nesting exceeds the maximum depth',
+      },
+    ]);
+  });
+
+  it('accepts the exact YAML scalar limit and rejects the next character', () => {
+    const exact = yamlToForm(minimalYaml('x'.repeat(16_384)));
+    expect(exact.valid).toBe(true);
+
+    const over = yamlToForm(minimalYaml('x'.repeat(16_385)));
+    expect(over.valid).toBe(false);
+    expect(over.errors).toEqual([
+      {
+        code: 'too_large',
+        path: 'rows',
+        message: 'YAML scalar exceeds the maximum length',
       },
     ]);
   });

@@ -249,6 +249,101 @@ public sealed class TenantSuiteAndTestServiceTests
     }
 
     [Fact]
+    public async Task Test_case_identity_validation_rejects_missing_and_duplicate_ids_without_mutation()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        const string input = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
+        const string expectations = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]";
+
+        var missing = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "",
+                "",
+                null,
+                input,
+                expectations,
+                scope));
+        Assert.Contains(missing.Issues, issue => issue.Code == "required" && issue.Path == "externalId");
+        Assert.Contains(missing.Issues, issue => issue.Code == "required" && issue.Path == "name");
+
+        var duplicateCreate = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "allowed case",
+                "replacement",
+                null,
+                input,
+                expectations,
+                scope));
+        Assert.Contains(duplicateCreate.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "externalId");
+
+        var existingOther = await service.CreateTestCaseAsync(
+            graph.AllowedSuiteId,
+            "other case",
+            "other case",
+            null,
+            input,
+            expectations,
+            scope);
+        Assert.NotNull(existingOther);
+
+        var duplicateUpdate = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.UpdateTestCaseAsync(
+                graph.AllowedTestCaseId,
+                "other case",
+                "replacement",
+                null,
+                input,
+                expectations,
+                scope));
+        Assert.Contains(duplicateUpdate.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "externalId");
+
+        var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(persisted);
+        Assert.Equal("allowed case", persisted.ExternalId);
+        Assert.Equal("allowed case", persisted.Name);
+        Assert.DoesNotContain(dbContext.TestCases, testCase => testCase.Name == "replacement");
+    }
+
+    [Fact]
+    public async Task Bulk_import_reports_row_identity_and_existing_id_issues_before_persisting()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        const string input = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
+        const string expectations = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]";
+        var rows = new List<TestCase>
+        {
+            new() { ExternalId = "", Name = "", InputSpecJson = input, ExpectationsJson = expectations },
+            new() { ExternalId = "allowed case", Name = "existing", InputSpecJson = input, ExpectationsJson = expectations },
+            new() { ExternalId = "allowed case", Name = "in-file duplicate", InputSpecJson = input, ExpectationsJson = expectations }
+        };
+
+        var exception = await Assert.ThrowsAsync<TestSpecificationValidationException>(() =>
+            service.BulkCreateTestsAsync(graph.AllowedSuiteId, rows, scope));
+
+        Assert.Contains(exception.Issues, issue => issue.Code == "required" && issue.Path == "rows[0].id");
+        Assert.Contains(exception.Issues, issue => issue.Code == "required" && issue.Path == "rows[0].name");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "rows[1].id");
+        Assert.Contains(exception.Issues, issue =>
+            issue.Code == "duplicate_external_id" && issue.Path == "rows[2].id");
+        Assert.Equal(3, await dbContext.TestCases.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Owned_test_case_crud_and_bulk_import_succeed()
     {
         await using var dbContext = CreateDbContext();

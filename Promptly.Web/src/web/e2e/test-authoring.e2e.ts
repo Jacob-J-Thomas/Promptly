@@ -49,6 +49,52 @@ const openTestMenu = async (page: Page) => {
   await expect(page.getByRole('menuitem', { name: 'Edit' })).toBeVisible();
 };
 
+const allExpectationYaml = `  expectations:
+    - type: contains_text
+      text: Deterministically accurate
+      case_insensitive: true
+    - type: banned_text
+      text: forbidden
+      case_insensitive: false
+    - type: regex_match
+      pattern: Deterministically
+      case_insensitive: true
+    - type: link_pattern
+      pattern: https://example.com
+    - type: tool_called
+      tool_name: search
+    - type: tool_sequence
+      sequence:
+        - search
+        - summarize
+      exact_sequence: false
+    - type: llm_judge
+      rubric: Helpful human judge
+      min_score: 0.8
+      model: null
+      provider: null
+    - type: groundedness
+      min_score: 0.8
+      model: null
+      provider: null`;
+
+const authoredExpectations = [
+  { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: true },
+  { type: 'banned_text', text: 'forbidden', case_insensitive: false },
+  { type: 'regex_match', pattern: 'Deterministically', case_insensitive: true },
+  { type: 'link_pattern', pattern: 'https://example.com' },
+  { type: 'tool_called', tool_name: 'search' },
+  { type: 'tool_sequence', sequence: ['search', 'summarize'], exact_sequence: false },
+  {
+    type: 'llm_judge',
+    rubric: 'Helpful human judge',
+    min_score: 0.8,
+    model: null,
+    provider: null,
+  },
+  { type: 'groundedness', min_score: 0.8, model: null, provider: null },
+] as const;
+
 test('test authoring persists through Form and YAML and runs through the real stack', async ({ page }) => {
   const correlation = process.env.PROMPTLY_E2E_AUTHORING_CORRELATION;
   if (!correlation) {
@@ -117,17 +163,44 @@ test('test authoring persists through Form and YAML and runs through the real st
   await createDialog.getByRole('menuitem', { name: 'Contains text' }).click();
   await createDialog.getByLabel('Text for expectation 1').fill('Deterministically accurate');
 
+  const description = createDialog.getByLabel('Description');
+  await description.focus();
+  await expect(description).toBeFocused();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' with keyboard editing');
+
   await createDialog.getByRole('tab', { name: 'YAML' }).click();
   const yamlEditor = createDialog.getByLabel('Test YAML');
   const initialYaml = await yamlEditor.inputValue();
   await yamlEditor.fill('- id: [broken');
   await createDialog.getByRole('tab', { name: 'Form' }).click();
   await expect(createDialog.getByText(/Repair the YAML errors before returning to Form/)).toBeVisible();
-  const authoredYaml = initialYaml
-    .replace('  input:\n', '  input:\n    temperature: 0.5\n    enabled: true\n');
+  const authoredYaml = initialYaml.slice(0, initialYaml.indexOf('  expectations:'))
+    .replace('  input:\n', `  input:
+    temperature: 0.5
+    enabled: true
+    metadata:
+      tags:
+        - smoke
+        - authoring
+      nullable: null
+      nested:
+        count: 2
+`)
+    + allExpectationYaml;
   await yamlEditor.fill(authoredYaml);
   await createDialog.getByRole('tab', { name: 'Form' }).click();
   expect(await createDialog.getByLabel('Content for message 1').inputValue()).toContain(correlation);
+  await expect(createDialog.getByLabel('Text for expectation 1')).toHaveValue('Deterministically accurate');
+  await expect(createDialog.getByLabel('Text for expectation 2')).toHaveValue('forbidden');
+  await expect(createDialog.getByLabel('Pattern for expectation 3')).toHaveValue('Deterministically');
+  await expect(createDialog.getByLabel('Link pattern for expectation 4')).toHaveValue('https://example.com');
+  await expect(createDialog.getByLabel('Tool name for expectation 5')).toHaveValue('search');
+  await expect(createDialog.getByLabel('Tool 1 for expectation 6')).toHaveValue('search');
+  await expect(createDialog.getByLabel('Tool 2 for expectation 6')).toHaveValue('summarize');
+  await expect(createDialog.getByLabel('Rubric for expectation 7')).toHaveValue('Helpful human judge');
+  await expect(createDialog.getByLabel('Minimum score for expectation 7')).toHaveValue('0.8');
+  await expect(createDialog.getByLabel('Minimum score for expectation 8')).toHaveValue('0.8');
 
   const createRequest = page.waitForRequest((request) => (
     request.method() === 'POST'
@@ -142,18 +215,46 @@ test('test authoring persists through Form and YAML and runs through the real st
   expect(JSON.parse(createdBody.inputSpecJson)).toMatchObject({
     temperature: 0.5,
     enabled: true,
+    metadata: {
+      tags: ['smoke', 'authoring'],
+      nullable: null,
+      nested: { count: 2 },
+    },
   });
   expect(createdBody.inputSpecJson).toContain(correlation);
-  expect(JSON.parse(createdBody.expectationsJson)).toEqual([
-    { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: true },
-  ]);
+  expect(JSON.parse(createdBody.expectationsJson)).toEqual(authoredExpectations);
   await expect(page.getByText('Authored response', { exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 375, height: 900 });
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= window.innerWidth
+  ))).toBe(true);
 
   await page.reload();
   await expect(page.getByText('Authored response', { exact: true })).toBeVisible();
   await openTestMenu(page);
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const editDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
+  await expect(editDialog.getByLabel('Text for expectation 1')).toHaveValue('Deterministically accurate');
+  await expect(editDialog.getByLabel('Text for expectation 2')).toHaveValue('forbidden');
+  await expect(editDialog.getByLabel('Pattern for expectation 3')).toHaveValue('Deterministically');
+  await expect(editDialog.getByLabel('Link pattern for expectation 4')).toHaveValue('https://example.com');
+  await expect(editDialog.getByLabel('Tool name for expectation 5')).toHaveValue('search');
+  await expect(editDialog.getByLabel('Tool 1 for expectation 6')).toHaveValue('search');
+  await expect(editDialog.getByLabel('Tool 2 for expectation 6')).toHaveValue('summarize');
+  await expect(editDialog.getByLabel('Rubric for expectation 7')).toHaveValue('Helpful human judge');
+  await expect(editDialog.getByLabel('Minimum score for expectation 7')).toHaveValue('0.8');
+  await expect(editDialog.getByLabel('Minimum score for expectation 8')).toHaveValue('0.8');
+  const loadedTests = await api(page, `/api/suites/${suiteId}/tests`, 'GET');
+  expect(loadedTests.status).toBe(200);
+  const loadedTest = (loadedTests.body as Array<{ expectationsJson: string }>)[0];
+  expect(JSON.parse(loadedTest.expectationsJson)).toEqual(authoredExpectations);
+
+  const editName = editDialog.getByLabel('Name');
+  await editName.focus();
+  await expect(editName).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(editDialog.getByLabel('Description')).toBeFocused();
   await editDialog.getByLabel('Name').fill('Edited authored response');
   await editDialog.getByLabel('Description').fill('Edited and reloaded through the browser');
   await editDialog.getByLabel('Content for message 1').fill(JSON.stringify({
@@ -182,10 +283,16 @@ test('test authoring persists through Form and YAML and runs through the real st
   expect(JSON.parse(updatedBody.inputSpecJson)).toMatchObject({
     temperature: 0.75,
     enabled: false,
+    metadata: {
+      tags: ['smoke', 'authoring'],
+      nullable: null,
+      nested: { count: 2 },
+    },
   });
   expect(updatedBody.inputSpecJson).toContain('Edited authoring prompt');
   expect(JSON.parse(updatedBody.expectationsJson)).toEqual([
     { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
+    ...authoredExpectations.slice(1),
   ]);
   await expect(page.getByText('Edited authored response', { exact: true })).toBeVisible();
 
@@ -200,6 +307,24 @@ test('test authoring persists through Form and YAML and runs through the real st
   );
   await expect(reloadedDialog.getByLabel('Case-insensitive for expectation 1')).not.toBeChecked();
   await reloadedDialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await openTestMenu(page);
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  const reductionDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
+  for (let index = authoredExpectations.length; index >= 2; index -= 1) {
+    await reductionDialog.getByRole('button', { name: `Delete expectation ${index}` }).click();
+  }
+  await expect(reductionDialog.getByLabel('Text for expectation 1')).toHaveValue('Deterministically accurate');
+  await expect(reductionDialog.getByRole('group', { name: 'Expectation 2' })).toHaveCount(0);
+  const reductionRequest = page.waitForRequest((request) => (
+    request.method() === 'PUT' && new URL(request.url()).pathname.startsWith('/api/tests/')
+  ));
+  await reductionDialog.getByRole('button', { name: 'Save changes' }).click();
+  const reduced = await reductionRequest;
+  const reducedBody = reduced.postDataJSON() as { expectationsJson: string };
+  expect(JSON.parse(reducedBody.expectationsJson)).toEqual([
+    { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
+  ]);
 
   await page.getByRole('button', { name: 'Run Suite' }).click();
   const runDialog = page.getByRole('dialog', { name: 'Run Test Suite' });

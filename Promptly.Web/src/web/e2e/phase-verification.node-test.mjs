@@ -117,6 +117,43 @@ test('requires one distinct provider POST for each direct authoring scenario', (
   ), /exactly 2 provider POSTs/);
 });
 
+test('rejects a malformed UUID in the expected direct correlation inventory', () => {
+  const expectedCorrelations = [
+    '11111111-1111-4111-8111-111111111111',
+    'not-a-uuid',
+  ];
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, expectedCorrelations[0])],
+    { phase: 'direct', expectedCorrelations },
+  ), /requires runner correlations/);
+});
+
+test('rejects duplicate expected correlations before provider evidence is accepted', () => {
+  const correlation = '11111111-1111-4111-8111-111111111111';
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, correlation)],
+    { phase: 'direct', expectedCorrelations: [correlation, correlation] },
+  ), /must be distinct/);
+});
+
+test('rejects direct evidence without an expected correlation inventory', () => {
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, '11111111-1111-4111-8111-111111111111')],
+    { phase: 'direct' },
+  ), /requires runner correlations/);
+});
+
+test('rejects duplicate provider evidence correlations', () => {
+  const correlations = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, correlations[0]), providerRecord(2, correlations[0])],
+    { phase: 'direct', expectedCorrelations: correlations },
+  ), /unexpected request/);
+});
+
 for (const [name, mutate, expected] of [
   ['a widened CIDR', (configuration) => { configuration.fixture.cidr = '172.30.0.0/29'; }, /outside the admitted boundary/],
   ['a different private host', (configuration) => { configuration.server.allowlistHost = 'postgres'; }, /exact allowlist boundary is invalid/],

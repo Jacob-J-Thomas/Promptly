@@ -254,7 +254,7 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
             </Box>
           );
         })}
-        {sequenceError && !sequenceError.path.includes('[') && (
+        {sequenceError && sequenceError.path === `expectations[${index}].sequence` && (
           <FormHelperText error>{sequenceError.message}</FormHelperText>
         )}
         <Button

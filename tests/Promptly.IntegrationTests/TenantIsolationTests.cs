@@ -340,7 +340,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
         var testExternalId = $"test-{nonce}";
         var testName = $"test-name-{secret}";
         var testInput = $"{{\"prompt\":\"input-{secret}\"}}";
-        var testExpectations = $"[{{\"type\":\"contains\",\"value\":\"expect-{secret}\"}}]";
+        var testExpectations = $"[{{\"type\":\"contains_text\",\"text\":\"expect-{secret}\"}}]";
         var runConfig = $"{{\"runSecret\":\"config-{secret}\"}}";
         var runSummary = $"{{\"summarySecret\":\"summary-{secret}\"}}";
         var resultTrace = $"{{\"traceSecret\":\"trace-{secret}\"}}";
@@ -1242,7 +1242,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
                        name = "API key created test",
                        description = "created by exact-project API key",
                        inputSpecJson = "{\"prompt\":\"api-key-created\"}",
-                       expectationsJson = "[{\"type\":\"contains\",\"value\":\"created\"}]"
+                       expectationsJson = "[{\"type\":\"contains_text\",\"text\":\"created\"}]"
                    },
                    cancellationToken))
         {
@@ -1306,7 +1306,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
                        name = "API key updated test",
                        description = "updated by exact-project API key",
                        inputSpecJson = "{\"prompt\":\"api-key-updated\"}",
-                       expectationsJson = "[{\"type\":\"contains\",\"value\":\"updated\"}]"
+                       expectationsJson = "[{\"type\":\"contains_text\",\"text\":\"updated\"}]"
                    },
                    cancellationToken))
         {
@@ -1333,7 +1333,7 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
             Assert.Equal(suiteId, document.RootElement.GetProperty("suiteId").GetGuid());
             Assert.Equal(updatedExternalId, document.RootElement.GetProperty("externalId").GetString());
             Assert.Equal(
-                "[{\"type\":\"contains\",\"value\":\"updated\"}]",
+                "[{\"type\":\"contains_text\",\"text\":\"updated\"}]",
                 document.RootElement.GetProperty("expectationsJson").GetString());
         }
 
@@ -1619,8 +1619,8 @@ public sealed class TenantIsolationTests(IntegrationFixture fixture)
               input:
                 prompt: imported-prompt
               expectations:
-                - type: contains
-                  value: imported
+                - type: contains_text
+                  text: imported
             """;
         var multipart = new MultipartFormDataContent();
         var file = new StringContent(yaml, Encoding.UTF8);

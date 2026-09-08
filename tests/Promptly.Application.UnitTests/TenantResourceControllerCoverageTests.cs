@@ -138,6 +138,7 @@ public sealed class TenantResourceControllerCoverageTests
             new ConfigurableEnvironmentService(),
             NoScope(),
             NullLogger<EnvironmentsController>.Instance);
+        Assert.IsType<UnauthorizedResult>(await unavailable.GetEnvironments(Guid.NewGuid()));
         Assert.IsType<UnauthorizedResult>(await unavailable.GetEnvironment(Guid.NewGuid()));
         Assert.IsType<UnauthorizedResult>(await unavailable.DeleteEnvironment(Guid.NewGuid()));
 
@@ -222,6 +223,7 @@ public sealed class TenantResourceControllerCoverageTests
             new ConfigurableEndpointService(),
             NoScope(),
             NullLogger<EndpointsController>.Instance);
+        Assert.IsType<UnauthorizedResult>(await unavailable.GetEndpoints(Guid.NewGuid()));
         Assert.IsType<UnauthorizedResult>(await unavailable.GetEndpoint(Guid.NewGuid()));
         Assert.IsType<UnauthorizedResult>(await unavailable.DeleteEndpoint(Guid.NewGuid()));
 

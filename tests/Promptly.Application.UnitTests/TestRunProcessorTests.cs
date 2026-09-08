@@ -68,6 +68,44 @@ public sealed class TestRunProcessorTests
     }
 
     [Fact]
+    public async Task ProcessRunAsync_persists_unexpected_evaluator_failures_as_errors()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"regex_match\",\"pattern\":\"a\"}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
+        var evaluator = new ExpectationEvaluator(
+            NullLogger<ExpectationEvaluator>.Instance,
+            new ThrowingRegexMatcher(),
+            new PermissiveExpectationValidator());
+        var processor = CreateProcessor(dbContext, runStore, evaluator);
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var storedResult = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Error, storedResult.Status);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(storedResult.MetricsJson));
+        Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
+        Assert.Equal(0, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
+        var expectationResult = metrics.RootElement.GetProperty("expectationResults")[0];
+        Assert.Equal("Error", expectationResult.GetProperty("Status").GetString());
+        Assert.Equal("evaluation_error", expectationResult.GetProperty("ErrorCode").GetString());
+        Assert.Equal("Evaluation failed", expectationResult.GetProperty("Reason").GetString());
+        Assert.DoesNotContain(
+            "sensitive matcher details",
+            storedResult.FailureReasonsJson,
+            StringComparison.Ordinal);
+        Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
+    }
+
+    [Fact]
     public void ExpectationResult_omits_a_null_error_code_from_json()
     {
         var result = new ExpectationResult
@@ -147,7 +185,7 @@ public sealed class TestRunProcessorTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+            ValidExpectationJson(expectationType)));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var pythonEvalClient = new BlockingPythonEvalClient(expectationType);
@@ -155,12 +193,21 @@ public sealed class TestRunProcessorTests
             dbContext,
             runStore,
             new StubExpectationEvaluator(UnusedExpectationResult()),
-            pythonEvalClient: pythonEvalClient);
+            pythonEvalClient: pythonEvalClient,
+            includeRetrievedDocs: expectationType == "groundedness");
         using var cancellation = new CancellationTokenSource();
 
         var processing = processor.ProcessRunAsync(runId, cancellation.Token);
-        await pythonEvalClient.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
-        cancellation.Cancel();
+        try
+        {
+            await pythonEvalClient.Entered.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            cancellation.Cancel();
+        }
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
         Assert.Equal(cancellation.Token, pythonEvalClient.ObservedCancellationToken);
@@ -178,7 +225,7 @@ public sealed class TestRunProcessorTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+            ValidExpectationJson(expectationType)));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
         var processor = CreateProcessor(
@@ -193,7 +240,8 @@ public sealed class TestRunProcessorTests
                     ErrorMessage = "Provider unavailable",
                     ErrorCode = PythonWorkerErrorCodes.Unavailable,
                     WorkerStatusCode = 503
-                }));
+                }),
+            includeRetrievedDocs: expectationType == "groundedness");
 
         await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
 
@@ -277,13 +325,14 @@ public sealed class TestRunProcessorTests
         ITestRunWorkerStore testRunWorkerStore,
         IExpectationEvaluator expectationEvaluator,
         IEndpointExecutor? endpointExecutor = null,
-        IPythonEvalClient? pythonEvalClient = null)
+        IPythonEvalClient? pythonEvalClient = null,
+        bool includeRetrievedDocs = false)
     {
         return new TestRunProcessor(
             dbContext,
             testRunWorkerStore,
             endpointExecutor ?? new StubEndpointExecutor(),
-            new StubMappingService(),
+            new StubMappingService(includeRetrievedDocs),
             expectationEvaluator,
             pythonEvalClient ?? new StubPythonEvalClient(),
             NullLogger<TestRunProcessor>.Instance);
@@ -301,6 +350,12 @@ public sealed class TestRunProcessorTests
             ExpectationsJson = expectationsJson
         };
     }
+
+    private static string ValidExpectationJson(string expectationType) => expectationType switch
+    {
+        "llm_judge" => "[{\"type\":\"llm_judge\",\"rubric\":\"Be helpful\"}]",
+        _ => JsonSerializer.Serialize(new[] { new { type = expectationType } })
+    };
 
     private static ExpectationResult UnusedExpectationResult()
     {
@@ -446,7 +501,7 @@ public sealed class TestRunProcessorTests
         }
     }
 
-    private sealed class StubMappingService : IMappingService
+    private sealed class StubMappingService(bool includeRetrievedDocs) : IMappingService
     {
         public Task<MappingResult> ApplyMappingAsync(string mappingSpecJson, string responseJson) =>
             Task.FromResult(new MappingResult
@@ -454,7 +509,10 @@ public sealed class TestRunProcessorTests
                 Success = true,
                 Trace = new CanonicalTrace
                 {
-                    Messages = [new Message { Role = "assistant", Content = "response" }]
+                    Messages = [new Message { Role = "assistant", Content = "response" }],
+                    RetrievedDocs = includeRetrievedDocs
+                        ? [new RetrievedDoc { Id = "doc-1", Content = "source" }]
+                        : []
                 }
             });
 
@@ -504,6 +562,33 @@ public sealed class TestRunProcessorTests
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class ThrowingRegexMatcher : IBoundedRegexMatcher
+    {
+        public BoundedRegexMatchResult FindMatches(
+            string pattern,
+            string input,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive matcher details");
+
+        public BoundedRegexCandidateResult FindMatchingCandidates(
+            string pattern,
+            IReadOnlyList<string> candidates,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive matcher details");
+    }
+
+    private sealed class PermissiveExpectationValidator : IExpectationValidator
+    {
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson) =>
+            ExpectationValidationResult.Valid;
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
     }
 
     private sealed class StubPythonEvalClient : IPythonEvalClient

@@ -13,13 +13,16 @@ public class ExpectationEvaluator : IExpectationEvaluator
 
     private readonly ILogger<ExpectationEvaluator> _logger;
     private readonly IBoundedRegexMatcher _regexMatcher;
+    private readonly IExpectationValidator _expectationValidator;
 
     public ExpectationEvaluator(
         ILogger<ExpectationEvaluator> logger,
-        IBoundedRegexMatcher regexMatcher)
+        IBoundedRegexMatcher regexMatcher,
+        IExpectationValidator? expectationValidator = null)
     {
         _logger = logger;
         _regexMatcher = regexMatcher;
+        _expectationValidator = expectationValidator ?? new ExpectationDslValidator(regexMatcher);
     }
 
     public Task<ExpectationResult> EvaluateAsync(
@@ -53,11 +56,28 @@ public class ExpectationEvaluator : IExpectationEvaluator
                     ExpectationType = "unknown",
                     Passed = false,
                     Score = 0.0,
+                    ErrorCode = "missing_expectation_type",
                     Reason = "Invalid expectation: missing 'type' field"
                 };
             }
 
-            var type = expDict["type"]?.ToString();
+            var type = expDict["type"] is JsonElement { ValueKind: JsonValueKind.String } typeElement
+                ? typeElement.GetString()
+                : expDict["type"]?.ToString();
+            type = string.IsNullOrWhiteSpace(type) ? null : type;
+            var validation = _expectationValidator.ValidateExpectation(expDict);
+            if (!validation.IsValid)
+            {
+                var issue = validation.Issues[0];
+                return new ExpectationResult
+                {
+                    ExpectationType = type ?? "unknown",
+                    Passed = false,
+                    Score = 0.0,
+                    ErrorCode = issue.Code,
+                    Reason = $"{issue.Path}: {issue.Message}"
+                };
+            }
 
             return type switch
             {
@@ -88,7 +108,8 @@ public class ExpectationEvaluator : IExpectationEvaluator
                 ExpectationType = "error",
                 Passed = false,
                 Score = 0.0,
-                Reason = $"Evaluation error: {ex.Message}"
+                ErrorCode = "evaluation_error",
+                Reason = "Evaluation failed"
             };
         }
     }
@@ -98,7 +119,7 @@ public class ExpectationEvaluator : IExpectationEvaluator
         CanonicalTrace trace)
     {
         var text = GetStringValue(exp, "text") ?? "";
-        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
+        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? true;
         var combined = CombineAssistantMessages(trace);
         var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var found = combined.Contains(text, comparison);
@@ -119,7 +140,7 @@ public class ExpectationEvaluator : IExpectationEvaluator
         CanonicalTrace trace)
     {
         var text = GetStringValue(exp, "text") ?? "";
-        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
+        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? true;
         var combined = CombineAssistantMessages(trace);
         var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var found = combined.Contains(text, comparison);
@@ -146,7 +167,7 @@ public class ExpectationEvaluator : IExpectationEvaluator
             return MissingRegexPattern("regex_match");
         }
 
-        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? false;
+        var caseInsensitive = GetBoolValue(exp, "case_insensitive") ?? true;
         var matchResult = _regexMatcher.FindMatches(
             pattern,
             CombineAssistantMessagesForRegex(trace),
@@ -325,19 +346,22 @@ public class ExpectationEvaluator : IExpectationEvaluator
     {
         var expectedSequence = GetListValue(exp, "sequence") ?? [];
         var actualSequence = trace.ToolCalls.Select(tc => tc.Name).ToList();
-        var matches = actualSequence.Count >= expectedSequence.Count;
-
-        if (matches)
+        if (expectedSequence.Count == 0)
         {
-            for (var index = 0; index < expectedSequence.Count; index++)
+            return new ExpectationResult
             {
-                if (actualSequence[index] != expectedSequence[index])
-                {
-                    matches = false;
-                    break;
-                }
-            }
+                ExpectationType = "tool_sequence",
+                Passed = false,
+                Score = 0.0,
+                ErrorCode = "invalid_tool_sequence",
+                Reason = "Tool sequence must contain at least one non-empty tool name"
+            };
         }
+
+        var exactSequence = GetBoolValue(exp, "exact_sequence") ?? true;
+        var matches = exactSequence
+            ? actualSequence.SequenceEqual(expectedSequence, StringComparer.Ordinal)
+            : IsOrderedSubsequence(expectedSequence, actualSequence);
 
         return new ExpectationResult
         {
@@ -345,7 +369,9 @@ public class ExpectationEvaluator : IExpectationEvaluator
             Passed = matches,
             Score = matches ? 1.0 : 0.0,
             Reason = matches
-                ? $"Tool sequence matches expected order: [{string.Join(", ", expectedSequence)}]"
+                ? exactSequence
+                    ? $"Tool sequence exactly matches expected order: [{string.Join(", ", expectedSequence)}]"
+                    : $"Tool sequence appears in expected order: [{string.Join(", ", expectedSequence)}]"
                 : $"Tool sequence mismatch. Expected: [{string.Join(", ", expectedSequence)}], Actual: [{string.Join(", ", actualSequence)}]",
             Metrics = new Dictionary<string, object>
             {
@@ -353,6 +379,26 @@ public class ExpectationEvaluator : IExpectationEvaluator
                 { "actual_sequence", actualSequence }
             }
         };
+    }
+
+    private static bool IsOrderedSubsequence(
+        IReadOnlyList<string> expected,
+        IReadOnlyList<string> actual)
+    {
+        var expectedIndex = 0;
+        foreach (var actualTool in actual)
+        {
+            if (string.Equals(actualTool, expected[expectedIndex], StringComparison.Ordinal))
+            {
+                expectedIndex++;
+                if (expectedIndex == expected.Count)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static string CombineAssistantMessages(CanonicalTrace trace)

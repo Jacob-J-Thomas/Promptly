@@ -68,18 +68,18 @@ public sealed class TestRunProcessorCoverageTests
                 Assert.Equal(TestRunStatus.Completed, update.Status);
                 using var summary = JsonDocument.Parse(Assert.IsType<string>(update.SummaryJson));
                 Assert.Equal(1, summary.RootElement.GetProperty("total").GetInt32());
-                Assert.Equal(1, summary.RootElement.GetProperty("passed").GetInt32());
+                Assert.Equal(0, summary.RootElement.GetProperty("passed").GetInt32());
                 Assert.Equal(0, summary.RootElement.GetProperty("failed").GetInt32());
-                Assert.Equal(0, summary.RootElement.GetProperty("errors").GetInt32());
-                Assert.Equal(1, summary.RootElement.GetProperty("passRate").GetDouble());
+                Assert.Equal(1, summary.RootElement.GetProperty("errors").GetInt32());
+                Assert.Equal(0, summary.RootElement.GetProperty("passRate").GetDouble());
                 Assert.Equal(0, summary.RootElement.GetProperty("avgLatencyMs").GetInt64());
                 Assert.Equal(0, summary.RootElement.GetProperty("totalTokens").GetInt32());
                 Assert.Equal(0, summary.RootElement.GetProperty("totalCost").GetDouble());
             });
         var result = await dbContext.TestRunResults.SingleAsync(
             TestContext.Current.CancellationToken);
-        Assert.Equal(TestResultStatus.Pass, result.Status);
-        Assert.Null(result.FailureReasonsJson);
+        Assert.Equal(TestResultStatus.Error, result.Status);
+        Assert.Contains("no_expectations", result.FailureReasonsJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -88,7 +88,9 @@ public sealed class TestRunProcessorCoverageTests
         await using var dbContext = CreateDbContext();
         var suiteId = Guid.NewGuid();
         var runId = Guid.NewGuid();
-        dbContext.TestCases.Add(CreateTestCase(suiteId, "[]"));
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"contains_text\",\"text\":\"response\"}]"));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
@@ -197,9 +199,11 @@ public sealed class TestRunProcessorCoverageTests
     }
 
     [Theory]
-    [InlineData("null")]
-    [InlineData("[]")]
-    public async Task ProcessRunAsync_passes_a_case_without_expectations(string expectationsJson)
+    [InlineData("null", "invalid_expectations_json")]
+    [InlineData("[]", "no_expectations")]
+    public async Task ProcessRunAsync_records_an_error_for_a_case_without_expectations(
+        string expectationsJson,
+        string expectedErrorCode)
     {
         await using var dbContext = CreateDbContext();
         var suiteId = Guid.NewGuid();
@@ -214,10 +218,94 @@ public sealed class TestRunProcessorCoverageTests
 
         var result = await dbContext.TestRunResults.SingleAsync(
             TestContext.Current.CancellationToken);
-        Assert.Equal(TestResultStatus.Pass, result.Status);
+        Assert.Equal(TestResultStatus.Error, result.Status);
         using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
         Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
         Assert.Equal(0, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Contains(expectedErrorCode, result.FailureReasonsJson, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("42")]
+    [InlineData("null")]
+    public async Task ProcessRunAsync_handles_injected_validator_legacy_non_string_expectation_types(
+        string serializedType)
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            $"[{{\"type\":{serializedType}}}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            expectationValidator: new PermissiveValidator());
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var result = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Fail, result.Status);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
+        Assert.Equal(1, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(0, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Equal("invalid", metrics.RootElement
+            .GetProperty("expectationResults")[0]
+            .GetProperty("ExpectationType")
+            .GetString());
+    }
+
+    [Fact]
+    public async Task ProcessRunAsync_keeps_non_object_expectations_as_durable_errors()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(suiteId, "[1]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var processor = CreateProcessor(dbContext, runStore);
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var result = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Error, result.Status);
+        Assert.Contains("invalid_expectation", result.FailureReasonsJson, StringComparison.Ordinal);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
+        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
+    }
+
+    [Fact]
+    public async Task ProcessRunAsync_routes_injected_validator_legacy_unknown_types_through_the_fallback_result()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"legacy_expectation\"}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            expectationValidator: new PermissiveValidator());
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var result = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Fail, result.Status);
+        Assert.Contains("Unknown expectation type: legacy_expectation", result.FailureReasonsJson,
+            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -235,7 +323,7 @@ public sealed class TestRunProcessorCoverageTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+            ValidExpectationJson(expectationType)));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
@@ -267,9 +355,10 @@ public sealed class TestRunProcessorCoverageTests
             suiteId,
             """
             [
-              {"type":"contains_text","outcome":"fail"},
-              {"type":"banned_text","outcome":"error"},
+              {"type":"contains_text","text":"missing"},
+              {"type":"banned_text","text":"error"},
               {"type":"future_expectation"},
+              {"type":"contains_text","text":"valid","unknown":true},
               {}
             ]
             """));
@@ -305,11 +394,13 @@ public sealed class TestRunProcessorCoverageTests
         Assert.Equal(TestResultStatus.Error, result.Status);
         using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
         Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
-        Assert.Equal(3, metrics.RootElement.GetProperty("failed").GetInt32());
-        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
-        Assert.Contains("evaluation_error", result.FailureReasonsJson, StringComparison.Ordinal);
-        Assert.Contains("future_expectation", result.FailureReasonsJson, StringComparison.Ordinal);
-        Assert.Contains("Unknown expectation type", result.FailureReasonsJson, StringComparison.Ordinal);
+        Assert.Equal(1, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(4, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Equal(5, metrics.RootElement.GetProperty("expectationResults").GetArrayLength());
+        Assert.Equal(2, evaluator.CallCount);
+        Assert.Contains("unknown_expectation_field", result.FailureReasonsJson, StringComparison.Ordinal);
+        Assert.Contains("unsupported_expectation_type", result.FailureReasonsJson, StringComparison.Ordinal);
+        Assert.Contains("missing_expectation_type", result.FailureReasonsJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -318,7 +409,9 @@ public sealed class TestRunProcessorCoverageTests
         await using var dbContext = CreateDbContext();
         var suiteId = Guid.NewGuid();
         var runId = Guid.NewGuid();
-        dbContext.TestCases.Add(CreateTestCase(suiteId, "[{\"type\":\"contains_text\"}]"));
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"contains_text\",\"text\":\"missing\"}]"));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
@@ -356,19 +449,21 @@ public sealed class TestRunProcessorCoverageTests
         await using var dbContext = CreateDbContext();
         var suiteId = Guid.NewGuid();
         var runId = Guid.NewGuid();
+        var expectation = new Dictionary<string, object>
+        {
+            ["type"] = expectationType,
+            ["min_score"] = minScore,
+            ["model"] = "judge-model",
+            ["provider"] = "judge-provider"
+        };
+        if (expectationType == "llm_judge")
+        {
+            expectation["rubric"] = "Be correct";
+        }
+
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[]
-            {
-                new
-                {
-                    type = expectationType,
-                    rubric = "Be correct",
-                    min_score = minScore,
-                    model = "judge-model",
-                    provider = "judge-provider"
-                }
-            })));
+            JsonSerializer.Serialize(new[] { expectation })));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
@@ -407,6 +502,55 @@ public sealed class TestRunProcessorCoverageTests
         }
     }
 
+    [Fact]
+    public async Task ProcessRunAsync_keeps_missing_grounding_evidence_as_a_failed_assertion_at_zero_threshold()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"groundedness\",\"min_score\":0}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var pythonClient = new DelegatePythonEvalClient
+        {
+            Groundedness = (_, _, _, _, _, _) => Task.FromResult(new EvaluationResult
+            {
+                Success = true,
+                Score = 1,
+                Reason = "should not be called"
+            })
+        };
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            mappingService: new DelegateMappingService((_, _) =>
+                Task.FromResult(new MappingResult
+                {
+                    Success = true,
+                    Trace = new CanonicalTrace
+                    {
+                        Messages = [new Message { Role = "assistant", Content = "answer" }]
+                    }
+                })),
+            pythonEvalClient: pythonClient);
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var result = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Fail, result.Status);
+        Assert.Equal(0, pythonClient.GroundednessCallCount);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(result.MetricsJson));
+        Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(0, metrics.RootElement.GetProperty("errors").GetInt32());
+        Assert.Contains("No retrieved documents available", result.FailureReasonsJson, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("llm_judge")]
     [InlineData("groundedness")]
@@ -418,10 +562,9 @@ public sealed class TestRunProcessorCoverageTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[]
-            {
-                new { type = expectationType, min_score = "not-a-number" }
-            })));
+            expectationType == "llm_judge"
+                ? "[{\"type\":\"llm_judge\",\"rubric\":\"Be helpful\"}]"
+                : "[{\"type\":\"groundedness\"}]"));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
@@ -445,10 +588,50 @@ public sealed class TestRunProcessorCoverageTests
         var result = await dbContext.TestRunResults.SingleAsync(
             TestContext.Current.CancellationToken);
         Assert.Equal(TestResultStatus.Error, result.Status);
-        Assert.Equal(0.7, pythonClient.LastMinScore);
+        Assert.Equal(0.8, pythonClient.LastMinScore);
         Assert.Null(pythonClient.LastModel);
         Assert.Null(pythonClient.LastProvider);
         Assert.Contains(PythonWorkerErrorCodes.ClientError, result.FailureReasonsJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessRunAsync_evaluates_an_injected_validator_legacy_llm_judge_with_omitted_optional_fields()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(suiteId, "[{\"type\":\"llm_judge\"}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var runStore = new RecordingWorkerStore(
+            WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
+        var pythonClient = new DelegatePythonEvalClient
+        {
+            LlmJudge = (rubric, minScore, _, model, provider, _) =>
+            {
+                Assert.Equal(string.Empty, rubric);
+                Assert.Equal(0.8, minScore);
+                Assert.Null(model);
+                Assert.Null(provider);
+                return Task.FromResult(new EvaluationResult
+                {
+                    Success = true,
+                    Score = 1,
+                    Reason = "legacy judge"
+                });
+            }
+        };
+        var processor = CreateProcessor(
+            dbContext,
+            runStore,
+            pythonEvalClient: pythonClient,
+            expectationValidator: new PermissiveValidator());
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var result = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Pass, result.Status);
+        Assert.Equal(1, pythonClient.LlmCallCount);
     }
 
     [Theory]
@@ -462,7 +645,9 @@ public sealed class TestRunProcessorCoverageTests
         var runId = Guid.NewGuid();
         dbContext.TestCases.Add(CreateTestCase(
             suiteId,
-            JsonSerializer.Serialize(new[] { new { type = expectationType } })));
+            expectationType == "llm_judge"
+                ? "[{\"type\":\"llm_judge\",\"rubric\":\"Be helpful\"}]"
+                : "[{\"type\":\"groundedness\"}]"));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
             WorkerRunLoadResult.Ready(CreateRun(runId, suiteId)));
@@ -495,7 +680,9 @@ public sealed class TestRunProcessorCoverageTests
         var runId = Guid.NewGuid();
         var expectationsJson = failurePoint == "invalid-json"
             ? "not json"
-            : "[{\"type\":\"contains_text\"}]";
+            : failurePoint == "evaluator-exception"
+                ? "[{\"type\":\"contains_text\",\"text\":\"ok\"}]"
+                : "[{\"type\":\"contains_text\"}]";
         dbContext.TestCases.Add(CreateTestCase(suiteId, expectationsJson));
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         var runStore = new RecordingWorkerStore(
@@ -524,7 +711,10 @@ public sealed class TestRunProcessorCoverageTests
         var result = await dbContext.TestRunResults.SingleAsync(
             TestContext.Current.CancellationToken);
         Assert.Equal(TestResultStatus.Error, result.Status);
-        Assert.Contains("Processing error", result.FailureReasonsJson, StringComparison.Ordinal);
+        Assert.Contains(
+            failurePoint == "invalid-json" ? "invalid_expectations_json" : "Processing error",
+            result.FailureReasonsJson,
+            StringComparison.Ordinal);
         Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
     }
 
@@ -611,7 +801,8 @@ public sealed class TestRunProcessorCoverageTests
         IEndpointExecutor? endpointExecutor = null,
         IMappingService? mappingService = null,
         IExpectationEvaluator? expectationEvaluator = null,
-        IPythonEvalClient? pythonEvalClient = null)
+        IPythonEvalClient? pythonEvalClient = null,
+        IExpectationValidator? expectationValidator = null)
     {
         return new TestRunProcessor(
             dbContext,
@@ -623,7 +814,8 @@ public sealed class TestRunProcessorCoverageTests
             expectationEvaluator ?? new DelegateExpectationEvaluator((_, _, _) =>
                 Task.FromResult(PassingExpectation())),
             pythonEvalClient ?? new DelegatePythonEvalClient(),
-            NullLogger<TestRunProcessor>.Instance);
+            NullLogger<TestRunProcessor>.Instance,
+            expectationValidator);
     }
 
     private static TestCase CreateTestCase(Guid suiteId, string expectationsJson)
@@ -638,6 +830,17 @@ public sealed class TestRunProcessorCoverageTests
             ExpectationsJson = expectationsJson
         };
     }
+
+    private static string ValidExpectationJson(string expectationType) => expectationType switch
+    {
+        "contains_text" => "[{\"type\":\"contains_text\",\"text\":\"response\"}]",
+        "banned_text" => "[{\"type\":\"banned_text\",\"text\":\"forbidden\"}]",
+        "regex_match" => "[{\"type\":\"regex_match\",\"pattern\":\"response\"}]",
+        "link_pattern" => "[{\"type\":\"link_pattern\",\"pattern\":\"example\"}]",
+        "tool_called" => "[{\"type\":\"tool_called\",\"tool_name\":\"search\"}]",
+        "tool_sequence" => "[{\"type\":\"tool_sequence\",\"sequence\":[\"search\"]}]",
+        _ => throw new ArgumentOutOfRangeException(nameof(expectationType), expectationType, null)
+    };
 
     private static TestRun CreateRun(
         Guid runId,
@@ -701,6 +904,16 @@ public sealed class TestRunProcessorCoverageTests
             Score = 1,
             Reason = "matched"
         };
+    }
+
+    private sealed class PermissiveValidator : IExpectationValidator
+    {
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson) =>
+            ExpectationValidationResult.Valid;
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
     }
 
     private sealed record StatusUpdate(

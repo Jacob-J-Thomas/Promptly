@@ -139,17 +139,17 @@ triggerCommand.SetHandler(async (context) =>
                 {
                     Console.WriteLine($"  - {result.TestCaseExternalId} ({result.TestCaseName}): {result.Status}");
                 }
-                context.ExitCode = 1;
+                context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, completedRun);
                 return;
             }
 
-            context.ExitCode = 0;
+            context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, completedRun);
         }
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        context.ExitCode = 1;
+        context.ExitCode = Promptly.Cli.RunExitCodePolicy.InfrastructureError;
     }
 });
 
@@ -227,16 +227,16 @@ waitCommand.SetHandler(async (context) =>
             {
                 Console.WriteLine($"  - {result.TestCaseExternalId} ({result.TestCaseName}): {result.Status}");
             }
-            context.ExitCode = 1;
+            context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, run);
             return;
         }
 
-        context.ExitCode = 0;
+        context.ExitCode = Promptly.Cli.RunExitCodePolicy.GetExitCode(results, run);
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        context.ExitCode = 1;
+        context.ExitCode = Promptly.Cli.RunExitCodePolicy.InfrastructureError;
     }
 });
 

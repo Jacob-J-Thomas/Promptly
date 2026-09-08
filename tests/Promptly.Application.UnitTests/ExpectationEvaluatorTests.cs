@@ -718,7 +718,10 @@ public sealed class ExpectationEvaluatorTests
             Trace(new string('a', BoundedRegexMatcher.MaxInputLength + 2)),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(BoundedRegexMatcher.MaxInputLength + 1, exhaustionMatcher.LastInput!.Length);
+        // The second assistant message contributes the newline separator before
+        // the remaining-input check, so this path intentionally captures one
+        // character beyond the nominal evaluator budget.
+        Assert.Equal(BoundedRegexMatcher.MaxInputLength + 2, exhaustionMatcher.LastInput!.Length);
         Assert.Equal(BoundedRegexMatcher.MaxInputLength + 1, truncationMatcher.LastInput!.Length);
     }
 

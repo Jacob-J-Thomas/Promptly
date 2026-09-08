@@ -256,7 +256,7 @@ public sealed class TestRunProcessorCoverageTests
         Assert.Equal(0, metrics.RootElement.GetProperty("errors").GetInt32());
         Assert.Equal("invalid", metrics.RootElement
             .GetProperty("expectationResults")[0]
-            .GetProperty("expectationType")
+            .GetProperty("ExpectationType")
             .GetString());
     }
 

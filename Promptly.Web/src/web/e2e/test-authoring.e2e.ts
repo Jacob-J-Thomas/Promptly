@@ -59,6 +59,21 @@ const replaceYaml = async (page: Page, value: string) => {
   await editor.press('ControlOrMeta+A');
   await editor.press('Backspace');
   await page.keyboard.insertText(value);
+  await editor.press('ControlOrMeta+A');
+  const actualText = await editor.evaluate((element) => {
+    if (element instanceof HTMLTextAreaElement) {
+      return element.value;
+    }
+    const editContext = (element as HTMLElement & {
+      editContext?: { text?: string };
+    }).editContext;
+    if (!editContext || typeof editContext.text !== 'string') {
+      throw new Error('Monaco editor did not expose its native EditContext text.');
+    }
+    return editContext.text;
+  });
+  expect(actualText.replace(/\r\n/g, '\n')).toBe(value.replace(/\r\n/g, '\n'));
+  await editor.press('ArrowRight');
 };
 
 const allExpectationYaml = `  expectations:

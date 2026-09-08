@@ -80,10 +80,6 @@ export const MessageListEditor: React.FC<MessageListEditorProps> = ({
 
   const moveMessage = (index: number, direction: -1 | 1) => {
     const destination = index + direction;
-    if (destination < 0 || destination >= messages.length) {
-      return;
-    }
-
     const nextMessages = [...messages];
     const nextRowKeys = [...rowKeys];
     [nextMessages[index], nextMessages[destination]] = [

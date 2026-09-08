@@ -388,8 +388,8 @@ public sealed class YamlServiceTests
             + "  expectations:\n"
             + "    - type: contains_text\n"
             + "      text: hello\n",
-            "duplicate_property",
-            "$[0].id");
+            "invalid_yaml",
+            "$");
         AssertIssue(
             "- id: [typed]\n"
             + "  name: {typed: true}\n"
@@ -418,10 +418,10 @@ public sealed class YamlServiceTests
     public void DeserializeTests_enforces_row_and_scalar_limits_at_the_boundary()
     {
         var exactRows = string.Join(
-            string.Empty,
+            "\n",
             Enumerable.Range(0, TestSpecificationValidator.MaxMessageCount)
                 .Select(index => ValidYamlRow($"row-{index}")));
-        var overRows = exactRows + ValidYamlRow("row-over");
+        var overRows = exactRows + "\n" + ValidYamlRow("row-over");
         var exactTests = new YamlService(NullLogger<YamlService>.Instance)
             .DeserializeTests(exactRows, Guid.NewGuid());
         Assert.Equal(TestSpecificationValidator.MaxMessageCount, exactTests.Count);

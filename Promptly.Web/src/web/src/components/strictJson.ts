@@ -19,6 +19,183 @@ export interface StrictJsonResult {
   issue: StrictJsonIssue | null;
 }
 
+const strictJsonNumber = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+const minimumNormalNumber = Number.MIN_VALUE * 2 ** 52;
+
+/**
+ * A number whose JSON spelling cannot be represented exactly by an IEEE-754
+ * number. The wrapper is only used for those values; ordinary JSON numbers
+ * keep their normal JavaScript representation for callers.
+ */
+export class RawJsonNumber {
+  readonly raw: string;
+
+  readonly numericValue: number;
+
+  constructor(raw: string) {
+    if (!strictJsonNumber.test(raw) || !Number.isFinite(Number(raw))) {
+      throw new TypeError('Raw JSON number token is invalid.');
+    }
+    this.raw = raw;
+    this.numericValue = Number(raw);
+  }
+
+  /** Generic JSON.stringify remains compatible; exact editor paths use the raw-aware serializer. */
+  toJSON(): number {
+    return this.numericValue;
+  }
+}
+
+export const isRawJsonNumber = (value: unknown): value is RawJsonNumber => (
+  value instanceof RawJsonNumber
+);
+
+/**
+ * Keep a raw token when its significant digits exceed the precision normally
+ * available to a JavaScript number, or when an integer is outside the safe
+ * integer range. This intentionally leaves common values such as 0.5 and
+ * 1e100 as ordinary numbers.
+ */
+export const shouldPreserveRawJsonNumber = (token: string, value: number): boolean => {
+  if (!Number.isFinite(value) || !strictJsonNumber.test(token)) {
+    return false;
+  }
+  const nonZeroToken = /[1-9]/.test(token.replace(/[.eE+-]/g, ''));
+  if (value === 0 && nonZeroToken) {
+    return true;
+  }
+  if (value !== 0 && Math.abs(value) < minimumNormalNumber) {
+    return true;
+  }
+  if (!token.includes('.') && !/[eE]/.test(token)) {
+    return !Number.isSafeInteger(value);
+  }
+
+  const significantDigits = token
+    .replace(/^[+-]?0+(?=[1-9])/, '')
+    .replace(/[.eE+-]/g, '')
+    .replace(/^0+/, '')
+    .length;
+  return significantDigits > 15;
+};
+
+/** Normalize YAML core numeric spellings to a finite JSON numeric token. */
+export const normalizeYamlNumberToken = (token: string): string | null => {
+  let source = token;
+  let sign = '';
+  if (source.startsWith('-') || source.startsWith('+')) {
+    sign = source[0] === '-' ? '-' : '';
+    source = source.slice(1);
+  }
+
+  if (/^0x[0-9a-fA-F]+$/.test(source)) {
+    const decimal = BigInt(`0x${source.slice(2)}`).toString();
+    const normalized = `${sign}${decimal}`;
+    return Number.isFinite(Number(normalized)) && strictJsonNumber.test(normalized)
+      ? normalized
+      : null;
+  }
+  if (/^0o[0-7]+$/.test(source)) {
+    const decimal = BigInt(`0o${source.slice(2)}`).toString();
+    const normalized = `${sign}${decimal}`;
+    return Number.isFinite(Number(normalized)) && strictJsonNumber.test(normalized)
+      ? normalized
+      : null;
+  }
+
+  const exponentIndex = source.search(/[eE]/);
+  const mantissa = exponentIndex >= 0 ? source.slice(0, exponentIndex) : source;
+  const exponent = exponentIndex >= 0 ? source.slice(exponentIndex) : '';
+  if (!/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(mantissa)
+    || (exponent.length > 0 && !/^e[+-]?[0-9]+$/i.test(exponent))) {
+    return null;
+  }
+
+  const dotIndex = mantissa.indexOf('.');
+  let whole = dotIndex >= 0 ? mantissa.slice(0, dotIndex) : mantissa;
+  const fraction = dotIndex >= 0 ? mantissa.slice(dotIndex + 1) : '';
+  whole = whole.replace(/^0+(?=[0-9])/, '');
+  if (whole.length === 0) {
+    whole = '0';
+  }
+  const normalizedMantissa = fraction.length > 0 ? `${whole}.${fraction}` : whole;
+  const normalized = `${sign}${normalizedMantissa}${exponent}`;
+  return Number.isFinite(Number(normalized)) && strictJsonNumber.test(normalized)
+    ? normalized
+    : null;
+};
+
+const stringifyJsonValue = (
+  value: unknown,
+  ancestors: Set<object>,
+  inArray = false,
+): string | undefined => {
+  if (isRawJsonNumber(value)) {
+    return value.raw;
+  }
+  if (value === null) {
+    return 'null';
+  }
+  switch (typeof value) {
+    case 'string':
+      return JSON.stringify(value);
+    case 'boolean':
+      return value ? 'true' : 'false';
+    case 'number':
+      if (!Number.isFinite(value)) {
+        return 'null';
+      }
+      return JSON.stringify(value);
+    case 'undefined':
+    case 'function':
+    case 'symbol':
+      return inArray ? 'null' : undefined;
+    case 'bigint':
+      throw new TypeError('BigInt values cannot be serialized as JSON.');
+    default:
+      break;
+  }
+
+  if (typeof value !== 'object') {
+    return undefined;
+  }
+  const toJSON = (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === 'function') {
+    const jsonValue = toJSON.call(value);
+    if (jsonValue !== value) {
+      return stringifyJsonValue(jsonValue, ancestors, inArray);
+    }
+  }
+  if (ancestors.has(value)) {
+    throw new TypeError('Cannot serialize a cyclic JSON value.');
+  }
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => stringifyJsonValue(item, ancestors, true)).join(',')}]`;
+    }
+    const entries = Object.keys(value).flatMap((key) => {
+      const serialized = stringifyJsonValue(
+        (value as Record<string, unknown>)[key],
+        ancestors,
+      );
+      return serialized === undefined ? [] : [[JSON.stringify(key), serialized] as const];
+    });
+    return `{${entries.map(([key, item]) => `${key}:${item}`).join(',')}}`;
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
+/** Serialize JSON-compatible values while retaining selected raw number tokens. */
+export const stringifyJsonWithRawNumbers = (value: unknown): string => {
+  const serialized = stringifyJsonValue(value, new Set<object>());
+  if (serialized === undefined) {
+    throw new TypeError('Value cannot be serialized as JSON.');
+  }
+  return serialized;
+};
+
 const rootPath = 'inputSpecJson';
 
 const issue = (
@@ -40,6 +217,8 @@ class JsonPreflight {
 
   private failure: StrictJsonIssue | null = null;
 
+  private readonly numberTokens: { path: (string | number)[]; token: string }[] = [];
+
   constructor(text: string) {
     this.text = text;
     this.length = text.length;
@@ -47,7 +226,7 @@ class JsonPreflight {
 
   parse(): StrictJsonIssue | null {
     this.skipWhitespace();
-    if (!this.parseValue(rootPath, 0)) {
+    if (!this.parseValue(rootPath, [], 0)) {
       return this.failure ?? issue('invalid_json', rootPath, 'Input JSON is malformed. Repair it before saving this test.');
     }
     this.skipWhitespace();
@@ -56,7 +235,11 @@ class JsonPreflight {
       : issue('invalid_json', rootPath, 'Input JSON is malformed. Repair it before saving this test.');
   }
 
-  private parseValue(path: string, depth: number): boolean {
+  getRawNumberTokens() {
+    return this.numberTokens;
+  }
+
+  private parseValue(path: string, segments: (string | number)[], depth: number): boolean {
     this.skipWhitespace();
     if (depth > MAX_JSON_DEPTH) {
       this.failure = issue(
@@ -70,16 +253,16 @@ class JsonPreflight {
 
     const character = this.text[this.index];
     if (character === '{') {
-      return this.parseObject(path, depth);
+      return this.parseObject(path, segments, depth);
     }
     if (character === '[') {
-      return this.parseArray(path, depth);
+      return this.parseArray(path, segments, depth);
     }
     if (character === '"') {
       return this.parseString(path, true) !== null;
     }
     if (character === '-' || (character !== undefined && /[0-9]/.test(character))) {
-      return this.parseNumber(path);
+      return this.parseNumber(path, segments);
     }
     if (this.text.startsWith('true', this.index)) {
       this.index += 4;
@@ -96,7 +279,7 @@ class JsonPreflight {
     return false;
   }
 
-  private parseObject(path: string, depth: number): boolean {
+  private parseObject(path: string, segments: (string | number)[], depth: number): boolean {
     this.index += 1;
     this.skipWhitespace();
     const names = new Set<string>();
@@ -127,7 +310,7 @@ class JsonPreflight {
         return false;
       }
       this.index += 1;
-      if (!this.parseValue(propertyPath, depth + 1)) {
+      if (!this.parseValue(propertyPath, [...segments, name], depth + 1)) {
         return false;
       }
       this.skipWhitespace();
@@ -143,7 +326,7 @@ class JsonPreflight {
     return false;
   }
 
-  private parseArray(path: string, depth: number): boolean {
+  private parseArray(path: string, segments: (string | number)[], depth: number): boolean {
     this.index += 1;
     this.skipWhitespace();
     if (this.text[this.index] === ']') {
@@ -153,7 +336,7 @@ class JsonPreflight {
 
     let itemIndex = 0;
     while (this.index < this.length) {
-      if (!this.parseValue(`${path}[${itemIndex}]`, depth + 1)) {
+      if (!this.parseValue(`${path}[${itemIndex}]`, [...segments, itemIndex], depth + 1)) {
         return false;
       }
       itemIndex += 1;
@@ -223,7 +406,7 @@ class JsonPreflight {
     return null;
   }
 
-  private parseNumber(path: string): boolean {
+  private parseNumber(path: string, segments: (string | number)[]): boolean {
     const start = this.index;
     if (this.text[this.index] === '-') {
       this.index += 1;
@@ -262,6 +445,10 @@ class JsonPreflight {
     }
     const value = Number(this.text.slice(start, this.index));
     if (Number.isFinite(value)) {
+      const token = this.text.slice(start, this.index);
+      if (shouldPreserveRawJsonNumber(token, value)) {
+        this.numberTokens.push({ path: segments, token });
+      }
       return true;
     }
     this.failure = issue(
@@ -280,7 +467,14 @@ class JsonPreflight {
   }
 }
 
-export const parseBoundedJson = (text: string): StrictJsonResult => {
+export interface ParseBoundedJsonOptions {
+  preserveRawNumbers?: boolean;
+}
+
+export const parseBoundedJson = (
+  text: string,
+  options: ParseBoundedJsonOptions = {},
+): StrictJsonResult => {
   if (new TextEncoder().encode(text).length > MAX_JSON_BYTES) {
     return {
       value: null,
@@ -295,7 +489,32 @@ export const parseBoundedJson = (text: string): StrictJsonResult => {
   }
 
   try {
-    const value = JSON.parse(text) as unknown;
+    let value = JSON.parse(text) as unknown;
+    if (options.preserveRawNumbers) {
+      for (const token of preflight.getRawNumberTokens()) {
+        const raw = new RawJsonNumber(token.token);
+        if (token.path.length === 0) {
+          value = raw;
+          continue;
+        }
+        let current = value;
+        for (const segment of token.path.slice(0, -1)) {
+          if (typeof current !== 'object' || current === null) {
+            break;
+          }
+          current = (current as Record<string | number, unknown>)[segment];
+        }
+        if (typeof current === 'object' && current !== null) {
+          const last = token.path[token.path.length - 1];
+          Object.defineProperty(current, last, {
+            configurable: true,
+            enumerable: true,
+            value: raw,
+            writable: true,
+          });
+        }
+      }
+    }
     return { value, issue: null };
   } catch {
     return {

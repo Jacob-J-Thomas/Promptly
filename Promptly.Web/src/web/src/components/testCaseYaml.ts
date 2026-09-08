@@ -6,6 +6,8 @@ import {
   parseDocument,
   stringify,
   visit,
+  type Scalar,
+  type ScalarTag,
 } from 'yaml';
 import {
   parseInputSpecJson,
@@ -17,6 +19,13 @@ import {
   type ExpectationDraft,
   type ExpectationSpecIssue,
 } from './expectationSpec';
+import {
+  isRawJsonNumber,
+  normalizeYamlNumberToken,
+  RawJsonNumber,
+  shouldPreserveRawJsonNumber,
+  stringifyJsonWithRawNumbers,
+} from './strictJson';
 
 export interface TestCaseYamlDraft {
   externalId: string;
@@ -48,6 +57,14 @@ export interface TestCaseYamlParseResult {
 const MAX_YAML_BYTES = 1_048_576;
 const MAX_YAML_DEPTH = 32;
 const MAX_YAML_SCALAR_LENGTH = 16_384;
+
+const rawJsonNumberTag: ScalarTag = {
+  default: true,
+  identify: isRawJsonNumber,
+  resolve: (value) => value,
+  tag: 'tag:yaml.org,2002:float',
+  stringify: (node: Scalar<unknown>) => (node.value as RawJsonNumber).raw,
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -185,6 +202,26 @@ const parseYamlValue = (text: string): { value: unknown; errors: YamlValidationI
     if (preflightErrors.length > 0) {
       return { value: null, errors: preflightErrors };
     }
+    // YAML's default number resolver also materializes wide integers and long
+    // decimals as JavaScript numbers. Replace only lossy scalar nodes before
+    // conversion so their original numeric token reaches the JSON boundary.
+    visit(document, {
+      Node(_key, node) {
+        if (!isScalar(node)) {
+          return undefined;
+        }
+        const scalar = node as Scalar<unknown> & { source?: unknown };
+        if (typeof scalar.source === 'string'
+          && typeof scalar.value === 'number'
+          && Number.isFinite(scalar.value)) {
+          const normalized = normalizeYamlNumberToken(scalar.source);
+          if (normalized && shouldPreserveRawJsonNumber(normalized, scalar.value)) {
+            scalar.value = new RawJsonNumber(normalized);
+          }
+        }
+        return undefined;
+      },
+    });
     return { value: document.toJS({ mapAsMap: false, maxAliasCount: 100 }), errors: [] };
   } catch {
     return {
@@ -233,7 +270,14 @@ export const formToYaml = (draft: TestCaseYamlDraft): YamlConversionResult => {
   }
 
   try {
-    return { valid: true, yaml: stringify([row], { sortMapEntries: false }), errors: [] };
+    return {
+      valid: true,
+      yaml: stringify([row], {
+        customTags: [rawJsonNumberTag],
+        sortMapEntries: false,
+      }),
+      errors: [],
+    };
   } catch {
     return {
       valid: false,
@@ -313,7 +357,7 @@ export const yamlToForm = (text: string): TestCaseYamlParseResult => {
 
   let inputText: string;
   try {
-    inputText = JSON.stringify(row.input);
+    inputText = stringifyJsonWithRawNumbers(row.input);
   } catch {
     return {
       valid: false,
@@ -327,7 +371,7 @@ export const yamlToForm = (text: string): TestCaseYamlParseResult => {
   }
   let expectationsText: string;
   try {
-    expectationsText = JSON.stringify(row.expectations);
+    expectationsText = stringifyJsonWithRawNumbers(row.expectations);
   } catch {
     return {
       valid: false,

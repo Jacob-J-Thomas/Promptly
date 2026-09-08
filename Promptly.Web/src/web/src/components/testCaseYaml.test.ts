@@ -81,6 +81,42 @@ describe('test-case YAML conversion', () => {
     expect(parsed.draft?.expectations[7]?.text).toBe('expected-7');
   });
 
+  it('preserves exact wide numeric YAML scalars through the form boundary', () => {
+    const source = `- id: case-1
+  name: Wide numbers
+  input:
+    positive: 9007199254740993
+    negative: -9007199254740993
+    decimal: 0.123456789012345678901
+    exponent: 9007199254740993e0
+    ordinary: 0.5
+    values: [null, true, 1e100]
+    spellings: [+9007199254740993, 0x20000000000001, 0o400000000000000001, .123456789012345678901, 1.e-400]
+    "": 9007199254740993
+    messages: [{role: user, content: Hello}]
+  expectations: [{type: contains_text, text: Hello}]`;
+
+    const parsed = yamlToForm(source);
+    expect(parsed.valid).toBe(true);
+    expect(parsed.draft).not.toBeNull();
+
+    const written = formToYaml(parsed.draft!);
+    expect(written.valid).toBe(true);
+    expect(written.yaml).toContain('positive: 9007199254740993');
+    expect(written.yaml).toContain('negative: -9007199254740993');
+    expect(written.yaml).toContain('decimal: 0.123456789012345678901');
+    expect(written.yaml).toContain('exponent: 9007199254740993e0');
+    expect(written.yaml).toContain('ordinary: 0.5');
+    expect(written.yaml).toContain('9007199254740993');
+    expect(written.yaml).toContain('0.123456789012345678901');
+    expect(written.yaml).toContain('1e-400');
+    expect(written.yaml).not.toContain('9007199254740992');
+
+    const reparsed = yamlToForm(written.yaml!);
+    expect(reparsed.valid).toBe(true);
+    expect(formToYaml(reparsed.draft!).yaml).toContain('positive: 9007199254740993');
+  });
+
   it.each([
     ['', 'invalid_shape'],
     ['null', 'invalid_shape'],

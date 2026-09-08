@@ -264,7 +264,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   await createDialog.getByRole('textbox', { name: 'Name', exact: true }).fill('Authored response');
   await createDialog.getByLabel('Description').fill('Created through the browser editor');
   await createDialog.getByRole('button', { name: 'Add message' }).click();
-  await createDialog.getByLabel('Content for message 1').fill(JSON.stringify({
+  await createDialog.getByLabel('Content for message 1', { exact: true }).fill(JSON.stringify({
     integrationCorrelation: correlation,
     prompt: 'Hello from authoring',
   }));
@@ -332,7 +332,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   await expect.poll(() => createDialog.getByRole('alert').allTextContents()).toEqual([aiEvaluationNotice]);
   await expect(createDialog.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
   await expect(createDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);
-  expect(await createDialog.getByLabel('Content for message 1').inputValue()).toContain(correlation);
+  expect(await createDialog.getByLabel('Content for message 1', { exact: true }).inputValue()).toContain(correlation);
   await expect(createDialog.getByLabel('Content for message 12')).toHaveValue('YAML round-trip message 12');
   await expect(createDialog.getByLabel('Text for expectation 1')).toHaveValue('Deterministically accurate');
   await expect(createDialog.getByLabel('Text for expectation 2')).toHaveValue('forbidden');
@@ -414,7 +414,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   await expect(editDialog.getByLabel('Description')).toBeFocused();
   await editName.fill('Edited authored response');
   await editDialog.getByLabel('Description').fill('Edited and reloaded through the browser');
-  await editDialog.getByLabel('Content for message 1').fill(JSON.stringify({
+  await editDialog.getByLabel('Content for message 1', { exact: true }).fill(JSON.stringify({
     integrationCorrelation: correlation,
     prompt: 'Edited authoring prompt',
   }));
@@ -507,7 +507,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   const reloadedDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
   await expect(reloadedDialog.getByRole('textbox', { name: 'Name', exact: true }))
     .toHaveValue('Edited authored response');
-  await expect(reloadedDialog.getByLabel('Content for message 1')).toHaveValue(
+  await expect(reloadedDialog.getByLabel('Content for message 1', { exact: true })).toHaveValue(
     JSON.stringify({ integrationCorrelation: correlation, prompt: 'Edited authoring prompt' }),
   );
   await expect(reloadedDialog.getByRole('group', { name: /^Message \d+$/ })).toHaveCount(12);

@@ -59,6 +59,16 @@ public sealed class TenantRunsControllerCoverageTests
             resultWithTest,
             Assert.IsType<TestRunResultResponse>(result.Value));
         Assert.Equal(Scope, service.LastScope);
+
+        var nullNavigationController = CreateController(new StubTestRunService
+        {
+            Result = resultWithoutTest
+        });
+        var nullNavigation = Assert.IsType<OkObjectResult>(
+            await nullNavigationController.GetRunResult(run.Id, resultWithoutTest.Id));
+        AssertResultResponse(
+            resultWithoutTest,
+            Assert.IsType<TestRunResultResponse>(nullNavigation.Value));
     }
 
     [Fact]

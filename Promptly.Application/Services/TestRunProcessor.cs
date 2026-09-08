@@ -549,15 +549,10 @@ public class TestRunProcessor : ITestRunProcessor
 
     private static string GetExpectationType(IReadOnlyDictionary<string, object> expectation)
     {
-        if (expectation.TryGetValue("type", out var value)
-            && value is JsonElement element)
-        {
-            return element.ValueKind == JsonValueKind.String
-                ? element.GetString() ?? "invalid"
+        return expectation.TryGetValue("type", out var value)
+            && value is JsonElement { ValueKind: JsonValueKind.String } element
+                ? element.GetString()!
                 : "invalid";
-        }
-
-        return value?.ToString() ?? "invalid";
     }
 
     private sealed record ExpectationEntry(

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
+using Promptly.Application.Services;
 using Promptly.Domain.Entities;
 using Promptly.Server.Controllers;
 using Promptly.Server.Security;
@@ -130,6 +131,34 @@ public sealed class TenantTestsControllerCoverageTests
         Assert.Equal(500, Assert.IsType<ObjectResult>(result).StatusCode);
     }
 
+    [Fact]
+    public async Task Validation_failures_from_create_and_update_return_the_issue_contract()
+    {
+        var service = new StubTestCaseService
+        {
+            ExpectationFailure = new ExpectationValidationException(
+            [new ExpectationValidationIssue(
+                "invalid_expectation",
+                "$[0]",
+                "The expectation is invalid")])
+        };
+        var controller = CreateController(service);
+
+        var create = Assert.IsType<BadRequestObjectResult>(await controller.CreateTestCase(
+            Guid.NewGuid(),
+            CreateRequest()));
+        var update = Assert.IsType<BadRequestObjectResult>(await controller.UpdateTestCase(
+            Guid.NewGuid(),
+            UpdateRequest()));
+
+        var createPayload = JsonSerializer.Serialize(create.Value);
+        var updatePayload = JsonSerializer.Serialize(update.Value);
+        Assert.Contains("Invalid expectations", createPayload, StringComparison.Ordinal);
+        Assert.Contains("invalid_expectation", createPayload, StringComparison.Ordinal);
+        Assert.Contains("Invalid expectations", updatePayload, StringComparison.Ordinal);
+        Assert.Contains("invalid_expectation", updatePayload, StringComparison.Ordinal);
+    }
+
     private static Task<IActionResult> InvokeAsync(TestsController controller, TestAction action)
     {
         var id = Guid.NewGuid();
@@ -219,6 +248,7 @@ public sealed class TenantTestsControllerCoverageTests
         public TestCase? Loaded { get; init; }
         public TestCase? Updated { get; init; }
         public bool Deleted { get; init; }
+        public ExpectationValidationException? ExpectationFailure { get; init; }
         public Exception? Failure { get; init; }
         public int CallCount { get; private set; }
         public Guid LastId { get; private set; }
@@ -265,6 +295,11 @@ public sealed class TenantTestsControllerCoverageTests
             if (Failure is not null)
             {
                 throw Failure;
+            }
+
+            if (ExpectationFailure is not null)
+            {
+                throw ExpectationFailure;
             }
 
             return Task.FromResult(value);

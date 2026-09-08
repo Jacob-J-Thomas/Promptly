@@ -56,10 +56,6 @@ const cloneExpectation = (expectation: ExpectationDraft): ExpectationDraft => ({
   ...(Array.isArray(expectation.sequence) ? { sequence: [...expectation.sequence] } : {}),
 });
 
-const cloneExpectations = (expectations: readonly ExpectationDraft[]) => (
-  expectations.map(cloneExpectation)
-);
-
 const fieldIssue = (
   issues: readonly ExpectationSpecIssue[],
   index: number,
@@ -92,6 +88,19 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
   onChange,
   disabled = false,
 }) => {
+  const [nextRowId, setNextRowId] = useState(expectations.length);
+  const [rowKeys, setRowKeys] = useState<string[]>(() => (
+    expectations.map((_, index) => `expectation-row-${index}`)
+  ));
+  const renderedRowKeys = rowKeys.length >= expectations.length
+    ? rowKeys.slice(0, expectations.length)
+    : [
+      ...rowKeys,
+      ...Array.from(
+        { length: expectations.length - rowKeys.length },
+        (_, index) => `expectation-row-external-${rowKeys.length + index}`,
+      ),
+    ];
   const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null);
   const issues = validateExpectations(expectations);
   const hasAiExpectation = expectations.some((expectation) => AI_TYPES.includes(
@@ -102,12 +111,15 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
     onChange(expectations.map((expectation, expectationIndex) => (
       expectationIndex === index
         ? { ...cloneExpectation(expectation), ...update }
-        : cloneExpectation(expectation)
+        : expectation
     )));
   };
 
   const addExpectation = (type: ExpectationType) => {
-    onChange([...cloneExpectations(expectations), createExpectation(type)]);
+    const rowKey = `expectation-row-${nextRowId}`;
+    setNextRowId(nextRowId + 1);
+    setRowKeys([...renderedRowKeys, rowKey]);
+    onChange([...expectations, createExpectation(type)]);
     setAddAnchor(null);
   };
 
@@ -124,14 +136,13 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
       });
     }
     onChange(expectations.map((expectation, expectationIndex) => (
-      expectationIndex === index ? next : cloneExpectation(expectation)
+      expectationIndex === index ? next : expectation
     )));
   };
 
   const deleteExpectation = (index: number) => {
-    onChange(expectations
-      .filter((_, expectationIndex) => expectationIndex !== index)
-      .map(cloneExpectation));
+    setRowKeys(renderedRowKeys.filter((_, expectationIndex) => expectationIndex !== index));
+    onChange(expectations.filter((_, expectationIndex) => expectationIndex !== index));
   };
 
   const moveExpectation = (index: number, direction: -1 | 1) => {
@@ -139,8 +150,14 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
     if (destination < 0 || destination >= expectations.length) {
       return;
     }
-    const next = cloneExpectations(expectations);
+    const next = [...expectations];
+    const nextRowKeys = [...renderedRowKeys];
     [next[index], next[destination]] = [next[destination], next[index]];
+    [nextRowKeys[index], nextRowKeys[destination]] = [
+      nextRowKeys[destination],
+      nextRowKeys[index],
+    ];
+    setRowKeys(nextRowKeys);
     onChange(next);
   };
 
@@ -378,11 +395,11 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
           MenuListProps={{ 'aria-label': 'Expectation types' }}
         >
           <ListSubheader>Text</ListSubheader>
-          {selectOptions(TEXT_TYPES, addExpectation)}
+          {selectOptions(TEXT_TYPES, (type) => addExpectation(type))}
           <ListSubheader>Tools</ListSubheader>
-          {selectOptions(TOOL_TYPES, addExpectation)}
+          {selectOptions(TOOL_TYPES, (type) => addExpectation(type))}
           <ListSubheader>AI</ListSubheader>
-          {selectOptions(AI_TYPES, addExpectation)}
+          {selectOptions(AI_TYPES, (type) => addExpectation(type))}
         </Menu>
       </Box>
 
@@ -405,7 +422,7 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
           const typeLabelId = `expectation-type-label-${index}`;
           return (
             <Box
-              key={index}
+              key={renderedRowKeys[index]}
               role="group"
               aria-label={`Expectation ${index + 1}`}
               sx={{

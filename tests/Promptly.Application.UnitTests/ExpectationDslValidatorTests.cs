@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using Promptly.Application.Interfaces;
 using Promptly.Application.Services;
 using Promptly.Domain.ValueObjects;
 
@@ -77,6 +78,203 @@ public sealed class ExpectationDslValidatorTests
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Issues, issue => issue.Code == "unknown_expectation_field");
+    }
+
+    [Theory]
+    [InlineData("", "invalid_expectations_json")]
+    [InlineData("{}", "invalid_expectations_json")]
+    [InlineData("[1]", "invalid_expectation")]
+    [InlineData("[\"text\"]", "invalid_expectation")]
+    [InlineData("[", "invalid_expectations_json")]
+    public void ValidateExpectationsJson_rejects_non_array_and_non_object_documents(
+        string json,
+        string expectedCode)
+    {
+        var result = new ExpectationDslValidator().ValidateExpectationsJson(json);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue => issue.Code == expectedCode);
+    }
+
+    [Theory]
+    [InlineData("required_expectation_field", "sequence")]
+    [InlineData("invalid_tool_sequence", "sequence")]
+    public void ValidateExpectation_rejects_missing_or_empty_native_sequences(
+        string expectedCode,
+        string expectedPath)
+    {
+        var expectation = Expectation("tool_sequence");
+        if (expectedCode == "invalid_tool_sequence")
+        {
+            expectation["sequence"] = new List<string> { " " };
+        }
+
+        var result = new ExpectationDslValidator().ValidateExpectation(expectation);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue =>
+            issue.Code == expectedCode && issue.Path == expectedPath);
+    }
+
+    [Fact]
+    public void ValidateExpectation_rejects_json_sequences_with_non_string_items()
+    {
+        using var document = JsonDocument.Parse(
+            """{"type":"tool_sequence","sequence":["search",42]}""");
+        var expectation = JsonSerializer.Deserialize<Dictionary<string, object>>(
+            document.RootElement.GetRawText())!;
+
+        var result = new ExpectationDslValidator().ValidateExpectation(expectation);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue => issue.Code == "invalid_tool_sequence");
+    }
+
+    public static IEnumerable<object[]> NativeScoreValues()
+    {
+        yield return [0.5d];
+        yield return [0.5f];
+        yield return [0.5m];
+        yield return [1];
+    }
+
+    [Theory]
+    [MemberData(nameof(NativeScoreValues))]
+    public void ValidateExpectation_accepts_supported_native_score_values(object score)
+    {
+        var result = new ExpectationDslValidator().ValidateExpectation(
+            Expectation("groundedness", ("min_score", score)));
+
+        Assert.True(result.IsValid, string.Join("; ", result.Issues.Select(issue => issue.Message)));
+    }
+
+    [Theory]
+    [InlineData(-0.1)]
+    [InlineData(1.1)]
+    public void ValidateExpectation_rejects_native_scores_outside_the_range(double score)
+    {
+        var result = new ExpectationDslValidator().ValidateExpectation(
+            Expectation("groundedness", ("min_score", score)));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue => issue.Code == "invalid_score");
+    }
+
+    [Fact]
+    public void ValidateExpectation_rejects_unsupported_native_score_values()
+    {
+        var result = new ExpectationDslValidator().ValidateExpectation(
+            Expectation("groundedness", ("min_score", new object())));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue => issue.Code == "invalid_score");
+    }
+
+    [Fact]
+    public void ValidateExpectation_checks_optional_text_and_boolean_types()
+    {
+        var result = new ExpectationDslValidator().ValidateExpectation(
+            Expectation(
+                "llm_judge",
+                ("rubric", "helpful"),
+                ("model", 42),
+                ("provider", ""),
+                ("min_score", 0.5)));
+
+        Assert.False(result.IsValid);
+        Assert.Equal(2, result.Issues.Count(issue => issue.Code == "invalid_expectation_field"));
+        Assert.Contains(result.Issues, issue => issue.Path == "model");
+        Assert.Contains(result.Issues, issue => issue.Path == "provider");
+    }
+
+    [Fact]
+    public void ValidateExpectation_rejects_an_invalid_optional_boolean()
+    {
+        var result = new ExpectationDslValidator().ValidateExpectation(
+            Expectation(
+                "contains_text",
+                ("text", "hello"),
+                ("case_insensitive", "yes")));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue =>
+            issue.Code == "invalid_expectation_field" && issue.Path == "case_insensitive");
+    }
+
+    [Fact]
+    public void ValidateExpectation_allows_null_optional_text_values()
+    {
+        var result = new ExpectationDslValidator().ValidateExpectation(
+            Expectation(
+                "llm_judge",
+                ("rubric", "helpful"),
+                ("model", null!),
+                ("provider", null!)));
+
+        Assert.True(result.IsValid, string.Join("; ", result.Issues.Select(issue => issue.Message)));
+    }
+
+    [Fact]
+    public void ExpectationValidationResult_valid_singleton_is_an_empty_contract_result()
+    {
+        Assert.True(ExpectationValidationResult.Valid.IsValid);
+        Assert.Empty(ExpectationValidationResult.Valid.Issues);
+    }
+
+    public static IEnumerable<object[]> RegexFailureStatuses()
+    {
+        yield return [BoundedRegexStatus.InvalidPattern, "invalid_regex_pattern"];
+        yield return [BoundedRegexStatus.UnsupportedPattern, "unsupported_regex_construct"];
+        yield return [BoundedRegexStatus.PatternTooLong, "regex_pattern_too_long"];
+        yield return [BoundedRegexStatus.InputTooLong, "regex_input_too_long"];
+        yield return [BoundedRegexStatus.TimedOut, "regex_timeout"];
+        yield return [(BoundedRegexStatus)999, "regex_evaluation_error"];
+    }
+
+    [Theory]
+    [MemberData(nameof(RegexFailureStatuses))]
+    public void ValidatePattern_maps_each_regex_failure_code(
+        BoundedRegexStatus status,
+        string expectedCode)
+    {
+        var validator = new ExpectationDslValidator(
+            new StubRegexMatcher(new BoundedRegexMatchResult(status, [], null)));
+
+        var result = validator.ValidateExpectation(
+            Expectation("regex_match", ("pattern", "candidate")));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue => issue.Code == expectedCode);
+        Assert.Contains(result.Issues, issue => issue.Path == "pattern");
+    }
+
+    private static Dictionary<string, object> Expectation(
+        string type,
+        params (string Key, object Value)[] values)
+    {
+        var expectation = new Dictionary<string, object> { ["type"] = type };
+        foreach (var (key, value) in values)
+        {
+            expectation[key] = value;
+        }
+
+        return expectation;
+    }
+
+    private sealed class StubRegexMatcher(BoundedRegexMatchResult result) : IBoundedRegexMatcher
+    {
+        public BoundedRegexMatchResult FindMatches(
+            string pattern,
+            string input,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) => result;
+
+        public BoundedRegexCandidateResult FindMatchingCandidates(
+            string pattern,
+            IReadOnlyList<string> candidates,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            new(result.Status, [], result.ErrorMessage);
     }
 
     [Fact]

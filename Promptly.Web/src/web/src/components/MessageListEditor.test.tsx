@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { MessageListEditor } from './MessageListEditor';
 import type { ConversationMessage } from './messageSpec';
@@ -16,6 +17,17 @@ const renderEditor = (
 ) => {
   render(<MessageListEditor messages={messages} onChange={onChange} disabled={disabled} />);
   return onChange;
+};
+
+const StatefulMessageEditor = ({
+  initial = initialMessages,
+}: {
+  initial?: readonly ConversationMessage[];
+}) => {
+  const [messages, setMessages] = useState<ConversationMessage[]>(() => (
+    initial.map((message) => ({ ...message }))
+  ));
+  return <MessageListEditor messages={messages} onChange={setMessages} />;
 };
 
 describe('MessageListEditor', () => {
@@ -42,6 +54,10 @@ describe('MessageListEditor', () => {
       { role: 'user', content: 'Hello\nwith a second line' },
       initialMessages[2],
     ]);
+    const changedMessages = onChange.mock.calls[1]?.[0];
+    expect(changedMessages?.[0]).toBe(initialMessages[0]);
+    expect(changedMessages?.[1]).not.toBe(initialMessages[1]);
+    expect(changedMessages?.[2]).toBe(initialMessages[2]);
     expect(initialMessages[1]).toEqual({ role: 'user', content: 'Hello' });
   });
 
@@ -60,6 +76,44 @@ describe('MessageListEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move message 1 down' }));
     expect(onChange).toHaveBeenLastCalledWith([messages[1], messages[0], messages[2]]);
     expect(messages).toEqual(initialMessages);
+  });
+
+  it('runs sequential edits through a stateful parent and keeps focus with reordered rows', () => {
+    render(<StatefulMessageEditor />);
+
+    const firstContent = screen.getByLabelText('Content for message 1');
+    act(() => firstContent.focus());
+    fireEvent.change(firstContent, { target: { value: 'System guidance' } });
+    expect(document.activeElement).toBe(firstContent);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
+    expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(4);
+    const addedRow = screen.getByRole('group', { name: 'Message 4' });
+    const addedRole = within(addedRow).getByRole('combobox');
+    act(() => addedRole.focus());
+    fireEvent.keyDown(addedRole, { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('option', { name: 'assistant' }));
+    fireEvent.change(screen.getByLabelText('Content for message 4'), {
+      target: { value: 'Follow-up' },
+    });
+
+    const moveAddedUp = within(screen.getByRole('group', { name: 'Message 4' }))
+      .getByRole('button', { name: 'Move message 4 up' });
+    act(() => moveAddedUp.focus());
+    fireEvent.click(moveAddedUp);
+    const movedRow = screen.getByRole('group', { name: 'Message 3' });
+    expect(within(movedRow).getByLabelText('Content for message 3')).toHaveValue('Follow-up');
+    expect(document.activeElement).toBe(
+      within(movedRow).getByRole('button', { name: 'Move message 3 up' }),
+    );
+
+    fireEvent.click(within(movedRow).getByRole('button', { name: 'Delete message 3' }));
+    expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(3);
+    expect(screen.getByLabelText('Content for message 1')).toHaveValue('System guidance');
+    expect(within(screen.getByRole('group', { name: 'Message 1' }))
+      .getByRole('button', { name: 'Move message 1 up' })).toBeDisabled();
+    expect(within(screen.getByRole('group', { name: 'Message 3' }))
+      .getByRole('button', { name: 'Move message 3 down' })).toBeDisabled();
   });
 
   it('shows validation and user-turn guidance without inventing content', () => {
@@ -86,6 +140,15 @@ describe('MessageListEditor', () => {
     expect(screen.getByRole('button', { name: 'Delete message 1' })).toBeDisabled();
   });
 
+  it('ignores attempted moves beyond the first and last message boundaries', () => {
+    const onChange = renderEditor(initialMessages);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move message 1 up' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move message 3 down' }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('keeps ten or more rows within the responsive editor structure', () => {
     const messages = Array.from({ length: 12 }, (_, index) => ({
       role: index % 2 === 0 ? 'user' : 'assistant',
@@ -95,5 +158,25 @@ describe('MessageListEditor', () => {
 
     expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(12);
     expect(screen.getByLabelText('Content for message 12')).toHaveValue('Message 12');
+  });
+
+  it('synchronizes stable row identities when a controlled parent changes length', () => {
+    const { rerender } = render(
+      <MessageListEditor messages={initialMessages} onChange={vi.fn()} />,
+    );
+
+    rerender(
+      <MessageListEditor messages={initialMessages.slice(0, 2)} onChange={vi.fn()} />,
+    );
+    expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(2);
+
+    rerender(
+      <MessageListEditor
+        messages={[...initialMessages, { role: 'user', content: 'Later' }]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByRole('group', { name: /^Message \d+$/ })).toHaveLength(4);
+    expect(screen.getByLabelText('Content for message 4')).toHaveValue('Later');
   });
 });

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_MESSAGE_COUNT,
   parseInputSpecJson,
   serializeInputSpec,
+  validateMessages,
   type ConversationMessage,
 } from './messageSpec';
+import {
+  MAX_JSON_BYTES,
+  MAX_JSON_DEPTH,
+  MAX_JSON_SCALAR_LENGTH,
+} from './strictJson';
 
 describe('message input-spec helpers', () => {
   it('preserves unknown metadata and ordered messages when editing', () => {
@@ -89,6 +96,104 @@ describe('message input-spec helpers', () => {
       code: 'unknown_property',
       path: 'inputSpecJson.messages[0].provider_hint',
       message: 'Message property "provider_hint" is not supported.',
+    });
+  });
+
+  it('rejects duplicate properties at every input depth and preserves the raw document', () => {
+    const topLevel = '{"messages":[{"role":"user","content":"old"}],"messages":[]}';
+    const messageLevel = '{"messages":[{"role":"user","content":"old","\\u0063ontent":"new"}]}';
+    const metadataLevel = '{"messages":[{"role":"user","content":"hello"}],"metadata":{"tag":1,"\\u0074ag":2}}';
+
+    [topLevel, messageLevel, metadataLevel].forEach((input) => {
+      const parsed = parseInputSpecJson(input);
+      expect(parsed.valid).toBe(false);
+      expect(parsed.messages).toBeNull();
+      expect(parsed.originalText).toBe(input);
+      expect(parsed.errors[0]?.code).toBe('duplicate_property');
+    });
+    expect(parseInputSpecJson(messageLevel).errors[0]?.path)
+      .toBe('inputSpecJson.messages[0].content');
+    expect(parseInputSpecJson(metadataLevel).errors[0]?.path)
+      .toBe('inputSpecJson.metadata.tag');
+  });
+
+  it('rejects oversized and overly deep legacy JSON before materializing messages', () => {
+    const exactBytesBase = '{"messages":[{"role":"user","content":"hello"}]}';
+    const exactPadding = ' '.repeat(MAX_JSON_BYTES - new TextEncoder().encode(exactBytesBase).length);
+    expect(parseInputSpecJson(exactBytesBase + exactPadding).valid).toBe(true);
+
+    const oversized = `${exactBytesBase}${exactPadding} `;
+    const oversizedResult = parseInputSpecJson(oversized);
+    expect(oversizedResult.valid).toBe(false);
+    expect(oversizedResult.messages).toBeNull();
+    expect(oversizedResult.originalText).toBe(oversized);
+    expect(oversizedResult.errors[0]).toEqual({
+      code: 'too_large',
+      path: 'inputSpecJson',
+      message: 'Input JSON exceeds the 262144-byte limit.',
+    });
+
+    let exactDepth = 'true';
+    for (let index = 0; index < MAX_JSON_DEPTH; index += 1) {
+      exactDepth = `{"next":${exactDepth}}`;
+    }
+    expect(parseInputSpecJson(exactDepth).valid).toBe(false);
+    const deep = `{"next":${exactDepth}}`;
+    const deepResult = parseInputSpecJson(deep);
+    expect(deepResult.valid).toBe(false);
+    expect(deepResult.messages).toBeNull();
+    expect(deepResult.errors[0]?.code).toBe('too_large');
+  });
+
+  it('enforces message and scalar boundaries in controlled validation', () => {
+    const exactMessages = Array.from({ length: MAX_MESSAGE_COUNT }, () => ({
+      role: 'user' as const,
+      content: 'x',
+    }));
+    expect(parseInputSpecJson(JSON.stringify({ messages: exactMessages })).valid).toBe(true);
+    const tooManyMessages = parseInputSpecJson(JSON.stringify({
+      messages: [...exactMessages, { role: 'user', content: 'x' }],
+    }));
+    expect(tooManyMessages.valid).toBe(false);
+    expect(tooManyMessages.errors[0]).toEqual({
+      code: 'too_large',
+      path: 'inputSpecJson.messages',
+      message: 'Messages cannot exceed 100 items.',
+    });
+
+    const exactScalar = { role: 'user' as const, content: 'x'.repeat(MAX_JSON_SCALAR_LENGTH) };
+    expect(parseInputSpecJson(JSON.stringify({ messages: [exactScalar] })).valid).toBe(true);
+    const tooLong = parseInputSpecJson(JSON.stringify({
+      messages: [{ role: 'user', content: `${'x'.repeat(MAX_JSON_SCALAR_LENGTH)}x` }],
+    }));
+    expect(tooLong.valid).toBe(false);
+    expect(tooLong.errors[0]?.code).toBe('too_large');
+  });
+
+  it('reports direct editor limits and malformed message entries', () => {
+    expect(validateMessages([{
+      role: 'user',
+      content: 'x'.repeat(MAX_JSON_SCALAR_LENGTH + 1),
+    }])).toEqual([{
+      code: 'too_large',
+      path: 'messages[0].content',
+      message: 'Message content cannot exceed 16384 characters.',
+    }]);
+
+    const scalarMessage = parseInputSpecJson('{"messages":[null]}');
+    expect(scalarMessage.messages).toBeNull();
+    expect(scalarMessage.errors[0]).toEqual({
+      code: 'invalid_shape',
+      path: 'inputSpecJson.messages[0]',
+      message: 'Each message must be an object.',
+    });
+
+    const blankMessage = parseInputSpecJson('{"messages":[{"role":"user","content":"  "}]}');
+    expect(blankMessage.messages).toBeNull();
+    expect(blankMessage.errors[0]).toEqual({
+      code: 'required',
+      path: 'inputSpecJson.messages[0].content',
+      message: 'Message content is required.',
     });
   });
 

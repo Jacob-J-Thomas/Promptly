@@ -266,6 +266,37 @@ public sealed class BoundedRegexMatcherTests
         Assert.Equal(BoundedRegexStatus.TimedOut, result.Status);
     }
 
+    [Fact]
+    public void Constructor_rejects_a_null_budget_factory()
+    {
+        Assert.Throws<ArgumentNullException>(() => new BoundedRegexMatcher(null!));
+    }
+
+    [Theory]
+    [InlineData("[", BoundedRegexStatus.InvalidPattern)]
+    [InlineData("(?=unsafe)", BoundedRegexStatus.UnsupportedPattern)]
+    public void FindMatchingCandidates_maps_pattern_creation_failures(
+        string pattern,
+        BoundedRegexStatus expectedStatus)
+    {
+        var result = _matcher.FindMatchingCandidates(pattern, ["input"]);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Empty(result.Matches);
+        Assert.NotNull(result.ErrorMessage);
+    }
+
+    [Fact]
+    public void FindMatchingCandidates_clamps_a_sub_millisecond_bucket_to_one_millisecond()
+    {
+        var matcher = new TestBoundedRegexMatcher(new NearEmptyBudgetFactory());
+
+        var result = matcher.FindMatchingCandidates("a", ["a"]);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["a"], result.Matches);
+    }
+
     private sealed class TestBoundedRegexMatcher
     {
         private readonly BoundedRegexMatcher _inner;
@@ -361,5 +392,15 @@ public sealed class BoundedRegexMatcherTests
     private sealed class TinyRemainingBudget : IRegexEvaluationBudget
     {
         public TimeSpan Remaining => TimeSpan.FromTicks(1);
+    }
+
+    private sealed class NearEmptyBudgetFactory : IRegexEvaluationBudgetFactory
+    {
+        public IRegexEvaluationBudget Start(TimeSpan timeout) => new NearEmptyBudget();
+    }
+
+    private sealed class NearEmptyBudget : IRegexEvaluationBudget
+    {
+        public TimeSpan Remaining => TimeSpan.FromMilliseconds(1.5);
     }
 }

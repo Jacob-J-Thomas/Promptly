@@ -313,7 +313,7 @@ public sealed class TenantSuiteAndTestServiceTests
                 "invalid",
                 "invalid",
                 null,
-                "{}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
                 "[]",
                 scope));
 
@@ -336,21 +336,23 @@ public sealed class TenantSuiteAndTestServiceTests
 
         var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
         Assert.NotNull(existing);
+        var originalName = existing.Name;
+        var originalExpectations = existing.ExpectationsJson;
         var exception = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
             service.UpdateTestCaseAsync(
                 graph.AllowedTestCaseId,
                 "updated",
                 "updated",
                 null,
-                "{}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
                 "[]",
                 scope));
 
         Assert.NotEmpty(exception.Issues);
         var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
         Assert.NotNull(persisted);
-        Assert.Equal(existing!.Name, persisted!.Name);
-        Assert.Equal(existing.ExpectationsJson, persisted.ExpectationsJson);
+        Assert.Equal(originalName, persisted.Name);
+        Assert.Equal(originalExpectations, persisted.ExpectationsJson);
     }
 
     private static PromptlyDbContext CreateDbContext()

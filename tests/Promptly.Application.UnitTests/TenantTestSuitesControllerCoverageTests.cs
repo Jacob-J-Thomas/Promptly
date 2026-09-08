@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -149,7 +150,7 @@ public sealed class TenantTestSuitesControllerCoverageTests
             [new ExpectationValidationIssue("invalid_yaml", "$", "YAML document is invalid")]);
         var invalid = Assert.IsType<BadRequestObjectResult>(
             await ImportAsync(controller, suite.Id, "invalid"));
-        Assert.Contains("invalid_yaml", invalid.Value!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("invalid_yaml", JsonSerializer.Serialize(invalid.Value), StringComparison.Ordinal);
 
         yaml.DeserializeFailure = null;
         testCases.BulkFailure = new TestSpecificationValidationException(
@@ -159,8 +160,8 @@ public sealed class TenantTestSuitesControllerCoverageTests
                 "External ID already exists in this suite")]);
         var persistenceValidation = Assert.IsType<BadRequestObjectResult>(
             await ImportAsync(controller, suite.Id, "valid"));
-        Assert.Contains("duplicate_external_id", persistenceValidation.Value!.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("DbUpdateException", persistenceValidation.Value!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("duplicate_external_id", JsonSerializer.Serialize(persistenceValidation.Value), StringComparison.Ordinal);
+        Assert.DoesNotContain("DbUpdateException", JsonSerializer.Serialize(persistenceValidation.Value), StringComparison.Ordinal);
     }
 
     [Fact]

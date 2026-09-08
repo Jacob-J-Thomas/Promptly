@@ -153,9 +153,9 @@ public sealed class TenantTestsControllerCoverageTests
 
         var createPayload = JsonSerializer.Serialize(create.Value);
         var updatePayload = JsonSerializer.Serialize(update.Value);
-        Assert.Contains("Invalid expectations", createPayload, StringComparison.Ordinal);
+        Assert.Contains("Invalid test specification", createPayload, StringComparison.Ordinal);
         Assert.Contains("invalid_expectation", createPayload, StringComparison.Ordinal);
-        Assert.Contains("Invalid expectations", updatePayload, StringComparison.Ordinal);
+        Assert.Contains("Invalid test specification", updatePayload, StringComparison.Ordinal);
         Assert.Contains("invalid_expectation", updatePayload, StringComparison.Ordinal);
     }
 

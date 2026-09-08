@@ -38,6 +38,14 @@ fixture service with one exact host/port/CIDR rule and never joins the egress
 network. Both phase receipts are required for the aggregate gate. It never calls
 a reset endpoint and never uses production credentials.
 
+The orchestrator generates one synthetic correlation UUID for the direct phase,
+passes it by the named `PROMPTLY_E2E_EXPECTED_CORRELATION` handoff to Playwright,
+and requires the provider stub's single authorized POST to contain that exact
+value. SIGINT and SIGTERM are forwarded once to the active phase child; the
+orchestrator waits for the child's cleanup and receipt before aggregating, does
+not start another phase after cancellation, and never writes an upload marker
+for a cancelled aggregate.
+
 Artifacts are written under `artifacts/test-results/e2e`:
 
 - `proxy/` and `direct/` phase receipts, reports, and `html/index.html` files;

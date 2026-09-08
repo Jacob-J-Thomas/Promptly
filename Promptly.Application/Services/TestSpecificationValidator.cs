@@ -209,32 +209,32 @@ public sealed class TestSpecificationValidator : ITestSpecificationValidator
                 issues.Add(new("too_large", path, $"User-authored scalar cannot exceed {MaxScalarLength} characters"));
                 break;
             case JsonValueKind.Object:
-            {
-                var names = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var property in element.EnumerateObject())
                 {
-                    var propertyPath = $"{path}.{property.Name}";
-                    if (!names.Add(property.Name))
+                    var names = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var property in element.EnumerateObject())
                     {
-                        issues.Add(new("duplicate_property", propertyPath, "Duplicate JSON property is not allowed"));
+                        var propertyPath = $"{path}.{property.Name}";
+                        if (!names.Add(property.Name))
+                        {
+                            issues.Add(new("duplicate_property", propertyPath, "Duplicate JSON property is not allowed"));
+                        }
+
+                        ValidateLimits(property.Value, propertyPath, depth + 1, issues);
                     }
 
-                    ValidateLimits(property.Value, propertyPath, depth + 1, issues);
+                    break;
                 }
-
-                break;
-            }
             case JsonValueKind.Array:
-            {
-                var index = 0;
-                foreach (var item in element.EnumerateArray())
                 {
-                    ValidateLimits(item, $"{path}[{index}]", depth + 1, issues);
-                    index++;
-                }
+                    var index = 0;
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        ValidateLimits(item, $"{path}[{index}]", depth + 1, issues);
+                        index++;
+                    }
 
-                break;
-            }
+                    break;
+                }
         }
     }
 

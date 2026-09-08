@@ -516,27 +516,27 @@ public class YamlService : IYamlService
 
                     break;
                 case YamlMappingNode mapping:
-                {
-                    var names = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (var child in mapping.Children)
                     {
-                        var key = child.Key is YamlScalarNode scalarKey ? scalarKey.Value : null;
-                        var childPath = key is null ? path : $"{path}.{key}";
-                        if (key is null || !names.Add(key))
+                        var names = new HashSet<string>(StringComparer.Ordinal);
+                        foreach (var child in mapping.Children)
                         {
-                            issues.Add(new("duplicate_property", childPath, "Duplicate YAML property is not allowed"));
+                            var key = child.Key is YamlScalarNode scalarKey ? scalarKey.Value : null;
+                            var childPath = key is null ? path : $"{path}.{key}";
+                            if (key is null || !names.Add(key))
+                            {
+                                issues.Add(new("duplicate_property", childPath, "Duplicate YAML property is not allowed"));
+                            }
+
+                            ValidateYamlLimits(
+                                child.Value,
+                                childPath,
+                                depth + 1,
+                                issues,
+                                activeNodes);
                         }
 
-                        ValidateYamlLimits(
-                            child.Value,
-                            childPath,
-                            depth + 1,
-                            issues,
-                            activeNodes);
+                        break;
                     }
-
-                    break;
-                }
                 case YamlSequenceNode sequence:
                     for (var index = 0; index < sequence.Children.Count; index++)
                     {

@@ -66,7 +66,7 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
         using var persistedResponse = await user.GetAsync($"/api/suites/{suiteId}/tests");
         using var persisted = await ReadJsonAsync(persistedResponse);
         var persistedIds = persisted.RootElement.EnumerateArray()
-            .Select(test => test.GetProperty("externalId").GetString())
+            .Select(test => test.GetProperty("externalId").GetString() ?? throw new InvalidOperationException("Missing external ID"))
             .ToArray();
         Assert.Equal(["duplicate-existing"], persistedIds);
     }
@@ -158,7 +158,9 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
         }
 
         using var anonymous = fixture.PrimaryHost.Factory.CreateClient(new() { AllowAutoRedirect = false });
-        using (var unauthorized = await anonymous.GetAsync($"/api/suites/{suiteId}/tests"))
+        using (var unauthorized = await anonymous.GetAsync(
+                   $"/api/suites/{suiteId}/tests",
+                   TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
         }
@@ -244,7 +246,7 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
         Assert.Equal(
             ["contains_text", "banned_text", "regex_match", "link_pattern", "tool_called", "tool_sequence", "llm_judge", "groundedness"],
             roundTrippedExpectations.RootElement.EnumerateArray()
-                .Select(expectation => expectation.GetProperty("type").GetString())
+                .Select(expectation => expectation.GetProperty("type").GetString() ?? throw new InvalidOperationException("Missing expectation type"))
                 .ToArray());
 
         var metadata = roundTrippedInput.RootElement.GetProperty("metadata");

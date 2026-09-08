@@ -1,12 +1,14 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using Promptly.Domain.Entities;
 using Promptly.Application.Models;
+using Promptly.Application.Services;
+using Promptly.Domain.Entities;
 using Promptly.Infrastructure.Configuration;
 using Promptly.Infrastructure.Services;
 
@@ -319,7 +321,9 @@ public sealed class YamlServiceTests
             + "      text: hello\n";
 
         var exception = Assert.Throws<TestSpecificationValidationException>(() =>
-            _service.DeserializeTests(yaml, Guid.NewGuid()));
+        {
+            _service.DeserializeTests(yaml, Guid.NewGuid());
+        });
 
         Assert.Contains(exception.Issues, issue => issue.Code == "too_large");
     }

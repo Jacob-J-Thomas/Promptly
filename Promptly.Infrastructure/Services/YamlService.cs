@@ -628,17 +628,7 @@ public class YamlService : IYamlService
                 return JsonValue.Create(boolean)!;
             }
 
-            if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
-            {
-                if (!TryParseJsonNumber(value, out var integerJsonNumber))
-                {
-                    throw new InvalidOperationException("YAML numeric scalar is not a supported JSON number");
-                }
-
-                return integerJsonNumber!;
-            }
-
-            if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+            if (LooksLikeNumericScalar(value))
             {
                 if (!TryParseJsonNumber(value, out var jsonNumber))
                 {
@@ -647,20 +637,17 @@ public class YamlService : IYamlService
 
                 return jsonNumber!;
             }
-
-            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
-            {
-                if (!TryParseJsonNumber(value, out var wideJsonNumber))
-                {
-                    throw new InvalidOperationException("YAML numeric scalar is not a supported JSON number");
-                }
-
-                return wideJsonNumber!;
-            }
         }
 
         return JsonValue.Create(value)!;
     }
+
+    private static bool LooksLikeNumericScalar(string value) =>
+        value.Length > 0
+        && (char.IsDigit(value[0]) || value[0] is '+' or '-' or '.')
+        && value.Any(char.IsDigit)
+        && value.All(character =>
+            char.IsDigit(character) || character is '+' or '-' or '.' or 'e' or 'E');
 
     private static bool TryParseJsonNumber(string value, out JsonNode? number)
     {

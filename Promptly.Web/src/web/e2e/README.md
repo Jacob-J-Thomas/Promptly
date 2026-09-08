@@ -8,6 +8,9 @@ This gate proves the implemented authentication/session and Run Suite boundaries
   redirecting to login, and clearing both stored auth entries.
 - authenticated persisted project, environment, endpoint, mapping, suite, and test
   setup followed by a queued Run Suite with one deterministic passing expectation;
+- authenticated test creation and edit through the shared Form/YAML editor,
+  including malformed YAML repair, persisted metadata, reload, and a second
+  deterministic Run Suite result;
 - direct-mode fixture isolation, exact destination allowlisting, and rejection of
   an unrelated private destination.
 
@@ -66,6 +69,11 @@ The browser guard permits only the generated web origin and treats page errors,
 console errors, request failures, unapproved HTTP failures, and browser egress as
 test failures. The expired-session test registers the single expected 401 before
 triggering it and must observe that exact response.
+
+The direct phase runs both the persisted Run Suite scenario and the test-authoring
+scenario. Each scenario has a runner-generated correlation value embedded in its
+synthetic input; the provider evidence check must observe exactly one authorized
+POST for each distinct value before accepting the phase.
 
 The topology gate first proves its globally routed canary is reachable through the
 allowed egress proxy and that each server, web, and evaluation-worker workload can

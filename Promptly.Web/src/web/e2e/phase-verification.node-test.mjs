@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assertDirectFixtureBoundary,
+  assertProviderEvidence,
   evaluatePhaseReceipts,
 } from './phase-verification.mjs';
 
@@ -81,6 +82,33 @@ const validFixture = () => ({
 
 test('accepts the exact direct fixture boundary', () => {
   assert.equal(assertDirectFixtureBoundary(validFixture()), true);
+});
+
+const providerRecord = (sequence, correlation) => ({
+  authorized: true,
+  correlation_id: correlation,
+  kind: 'chat_completion',
+  message_count: 1,
+  method: 'POST',
+  model: 'verification-model',
+  path: '/v1/chat/completions',
+  sequence,
+  valid_json: true,
+});
+
+test('requires one distinct provider POST for each direct authoring scenario', () => {
+  const correlations = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  assert.equal(assertProviderEvidence(
+    correlations.map((correlation, index) => providerRecord(index + 1, correlation)),
+    { phase: 'direct', expectedCorrelations: correlations },
+  ), true);
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, correlations[0])],
+    { phase: 'direct', expectedCorrelations: correlations },
+  ), /exactly 2 provider POSTs/);
 });
 
 for (const [name, mutate, expected] of [

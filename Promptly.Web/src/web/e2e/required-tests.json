@@ -24,6 +24,12 @@
       "project": "chromium",
       "phase": "direct",
       "title": "persisted Run Suite configuration queues a run and loads its result"
+    },
+    {
+      "file": "e2e/test-authoring.e2e.ts",
+      "project": "chromium",
+      "phase": "direct",
+      "title": "test authoring persists through Form and YAML and runs through the real stack"
     }
   ]
 }

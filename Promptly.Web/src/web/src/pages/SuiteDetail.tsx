@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Container,
   Typography,
@@ -18,7 +18,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
   IconButton,
   Menu,
   MenuItem,
@@ -43,6 +42,7 @@ import { suitesApi, type TestSuite } from '../api/suites';
 import { testsApi, type TestCase } from '../api/tests';
 import { Layout } from '../components/Layout';
 import { RunConfigDialog } from '../components/RunConfigDialog';
+import { TestCaseDialog } from '../components/TestCaseDialog';
 import { getApiErrorMessage } from '../api/errors';
 
 export const SuiteDetail: React.FC = () => {
@@ -53,6 +53,7 @@ export const SuiteDetail: React.FC = () => {
   const [tests, setTests] = useState<TestCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const loadRequestRef = useRef(0);
 
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [createTestDialogOpen, setCreateTestDialogOpen] = useState(false);
@@ -62,6 +63,7 @@ export const SuiteDetail: React.FC = () => {
   const [selectedTest, setSelectedTest] = useState<TestCase | null>(null);
 
   const loadSuiteData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     if (!suiteId) {
       setError('Suite ID is required');
       setLoading(false);
@@ -74,19 +76,32 @@ export const SuiteDetail: React.FC = () => {
         suitesApi.getById(suiteId),
         testsApi.getBySuite(suiteId)
       ]);
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
       setSuite(suiteData);
       setTests(testsData);
       setError('');
     } catch (loadError: unknown) {
-      setError(getApiErrorMessage(loadError, 'Failed to load suite data'));
+      if (requestId === loadRequestRef.current) {
+        setError(getApiErrorMessage(loadError, 'Failed to load suite data'));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [suiteId]);
 
   useEffect(() => {
     void loadSuiteData();
   }, [loadSuiteData]);
+
+  useEffect(() => {
+    setAnchorEl(null);
+    setSelectedTest(null);
+    setCreateTestDialogOpen(false);
+  }, [suiteId]);
 
   const handleRunSuite = () => {
     setRunDialogOpen(true);
@@ -103,8 +118,22 @@ export const SuiteDetail: React.FC = () => {
   };
 
   const handleEditTest = () => {
-    // Test editing is tracked separately; keep the unavailable action non-destructive.
-    handleCloseMenu();
+    setAnchorEl(null);
+    setCreateTestDialogOpen(true);
+  };
+
+  const handleCreateTest = () => {
+    setSelectedTest(null);
+    setCreateTestDialogOpen(true);
+  };
+
+  const handleCloseTestDialog = () => {
+    setCreateTestDialogOpen(false);
+    setSelectedTest(null);
+  };
+
+  const handleTestSaved = async () => {
+    await loadSuiteData();
   };
 
   const handleDeleteTest = async () => {
@@ -208,7 +237,7 @@ export const SuiteDetail: React.FC = () => {
                     <Button
                       size="small"
                       startIcon={<Add />}
-                      onClick={() => setCreateTestDialogOpen(true)}
+                      onClick={handleCreateTest}
                     >
                       Create Test
                     </Button>
@@ -253,7 +282,7 @@ export const SuiteDetail: React.FC = () => {
               <Button
                 variant="contained"
                 startIcon={<Add />}
-                onClick={() => setCreateTestDialogOpen(true)}
+                onClick={handleCreateTest}
                 sx={{ mt: 2 }}
               >
                 Create First Test
@@ -312,9 +341,9 @@ export const SuiteDetail: React.FC = () => {
             open={Boolean(anchorEl)}
             onClose={handleCloseMenu}
           >
-            <MenuItem onClick={handleEditTest} disabled>
+            <MenuItem onClick={handleEditTest}>
               <Edit fontSize="small" sx={{ mr: 1 }} />
-              Edit (coming soon)
+              Edit
             </MenuItem>
             <MenuItem onClick={handleDeleteTest}>
               <Delete fontSize="small" sx={{ mr: 1 }} />
@@ -330,11 +359,12 @@ export const SuiteDetail: React.FC = () => {
             onRunStarted={(runId) => navigate(`/runs/${runId}`)}
           />
 
-          <CreateTestDialog
+          <TestCaseDialog
             open={createTestDialogOpen}
-            onClose={() => setCreateTestDialogOpen(false)}
+            onClose={handleCloseTestDialog}
             suiteId={suiteId!}
-            onTestCreated={loadSuiteData}
+            testCase={selectedTest}
+            onSaved={handleTestSaved}
           />
 
           <ImportTestsDialog
@@ -346,93 +376,6 @@ export const SuiteDetail: React.FC = () => {
         </Box>
       </Container>
     </Layout>
-  );
-};
-
-// Create Test Dialog Component
-interface CreateTestDialogProps {
-  open: boolean;
-  onClose: () => void;
-  suiteId: string;
-  onTestCreated: () => void;
-}
-
-const CreateTestDialog: React.FC<CreateTestDialogProps> = ({ open, onClose, suiteId, onTestCreated }) => {
-  const [externalId, setExternalId] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleClose = () => {
-    setExternalId('');
-    setName('');
-    setDescription('');
-    setError('');
-    onClose();
-  };
-
-  const handleCreate = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      await testsApi.create(suiteId, {
-        externalId,
-        name,
-        description,
-        inputSpecJson: JSON.stringify({ messages: [] }),
-        expectationsJson: JSON.stringify([]),
-      });
-      onTestCreated();
-      handleClose();
-    } catch (createError: unknown) {
-      setError(getApiErrorMessage(createError, 'Failed to create test'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Create Test Case</DialogTitle>
-      <DialogContent>
-        <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {error && <Alert severity="error">{error}</Alert>}
-          <TextField
-            label="External ID"
-            value={externalId}
-            onChange={(e) => setExternalId(e.target.value)}
-            required
-            fullWidth
-          />
-          <TextField
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            fullWidth
-          />
-          <TextField
-            label="Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            multiline
-            rows={3}
-            fullWidth
-          />
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          onClick={handleCreate}
-          disabled={loading || !externalId || !name}
-        >
-          Create
-        </Button>
-      </DialogActions>
-    </Dialog>
   );
 };
 

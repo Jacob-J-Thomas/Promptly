@@ -294,6 +294,7 @@ describe('TestCaseDialog', () => {
             { path: 'input.messages[0].content', message: 'Content is required.' },
             { path: 'expectations[0].min_score', message: 'Score must be between 0 and 1.' },
             { path: 42, message: 'discard this malformed entry' },
+            { path: 'input.metadata.secret', message: '   ' },
           ],
         },
       },
@@ -308,7 +309,38 @@ describe('TestCaseDialog', () => {
     expect(screen.getByText('expectations[0].min_score: Score must be between 0 and 1.'))
       .toBeInTheDocument();
     expect(screen.queryByText(/discard this malformed entry/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/input.metadata.secret/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Content for message 1')).toHaveValue('Hello from dialog');
+  });
+
+  it('keeps the Form open when malformed input JSON blocks the YAML transition', () => {
+    const malformed = {
+      ...persistedTest,
+      inputSpecJson: '{"messages": [',
+    };
+    renderDialog(malformed);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+
+    expect(screen.getByText(/Repair the existing JSON fields before opening YAML/))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText('Repair input JSON')).toHaveValue('{"messages": [');
+    expect(screen.queryByLabelText('Test YAML')).not.toBeInTheDocument();
+  });
+
+  it('keeps the Form open when malformed expectations JSON blocks the YAML transition', () => {
+    const malformed = {
+      ...persistedTest,
+      expectationsJson: 'not-json',
+    };
+    renderDialog(malformed);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+
+    expect(screen.getByText(/Repair the existing JSON fields before opening YAML/))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText('Repair expectations JSON')).toHaveValue('not-json');
+    expect(screen.queryByLabelText('Test YAML')).not.toBeInTheDocument();
   });
 
   it('keeps invalid legacy JSON visible and blocks save without an empty fallback', () => {
@@ -383,6 +415,61 @@ describe('TestCaseDialog', () => {
     expect(screen.getByText(/Repair the YAML errors before saving this test/)).toBeInTheDocument();
     expect(screen.getByText(/rows\[0\]\.id: Test id is required/)).toBeInTheDocument();
     expect(testsApi.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed YAML when saving directly from YAML mode', () => {
+    renderDialog(persistedTest);
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.change(screen.getByLabelText('Test YAML'), { target: { value: '- id: [broken' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(screen.getByText(/Repair the YAML errors before saving this test/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Test YAML')).toHaveValue('- id: [broken');
+    expect(testsApi.update).not.toHaveBeenCalled();
+  });
+
+  it('saves a valid YAML draft without requiring a return to Form mode', async () => {
+    const saved = { ...persistedTest, name: 'Saved from YAML' };
+    vi.mocked(testsApi.update).mockResolvedValue(saved);
+    const callbacks = renderDialog(persistedTest);
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.change(screen.getByLabelText('Test YAML'), {
+      target: { value: allTypesYaml.replace('All expectation types', 'Saved from YAML') },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(testsApi.update).toHaveBeenCalledOnce());
+    const [, request] = vi.mocked(testsApi.update).mock.calls[0] ?? [];
+    expect(request?.name).toBe('Saved from YAML');
+    expect(callbacks.onSaved).toHaveBeenCalledWith(saved);
+    expect(callbacks.onClose).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an aggregate expectation payload that crosses the wire limit', () => {
+    const storedExpectations = Array.from({ length: 16 }, () => ({
+      type: 'llm_judge',
+      rubric: 'Helpful',
+      min_score: 0.8,
+      model: 'm'.repeat(15_000),
+      provider: 'p',
+    }));
+    const storedExpectationsJson = JSON.stringify(storedExpectations);
+    expect(new TextEncoder().encode(storedExpectationsJson).byteLength).toBeLessThan(262_144);
+    renderDialog({ ...persistedTest, expectationsJson: storedExpectationsJson });
+
+    for (let index = 1; index <= storedExpectations.length; index += 1) {
+      fireEvent.change(screen.getByLabelText(`Rubric for expectation ${index}`), {
+        target: { value: 'r'.repeat(2_000) },
+      });
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(screen.getByText(/Fix the highlighted expectation fields before saving this test/))
+      .toBeInTheDocument();
+    expect(testsApi.update).not.toHaveBeenCalled();
   });
 
   it('ignores a completed save after the suite changes', async () => {

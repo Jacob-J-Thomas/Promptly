@@ -152,7 +152,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   await page.getByRole('button', { name: 'Create Test' }).click();
   const createDialog = page.getByRole('dialog', { name: 'Create Test Case' });
   await createDialog.getByLabel('External ID').fill(`authoring-${unique.slice(0, 8)}`);
-  await createDialog.getByLabel('Name').fill('Authored response');
+  await createDialog.getByRole('textbox', { name: 'Name', exact: true }).fill('Authored response');
   await createDialog.getByLabel('Description').fill('Created through the browser editor');
   await createDialog.getByRole('button', { name: 'Add message' }).click();
   await createDialog.getByLabel('Content for message 1').fill(JSON.stringify({
@@ -253,12 +253,12 @@ test('test authoring persists through Form and YAML and runs through the real st
   const loadedTest = (loadedTests.body as Array<{ expectationsJson: string }>)[0];
   expect(JSON.parse(loadedTest.expectationsJson)).toEqual(authoredExpectations);
 
-  const editName = editDialog.getByLabel('Name');
+  const editName = editDialog.getByRole('textbox', { name: 'Name', exact: true });
   await editName.focus();
   await expect(editName).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(editDialog.getByLabel('Description')).toBeFocused();
-  await editDialog.getByLabel('Name').fill('Edited authored response');
+  await editName.fill('Edited authored response');
   await editDialog.getByLabel('Description').fill('Edited and reloaded through the browser');
   await editDialog.getByLabel('Content for message 1').fill(JSON.stringify({
     integrationCorrelation: correlation,
@@ -304,7 +304,8 @@ test('test authoring persists through Form and YAML and runs through the real st
   await openTestMenu(page, 'Edited authored response');
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const reloadedDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
-  await expect(reloadedDialog.getByLabel('Name')).toHaveValue('Edited authored response');
+  await expect(reloadedDialog.getByRole('textbox', { name: 'Name', exact: true }))
+    .toHaveValue('Edited authored response');
   await expect(reloadedDialog.getByLabel('Content for message 1')).toHaveValue(
     JSON.stringify({ integrationCorrelation: correlation, prompt: 'Edited authoring prompt' }),
   );

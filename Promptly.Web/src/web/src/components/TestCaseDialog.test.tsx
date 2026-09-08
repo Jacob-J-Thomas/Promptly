@@ -95,6 +95,37 @@ const allTypesYaml = `- id: all-types
     - type: groundedness
       min_score: 1`;
 
+const numericInputSpecJson = '{"temperature":0.5,"enabled":true,"metadata":{"wideInteger":9007199254740993,"negativeWideInteger":-9007199254740993,"preciseDecimal":0.123456789012345678901,"exponentValue":9007199254740993e0,"nested":[null,{"":"blank-key"}]},"messages":[{"role":"user","content":"Hello"}]}';
+
+const numericYaml = `- id: numeric
+  name: Numeric values
+  description: Numeric metadata
+  input:
+    metadata:
+      wideInteger: 9007199254740993
+      negativeWideInteger: -9007199254740993
+      preciseDecimal: 0.123456789012345678901
+      exponentValue: 9007199254740993e0
+      nested:
+        - null
+        - '': blank-key
+    messages:
+      - role: user
+        content: Hello
+  expectations:
+    - type: contains_text
+      text: Hello
+      case_insensitive: true`;
+
+const expectRawNumericMetadata = (inputSpecJson: string) => {
+  expect(inputSpecJson).toContain('"wideInteger":9007199254740993');
+  expect(inputSpecJson).toContain('"negativeWideInteger":-9007199254740993');
+  expect(inputSpecJson).toContain('"preciseDecimal":0.123456789012345678901');
+  expect(inputSpecJson).toContain('"exponentValue":9007199254740993e0');
+  expect(inputSpecJson).toContain('"nested":[null,{"":"blank-key"}]');
+  expect(inputSpecJson).not.toContain('9007199254740992');
+};
+
 const makeInputAtByteLimit = () => {
   const metadataKeys = Array.from({ length: 16 }, (_, index) => `padding${index}`);
   const emptyMetadata = Object.fromEntries(metadataKeys.map((key) => [key, '']));
@@ -178,6 +209,43 @@ describe('TestCaseDialog', () => {
     });
     expect(callbacks.onSaved).toHaveBeenCalledWith(saved);
     expect(callbacks.onClose).toHaveBeenCalledOnce();
+  });
+
+  it('preserves raw numeric metadata through a persisted Form message edit', async () => {
+    const numericTest = { ...persistedTest, inputSpecJson: numericInputSpecJson };
+    vi.mocked(testsApi.update).mockResolvedValue({ ...numericTest, name: 'Numeric edit' });
+    renderDialog(numericTest);
+
+    expect(screen.getByLabelText('Content for message 1')).toHaveValue('Hello');
+    fireEvent.change(screen.getByLabelText('Content for message 1'), {
+      target: { value: 'Changed without touching metadata' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(testsApi.update).toHaveBeenCalledOnce());
+    const [, request] = vi.mocked(testsApi.update).mock.calls[0] ?? [];
+    expectRawNumericMetadata(request?.inputSpecJson ?? '');
+    expect(request?.inputSpecJson).toContain('Changed without touching metadata');
+  });
+
+  it('preserves raw numeric metadata through a YAML to Form round trip', async () => {
+    const numericTest = { ...persistedTest, inputSpecJson: numericInputSpecJson };
+    vi.mocked(testsApi.update).mockResolvedValue({ ...numericTest, name: 'Numeric YAML edit' });
+    renderDialog(numericTest);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.change(screen.getByLabelText('Test YAML'), { target: { value: numericYaml } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
+    expect(screen.getByLabelText('Content for message 1')).toHaveValue('Hello');
+    fireEvent.change(screen.getByLabelText('Content for message 1'), {
+      target: { value: 'Changed after YAML repair' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(testsApi.update).toHaveBeenCalledOnce());
+    const [, request] = vi.mocked(testsApi.update).mock.calls[0] ?? [];
+    expectRawNumericMetadata(request?.inputSpecJson ?? '');
+    expect(request?.inputSpecJson).toContain('Changed after YAML repair');
   });
 
   it('rejects a serialized input aggregate that crosses the byte cap on edit', async () => {

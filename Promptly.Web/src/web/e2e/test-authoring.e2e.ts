@@ -257,9 +257,11 @@ test('test authoring persists through Form and YAML and runs through the real st
   }).toBeGreaterThan(1);
   await expect.poll(async () => (
     (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
+      .replace(/\s+/g, ' ')
   )).toContain('Authored response');
   await expect.poll(async () => (
     (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
+      .replace(/\s+/g, ' ')
   )).toContain('Created through the browser editor with keyboard editing');
   expect(externalMonacoRequests).toEqual([]);
   await replaceYaml(page, '- id: [broken');

@@ -1,6 +1,7 @@
 import {
   MAX_JSON_SCALAR_LENGTH,
   parseBoundedJson,
+  stringifyJsonWithRawNumbers,
 } from './strictJson';
 
 export const MESSAGE_ROLES = ['system', 'user', 'assistant'] as const;
@@ -120,7 +121,7 @@ const invalidResult = (
  * the original text must be preserved and repaired explicitly.
  */
 export const parseInputSpecJson = (inputSpecJson: string): InputSpecParseResult => {
-  const bounded = parseBoundedJson(inputSpecJson);
+  const bounded = parseBoundedJson(inputSpecJson, { preserveRawNumbers: true });
   if (bounded.issue) {
     return invalidResult(inputSpecJson, [{
       code: bounded.issue.code,
@@ -240,7 +241,7 @@ export const serializeInputSpec = (
   const metadataWithoutMessages = { ...metadata };
   delete metadataWithoutMessages.messages;
 
-  return JSON.stringify({
+  return stringifyJsonWithRawNumbers({
     ...metadataWithoutMessages,
     messages: messages.map((message) => ({
       role: message.role,

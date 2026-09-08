@@ -63,6 +63,25 @@ describe('message input-spec helpers', () => {
     expect(metadata).toEqual({ enabled: true, nested: { values: [1, null, false] } });
   });
 
+  it('preserves exact wide metadata numbers when messages are edited', () => {
+    const input = '{"metadata":{"positive":9007199254740993,"negative":-9007199254740993,"decimal":0.123456789012345678901,"exponent":9007199254740993e0,"ordinary":0.5,"empty":null},"messages":[{"role":"user","content":"Hello"}]}';
+    const parsed = parseInputSpecJson(input);
+
+    expect(parsed.valid).toBe(true);
+    const serialized = serializeInputSpec(
+      [{ role: 'user', content: 'Hello again' }],
+      parsed.metadata,
+    );
+
+    expect(serialized).toContain('9007199254740993');
+    expect(serialized).toContain('-9007199254740993');
+    expect(serialized).toContain('0.123456789012345678901');
+    expect(serialized).toContain('9007199254740993e0');
+    expect(serialized).toContain('"ordinary":0.5');
+    expect(serialized).not.toContain('9007199254740992');
+    expect(JSON.parse(serialized).messages[0].content).toBe('Hello again');
+  });
+
   it.each([
     ['not-json', 'invalid_json'],
     ['null', 'invalid_shape'],

@@ -20,7 +20,7 @@ import {
   Paper,
   Divider,
 } from '@mui/material';
-import Editor from '@monaco-editor/react';
+import Editor from './configuredMonacoEditor';
 import { mappingApi, type CanonicalTrace } from '../api/mapping';
 import { endpointsApi, type CreateEndpointRequest } from '../api/endpoints';
 import { getApiErrorMessage } from '../api/errors';

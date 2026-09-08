@@ -8,18 +8,29 @@ const requiredFixture = Object.freeze({
 
 const correlationPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const assertProviderEvidence = (records, { phase, expectedCorrelation = null } = {}) => {
+export const assertProviderEvidence = (
+  records,
+  { phase, expectedCorrelation = null, expectedCorrelations = null } = {},
+) => {
   if (phase !== 'proxy' && phase !== 'direct') {
     throw new Error('provider evidence phase must be proxy or direct');
   }
   if (!Array.isArray(records) || records.length === 0) {
     throw new Error('Provider evidence is empty');
   }
-  if (phase === 'direct' && !correlationPattern.test(expectedCorrelation ?? '')) {
-    throw new Error('Direct provider evidence requires the runner correlation');
+  const expected = Array.isArray(expectedCorrelations)
+    ? expectedCorrelations
+    : expectedCorrelation ? [expectedCorrelation] : null;
+  if (phase === 'direct' && (!expected || expected.length === 0
+    || expected.some((correlation) => !correlationPattern.test(correlation)))) {
+    throw new Error('Direct provider evidence requires runner correlations');
+  }
+  if (expected && new Set(expected).size !== expected.length) {
+    throw new Error('Runner correlations must be distinct');
   }
 
   const sequences = new Set();
+  const correlations = new Set();
   for (const record of records) {
     const keys = Object.keys(record).sort();
     const expectedKeys = phase === 'direct'
@@ -42,7 +53,7 @@ export const assertProviderEvidence = (records, { phase, expectedCorrelation = n
         && record.message_count > 0
         && typeof record.correlation_id === 'string'
         && correlationPattern.test(record.correlation_id)
-        && record.correlation_id === expectedCorrelation
+        && (!expected || expected.includes(record.correlation_id))
       : record.authorized === true
         && record.kind === 'models'
         && record.method === 'GET'
@@ -52,15 +63,22 @@ export const assertProviderEvidence = (records, { phase, expectedCorrelation = n
       || !Number.isInteger(record.sequence)
       || record.sequence < 1
       || sequences.has(record.sequence)
+      || (phase === 'direct' && correlations.has(record.correlation_id))
     ) {
-      throw new Error(phase === 'direct' && record.correlation_id !== expectedCorrelation
-        ? 'Provider evidence correlation does not match the runner scenario'
-        : 'Provider evidence contains an unexpected request');
+      throw new Error('Provider evidence contains an unexpected request');
     }
     sequences.add(record.sequence);
+    if (phase === 'direct') {
+      correlations.add(record.correlation_id);
+    }
   }
-  if (phase === 'direct' && records.length !== 1) {
-    throw new Error(`Direct fixture expected exactly one provider POST, received ${records.length}`);
+  if (phase === 'direct') {
+    if (expected && records.length !== expected.length) {
+      throw new Error(`Direct fixture expected exactly ${expected.length} provider POSTs, received ${records.length}`);
+    }
+    if (expected && JSON.stringify([...correlations].sort()) !== JSON.stringify([...expected].sort())) {
+      throw new Error('Provider evidence correlations do not match the runner scenarios');
+    }
   }
   return true;
 };

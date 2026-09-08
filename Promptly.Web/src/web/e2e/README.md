@@ -8,6 +8,9 @@ This gate proves the implemented authentication/session and Run Suite boundaries
   redirecting to login, and clearing both stored auth entries.
 - authenticated persisted project, environment, endpoint, mapping, suite, and test
   setup followed by a queued Run Suite with one deterministic passing expectation;
+- authenticated test creation and edit through the shared Form/YAML editor,
+  including malformed YAML repair, persisted metadata, reload, and a second
+  deterministic Run Suite result;
 - direct-mode fixture isolation, exact destination allowlisting, and rejection of
   an unrelated private destination.
 
@@ -28,8 +31,9 @@ npm run test:e2e
 
 `npm run test:e2e` is the only supported entry point. It executes two required
 phases with separate Compose projects: the original proxy-mode authentication and
-ingress/egress phase, followed by the direct-mode Run Suite fixture. Each phase
-generates unique Compose project state, high-entropy database/JWT secrets, and
+ingress/egress phase, followed by the direct-mode Run Suite and test-authoring
+scenarios. Each phase generates unique Compose project state, high-entropy
+database/JWT secrets, and
 free loopback web and API ports; builds the Production server, worker, provider
 stub, egress proxy, and dedicated host-ingress gateway; waits with fixed bounds;
 collects a phase receipt; and unconditionally removes its containers, networks,
@@ -38,11 +42,13 @@ fixture service with one exact host/port/CIDR rule and never joins the egress
 network. Both phase receipts are required for the aggregate gate. It never calls
 a reset endpoint and never uses production credentials.
 
-The orchestrator generates one synthetic correlation UUID for the direct phase,
-passes it by the named `PROMPTLY_E2E_EXPECTED_CORRELATION` handoff to Playwright,
-and requires the provider stub's single authorized POST to contain that exact
-value. SIGINT and SIGTERM are forwarded once to the active phase child; the
-orchestrator waits for the child's cleanup and receipt before aggregating, does
+The runner generates two distinct synthetic correlation UUIDs for the direct
+phase: `PROMPTLY_E2E_EXPECTED_CORRELATION` for the persisted Run Suite scenario
+and `PROMPTLY_E2E_AUTHORING_CORRELATION` for the test-authoring scenario. It
+passes both named handoffs to Playwright and requires exactly one authorized
+provider POST containing each distinct value. SIGINT and SIGTERM are forwarded
+once to the active phase child; the orchestrator waits for the child's cleanup
+and receipt before aggregating, does
 not start another phase after cancellation, and never writes an upload marker
 for a cancelled aggregate.
 The phase runner uses persistent idempotent signal handlers, so a process-group
@@ -77,6 +83,11 @@ The browser guard permits only the generated web origin and treats page errors,
 console errors, request failures, unapproved HTTP failures, and browser egress as
 test failures. The expired-session test registers the single expected 401 before
 triggering it and must observe that exact response.
+
+The direct phase runs both the persisted Run Suite scenario and the test-authoring
+scenario. Each scenario has a runner-generated correlation value embedded in its
+synthetic input; the provider evidence check must observe exactly one authorized
+POST for each distinct value before accepting the phase.
 
 The topology gate first proves its globally routed canary is reachable through the
 allowed egress proxy and that each server, web, and evaluation-worker workload can

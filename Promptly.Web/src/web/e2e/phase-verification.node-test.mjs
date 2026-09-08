@@ -90,33 +90,82 @@ test('accepts the exact direct fixture boundary', () => {
   assert.equal(assertDirectFixtureBoundary(validFixture()), true);
 });
 
-const expectedCorrelation = '123e4567-e89b-12d3-a456-426614174000';
-const validProviderRecord = (correlationId = expectedCorrelation) => ({
+const providerRecord = (sequence, correlation) => ({
   authorized: true,
-  correlation_id: correlationId,
+  correlation_id: correlation,
   kind: 'chat_completion',
   message_count: 1,
   method: 'POST',
   model: 'verification-model',
   path: '/v1/chat/completions',
-  sequence: 1,
+  sequence,
   valid_json: true,
 });
 
-test('accepts direct provider evidence bound to the runner correlation', () => {
-  assert.equal(assertProviderEvidence([validProviderRecord()], {
-    phase: 'direct',
-    expectedCorrelation,
-  }), true);
+test('requires one distinct provider POST for each direct authoring scenario', () => {
+  const correlations = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  assert.equal(assertProviderEvidence(
+    correlations.map((correlation, index) => providerRecord(index + 1, correlation)),
+    { phase: 'direct', expectedCorrelations: correlations },
+  ), true);
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, correlations[0])],
+    { phase: 'direct', expectedCorrelations: correlations },
+  ), /exactly 2 provider POSTs/);
 });
 
-test('rejects a different valid UUID from the runner correlation', () => {
-  assert.throws(
-    () => assertProviderEvidence([
-      validProviderRecord('987e6543-e21b-12d3-a456-426614174000'),
-    ], { phase: 'direct', expectedCorrelation }),
-    /correlation does not match the runner scenario/,
-  );
+test('rejects a different valid UUID from the expected direct scenarios', () => {
+  const expectedCorrelations = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  assert.throws(() => assertProviderEvidence(
+    [
+      providerRecord(1, expectedCorrelations[0]),
+      providerRecord(2, '33333333-3333-4333-8333-333333333333'),
+    ],
+    { phase: 'direct', expectedCorrelations },
+  ), /unexpected request/);
+});
+
+test('rejects a malformed UUID in the expected direct correlation inventory', () => {
+  const expectedCorrelations = [
+    '11111111-1111-4111-8111-111111111111',
+    'not-a-uuid',
+  ];
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, expectedCorrelations[0])],
+    { phase: 'direct', expectedCorrelations },
+  ), /requires runner correlations/);
+});
+
+test('rejects duplicate expected correlations before provider evidence is accepted', () => {
+  const correlation = '11111111-1111-4111-8111-111111111111';
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, correlation)],
+    { phase: 'direct', expectedCorrelations: [correlation, correlation] },
+  ), /must be distinct/);
+});
+
+test('rejects direct evidence without an expected correlation inventory', () => {
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, '11111111-1111-4111-8111-111111111111')],
+    { phase: 'direct' },
+  ), /requires runner correlations/);
+});
+
+test('rejects duplicate provider evidence correlations', () => {
+  const correlations = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  assert.throws(() => assertProviderEvidence(
+    [providerRecord(1, correlations[0]), providerRecord(2, correlations[0])],
+    { phase: 'direct', expectedCorrelations: correlations },
+  ), /unexpected request/);
 });
 
 for (const [name, mutate, expected] of [

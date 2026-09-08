@@ -20,16 +20,19 @@ vi.mock('../api/mapping', () => ({
   },
 }));
 
-vi.mock('@monaco-editor/react', () => ({
+vi.mock('./configuredMonacoEditor', () => ({
   default: ({
     value,
     onChange,
+    language,
   }: {
     value?: string;
     onChange?: (value: string | undefined) => void;
+    language?: string;
   }) => (
     <textarea
       aria-label="Mapping Specification Editor"
+      data-language={language}
       value={value ?? ''}
       onChange={(event) => onChange?.(event.target.value)}
     />
@@ -199,6 +202,7 @@ describe('MappingWizard', () => {
     const { onClose, onComplete } = renderWizard();
 
     const editor = await reachMappingEditor();
+    expect(editor).toHaveAttribute('data-language', 'json');
     expect(endpointsApi.create).toHaveBeenCalledWith('environment-1', {
       name: 'Chat endpoint',
       path: '/chat',
@@ -282,6 +286,33 @@ describe('MappingWizard', () => {
     vi.mocked(mappingApi.validate).mockRejectedValueOnce(new Error('validation offline'));
     fireEvent.click(screen.getByRole('button', { name: 'Validate' }));
     expect(await screen.findByText('Failed to validate mapping')).toBeInTheDocument();
+  });
+
+  it('retains an empty mapping edit and shows the generic validation error', async () => {
+    renderWizard();
+    const editor = await reachMappingEditor();
+    vi.mocked(mappingApi.validate).mockResolvedValueOnce({ success: false });
+
+    fireEvent.change(editor, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Validate' }));
+
+    expect(await screen.findByText('Mapping validation failed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Mapping Specification Editor')).toHaveValue('');
+    expect(mappingApi.validate).toHaveBeenCalledWith(endpoint.id, {
+      mappingSpecJson: '',
+      sampleResponseJson: '{"choices":[{"message":{"content":"Hello"}}]}',
+    });
+  });
+
+  it('blocks validation when endpoint creation returns an empty id', async () => {
+    renderWizard();
+    vi.mocked(endpointsApi.create).mockResolvedValueOnce({ ...endpoint, id: '' });
+
+    await reachMappingEditor(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Validate' }));
+
+    expect(await screen.findByText('Endpoint not created')).toBeInTheDocument();
+    expect(mappingApi.validate).not.toHaveBeenCalled();
   });
 
   it('uses an API message for a save failure and leaves the final step open', async () => {

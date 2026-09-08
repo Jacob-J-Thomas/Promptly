@@ -4,6 +4,8 @@ import {
   MAX_JSON_DEPTH,
   MAX_JSON_SCALAR_LENGTH,
   parseBoundedJson,
+  RawJsonNumber,
+  stringifyJsonWithRawNumbers,
 } from './strictJson';
 
 const validInput = '{"messages":[{"role":"user","content":"hello"}]}';
@@ -69,6 +71,65 @@ describe('bounded strict JSON preflight', () => {
         message: 'Input JSON is malformed. Repair it before saving this test.',
       },
     });
+  });
+
+  it('retains lossy numeric tokens without changing ordinary number values', () => {
+    const result = parseBoundedJson(`{"safe":0.5,"large":9007199254740993,"negative":-9007199254740993,"decimal":0.123456789012345678901,"exponent":9007199254740993e0}`, { preserveRawNumbers: true });
+
+    expect(result.issue).toBeNull();
+    expect(result.value).toMatchObject({ safe: 0.5 });
+    expect(typeof (result.value as Record<string, unknown>).safe).toBe('number');
+    expect((result.value as Record<string, unknown>).large).toBeInstanceOf(RawJsonNumber);
+    expect((result.value as Record<string, unknown>).negative).toBeInstanceOf(RawJsonNumber);
+    expect((result.value as Record<string, unknown>).decimal).toBeInstanceOf(RawJsonNumber);
+    expect((result.value as Record<string, unknown>).exponent).toBeInstanceOf(RawJsonNumber);
+    expect(stringifyJsonWithRawNumbers(result.value)).toBe(
+      `{"safe":0.5,"large":9007199254740993,"negative":-9007199254740993,"decimal":0.123456789012345678901,"exponent":9007199254740993e0}`,
+    );
+    const compatibility = parseBoundedJson('{"score":0.123456789012345678901}');
+    expect(typeof (compatibility.value as Record<string, unknown>).score).toBe('number');
+  });
+
+  it('serializes nested raw numbers safely and rejects cyclic values', () => {
+    const parsed = parseBoundedJson('{"items":[{"":9007199254740993},null,true]}', { preserveRawNumbers: true });
+    expect(parsed.issue).toBeNull();
+    expect(stringifyJsonWithRawNumbers(parsed.value)).toBe(
+      '{"items":[{"":9007199254740993},null,true]}',
+    );
+
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => stringifyJsonWithRawNumbers(cyclic)).toThrow();
+  });
+
+  it('retains finite nonzero tokens that underflow to JavaScript zero', () => {
+    const result = parseBoundedJson('{"tiny":1e-400,"zero":0e-400}', { preserveRawNumbers: true });
+
+    expect(result.issue).toBeNull();
+    expect((result.value as Record<string, unknown>).tiny).toBeInstanceOf(RawJsonNumber);
+    expect((result.value as Record<string, unknown>).zero).toBe(0);
+    expect(stringifyJsonWithRawNumbers(result.value)).toBe('{"tiny":1e-400,"zero":0}');
+  });
+
+  it('retains finite subnormal values whose decimal spelling is rounded', () => {
+    const result = parseBoundedJson('{"tiny":1.1e-323}', { preserveRawNumbers: true });
+
+    expect(result.issue).toBeNull();
+    expect((result.value as Record<string, unknown>).tiny).toBeInstanceOf(RawJsonNumber);
+    expect(stringifyJsonWithRawNumbers(result.value)).toBe('{"tiny":1.1e-323}');
+  });
+
+  it('keeps native JSON serialization behavior for unsupported caller values', () => {
+    expect(() => new RawJsonNumber('not-a-number')).toThrow();
+    expect(stringifyJsonWithRawNumbers({ nan: Number.NaN, infinity: Number.POSITIVE_INFINITY })).toBe(
+      '{"nan":null,"infinity":null}',
+    );
+    expect(stringifyJsonWithRawNumbers({ omitted: undefined, values: [undefined, () => null, Symbol('x')] }))
+      .toBe('{"values":[null,null,null]}');
+    expect(stringifyJsonWithRawNumbers({ values: new Array(2) }))
+      .toBe('{"values":[null,null]}');
+    expect(() => stringifyJsonWithRawNumbers(1n)).toThrow();
+    expect(() => stringifyJsonWithRawNumbers(undefined)).toThrow();
   });
 
   it('rejects duplicate top-level and nested keys, including escaped equivalents', () => {

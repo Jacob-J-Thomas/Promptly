@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AxiosError, AxiosHeaders } from 'axios';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +27,24 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 vi.mock('../components/Layout', () => ({
   Layout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock('../components/configuredMonacoEditor', () => ({
+  default: ({
+    value,
+    onChange,
+    options,
+  }: {
+    value?: string;
+    onChange?: (value: string | undefined) => void;
+    options?: { ariaLabel?: string };
+  }) => (
+    <textarea
+      aria-label={options?.ariaLabel}
+      value={value ?? ''}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  ),
 }));
 
 vi.mock('../components/RunConfigDialog', () => ({
@@ -61,6 +79,7 @@ vi.mock('../api/tests', () => ({
   testsApi: {
     getBySuite: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn(),
     importYaml: vi.fn(),
     exportYaml: vi.fn(),
@@ -102,6 +121,19 @@ const createdTest: TestCase = {
   description: 'Conversation continuity',
 };
 
+const editableTest: TestCase = {
+  ...testCase,
+  inputSpecJson: JSON.stringify({
+    messages: [{ role: 'user', content: 'Original greeting' }],
+    temperature: 0.5,
+    enabled: true,
+    metadata: { tags: ['suite'] },
+  }),
+  expectationsJson: JSON.stringify([
+    { type: 'contains_text', text: 'Original', case_insensitive: true },
+  ]),
+};
+
 const apiError = (message: string) => new AxiosError(
   'request failed',
   'ERR_BAD_REQUEST',
@@ -131,7 +163,28 @@ const openTestMenu = async () => {
   const menuButton = screen.getByTestId('MoreVertIcon').closest('button');
   expect(menuButton).not.toBeNull();
   fireEvent.click(menuButton!);
-  await screen.findByRole('menuitem', { name: 'Edit (coming soon)' });
+  await screen.findByRole('menuitem', { name: 'Edit' });
+};
+
+const fillMinimumTestDraft = () => {
+  fireEvent.change(screen.getByLabelText(/External ID/), {
+    target: { value: 'chat-002' },
+  });
+  fireEvent.change(screen.getByLabelText(/^Name/), {
+    target: { value: 'Answers a follow-up' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
+  const message = screen.getByRole('group', { name: 'Message 1' });
+  fireEvent.mouseDown(within(message).getByRole('combobox'));
+  fireEvent.click(screen.getByRole('option', { name: 'user' }));
+  fireEvent.change(screen.getByLabelText('Content for message 1'), {
+    target: { value: 'Hello from the editor' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add expectation' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Contains text' }));
+  fireEvent.change(screen.getByLabelText('Text for expectation 1'), {
+    target: { value: 'Hello from the editor' },
+  });
 };
 
 const selectImportFile = () => {
@@ -151,6 +204,7 @@ describe('SuiteDetail', () => {
     vi.mocked(suitesApi.getById).mockResolvedValue(suite);
     vi.mocked(testsApi.getBySuite).mockResolvedValue([testCase]);
     vi.mocked(testsApi.create).mockResolvedValue(createdTest);
+    vi.mocked(testsApi.update).mockResolvedValue(createdTest);
     vi.mocked(testsApi.delete).mockResolvedValue(undefined);
     vi.mocked(testsApi.importYaml).mockResolvedValue(undefined);
     vi.mocked(testsApi.exportYaml).mockResolvedValue('tests: []');
@@ -195,7 +249,8 @@ describe('SuiteDetail', () => {
       target: { value: 'abc123' },
     });
     expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Run Test Suite' }))
+      .getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run Test Suite' }))
       .not.toBeInTheDocument());
   });
@@ -207,6 +262,76 @@ describe('SuiteDetail', () => {
     expect(await screen.findByText('Suite ID is required')).toBeInTheDocument();
     expect(suitesApi.getById).not.toHaveBeenCalled();
     expect(testsApi.getBySuite).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late successful load from a previous suite route', async () => {
+    let resolveOld: ((value: TestSuite) => void) | undefined;
+    const oldLoad = new Promise<TestSuite>((resolve) => {
+      resolveOld = resolve;
+    });
+    const nextSuite: TestSuite = { ...suite, id: 'suite-2', name: 'Next Suite' };
+    vi.mocked(suitesApi.getById).mockImplementation((id) => (
+      id === 'suite-1' ? oldLoad : Promise.resolve(nextSuite)
+    ));
+    vi.mocked(testsApi.getBySuite).mockImplementation((id) => (
+      id === 'suite-1' ? Promise.resolve([testCase]) : Promise.resolve([])
+    ));
+
+    const view = render(<SuiteDetail />);
+    router.suiteId = 'suite-2';
+    view.rerender(<SuiteDetail />);
+
+    expect(await screen.findByRole('heading', { name: 'Next Suite' })).toBeInTheDocument();
+    await act(async () => resolveOld?.({ ...suite, name: 'Stale Suite' }));
+    expect(screen.getByRole('heading', { name: 'Next Suite' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Stale Suite' })).not.toBeInTheDocument();
+  });
+
+  it('ignores a late failed load from a previous suite route', async () => {
+    let rejectOld: ((reason?: unknown) => void) | undefined;
+    const oldLoad = new Promise<TestSuite>((_resolve, reject) => {
+      rejectOld = reject;
+    });
+    const nextSuite: TestSuite = { ...suite, id: 'suite-2', name: 'Next Suite' };
+    vi.mocked(suitesApi.getById).mockImplementation((id) => (
+      id === 'suite-1' ? oldLoad : Promise.resolve(nextSuite)
+    ));
+    vi.mocked(testsApi.getBySuite).mockImplementation((id) => (
+      id === 'suite-1' ? Promise.resolve([testCase]) : Promise.resolve([])
+    ));
+
+    const view = render(<SuiteDetail />);
+    router.suiteId = 'suite-2';
+    view.rerender(<SuiteDetail />);
+
+    expect(await screen.findByRole('heading', { name: 'Next Suite' })).toBeInTheDocument();
+    await act(async () => rejectOld?.(new Error('stale suite load failure')));
+    expect(screen.getByRole('heading', { name: 'Next Suite' })).toBeInTheDocument();
+    expect(screen.queryByText('stale suite load failure')).not.toBeInTheDocument();
+  });
+
+  it('closes the test actions menu on Escape without selecting an action', async () => {
+    await renderLoaded();
+    await openTestMenu();
+
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Edit' }), {
+      key: 'Escape',
+      code: 'Escape',
+    });
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Edit' }))
+      .not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: 'Edit Test Case' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Run Suite usable when a loaded suite has no project payload', async () => {
+    vi.mocked(suitesApi.getById).mockResolvedValueOnce(null as unknown as TestSuite);
+    vi.mocked(testsApi.getBySuite).mockResolvedValueOnce([testCase]);
+    render(<SuiteDetail />);
+    await screen.findByText('chat-001');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Suite' }));
+    expect(runDialogMock.projectId).toBe('');
+    expect(screen.getByRole('dialog', { name: 'Run Test Suite' })).toBeInTheDocument();
   });
 
   it('shows a server message when loading fails', async () => {
@@ -233,12 +358,7 @@ describe('SuiteDetail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create First Test' }));
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/External ID/), {
-      target: { value: 'chat-002' },
-    });
-    fireEvent.change(screen.getByLabelText(/^Name/), {
-      target: { value: 'Answers a follow-up' },
-    });
+    fillMinimumTestDraft();
     fireEvent.change(screen.getByLabelText('Description'), {
       target: { value: 'Conversation continuity' },
     });
@@ -248,8 +368,8 @@ describe('SuiteDetail', () => {
       externalId: 'chat-002',
       name: 'Answers a follow-up',
       description: 'Conversation continuity',
-      inputSpecJson: '{"messages":[]}',
-      expectationsJson: '[]',
+      inputSpecJson: '{"messages":[{"role":"user","content":"Hello from the editor"}]}',
+      expectationsJson: '[{"type":"contains_text","text":"Hello from the editor","case_insensitive":true}]',
     }));
     await waitFor(() => expect(suitesApi.getById).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create Test Case' }))
@@ -269,8 +389,7 @@ describe('SuiteDetail', () => {
     await renderLoaded();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Test' }));
-    fireEvent.change(screen.getByLabelText(/External ID/), { target: { value: 'chat-002' } });
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Follow-up' } });
+    fillMinimumTestDraft();
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('Test creation is unavailable')).toBeInTheDocument();
@@ -278,7 +397,8 @@ describe('SuiteDetail', () => {
     expect(screen.getByLabelText(/External ID/)).toHaveValue('chat-002');
     expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByRole('alert'))
+      .getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create Test Case' }))
       .not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Create Test' }));
@@ -286,15 +406,73 @@ describe('SuiteDetail', () => {
     expect(screen.getByLabelText(/External ID/)).toHaveValue('');
   });
 
-  it('keeps the unavailable edit action disabled without disrupting the suite', async () => {
-    await renderLoaded();
+  it('opens a populated edit dialog and persists a changed test through PUT', async () => {
+    vi.mocked(testsApi.getBySuite).mockResolvedValue([editableTest]);
+    vi.mocked(testsApi.update).mockResolvedValue({ ...editableTest, name: 'Edited test' });
+    await renderLoaded(suite, [editableTest]);
     await openTestMenu();
 
-    expect(screen.getByRole('menuitem', { name: 'Edit (coming soon)' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    );
-    expect(document.body).toHaveTextContent('Regression Suite');
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    expect(await screen.findByRole('dialog', { name: 'Edit Test Case' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Name/)).toHaveValue('Returns a greeting');
+    expect(screen.getByLabelText('Content for message 1')).toHaveValue('Original greeting');
+    expect(screen.getByLabelText('Text for expectation 1')).toHaveValue('Original');
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Edited test' } });
+    fireEvent.change(screen.getByLabelText('Content for message 1'), {
+      target: { value: 'Changed greeting' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(testsApi.update).toHaveBeenCalledWith('test-1', expect.objectContaining({
+      externalId: 'chat-001',
+      name: 'Edited test',
+      inputSpecJson: expect.stringContaining('Changed greeting'),
+      expectationsJson: editableTest.expectationsJson,
+    })));
+    await waitFor(() => expect(suitesApi.getById).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: 'Edit Test Case' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the editor mounted while the post-save suite refresh is pending', async () => {
+    let resolveRefresh: (() => void) | undefined;
+    const pendingRefresh = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    vi.mocked(suitesApi.getById)
+      .mockResolvedValueOnce(suite)
+      .mockImplementationOnce(async () => {
+        await pendingRefresh;
+        return suite;
+      });
+    vi.mocked(testsApi.getBySuite)
+      .mockResolvedValueOnce([editableTest])
+      .mockImplementationOnce(async () => {
+        await pendingRefresh;
+        return [{ ...editableTest, name: 'Edited test' }];
+      });
+    vi.mocked(testsApi.update).mockResolvedValue({ ...editableTest, name: 'Edited test' });
+
+    render(<SuiteDetail />);
+    await screen.findByRole('heading', { name: suite.name });
+    await openTestMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Test Case' });
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Edited test' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(testsApi.update).toHaveBeenCalledOnce());
+    await waitFor(() => expect(testsApi.getBySuite).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('dialog', { name: 'Edit Test Case' })).toBe(dialog);
+    expect(within(dialog).getByRole('progressbar')).toBeInTheDocument();
+
+    resolveRefresh?.();
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    const runSuiteButton = await screen.findByRole('button', { name: 'Run Suite' });
+    expect(runSuiteButton).toBeEnabled();
+    fireEvent.click(runSuiteButton);
+    expect(screen.getByRole('dialog', { name: 'Run Test Suite' })).toBeInTheDocument();
   });
 
   it('deletes a selected test and refreshes suite data', async () => {

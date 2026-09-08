@@ -99,7 +99,7 @@ jobs:
       - name: Run web unit tests and coverage gate
         run: npm run test:coverage
 
-      - name: Require covered authentication UI sources
+      - name: Require covered authentication and authoring UI sources
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
@@ -111,6 +111,17 @@ jobs:
             "src/authenticationInputLimits.ts",
             "src/pages/Login.tsx",
             "src/pages/Register.tsx",
+            "src/components/RunConfigDialog.tsx",
+            "src/components/MessageListEditor.tsx",
+            "src/components/messageSpec.ts",
+            "src/components/ExpectationListEditor.tsx",
+            "src/components/expectationSpec.ts",
+            "src/components/strictJson.ts",
+            "src/components/configuredMonacoEditor.tsx",
+            "src/components/MappingWizard.tsx",
+            "src/components/TestCaseDialog.tsx",
+            "src/components/testCaseYaml.ts",
+            "src/pages/SuiteDetail.tsx",
           ];
 
           for (const sourcePath of requiredSources) {

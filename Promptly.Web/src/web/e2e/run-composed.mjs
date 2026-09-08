@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import {
   lstat,
@@ -34,6 +34,15 @@ const {
 const phase = process.env.PROMPTLY_E2E_PHASE;
 if (phase !== 'proxy' && phase !== 'direct') {
   throw new Error('PROMPTLY_E2E_PHASE must be proxy or direct');
+}
+const expectedCorrelations = phase === 'direct'
+  ? [
+    process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? randomUUID(),
+    process.env.PROMPTLY_E2E_AUTHORING_CORRELATION ?? randomUUID(),
+  ]
+  : [];
+if (phase === 'direct' && expectedCorrelations[0] === expectedCorrelations[1]) {
+  expectedCorrelations[1] = randomUUID();
 }
 const artifactsRoot = path.join(baseArtifactsRoot, phase);
 const composeFiles = [
@@ -873,7 +882,7 @@ const verifyProviderEvidence = async () => {
   const records = lines.map((line) => JSON.parse(line));
   assertProviderEvidence(records, {
     phase,
-    expectedCorrelation: process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? null,
+    expectedCorrelations: phase === 'direct' ? expectedCorrelations : null,
   });
 };
 
@@ -1153,11 +1162,11 @@ try {
     PROMPTLY_E2E_WEB_ORIGIN: webOrigin,
   });
   if (phase === 'direct') {
-    playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION = (
-      process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? ''
-    );
+    playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION = expectedCorrelations[0];
+    playwrightEnvironment.PROMPTLY_E2E_AUTHORING_CORRELATION = expectedCorrelations[1];
   } else {
     delete playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION;
+    delete playwrightEnvironment.PROMPTLY_E2E_AUTHORING_CORRELATION;
   }
 
   browserAttempted = true;

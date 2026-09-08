@@ -19,7 +19,7 @@ export default defineConfig({
   testMatch: '**/*.e2e.ts',
   grep: phase === 'proxy'
     ? /anonymous protected routes redirect to login|registration logout and login traverse the real stack|an expired signed session receives 401 and clears stored authentication/
-    : /persisted Run Suite configuration queues a run and loads its result/,
+    : /persisted Run Suite configuration queues a run and loads its result|test authoring persists through Form and YAML and runs through the real stack/,
   outputDir: path.join(artifactsRoot, phase, 'playwright-output'),
   fullyParallel: false,
   forbidOnly: true,

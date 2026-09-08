@@ -221,6 +221,7 @@ test('test authoring persists through Form and YAML and runs through the real st
       nested: { count: 2 },
     },
   });
+  await expect(createDialog).toBeHidden();
   expect(createdBody.inputSpecJson).toContain(correlation);
   expect(JSON.parse(createdBody.expectationsJson)).toEqual(authoredExpectations);
   await expect(page.getByText('Authored response', { exact: true })).toBeVisible();
@@ -297,6 +298,7 @@ test('test authoring persists through Form and YAML and runs through the real st
     { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
     ...authoredExpectations.slice(1),
   ]);
+  await expect(editDialog).toBeHidden();
   await expect(page.getByText('Edited authored response', { exact: true })).toBeVisible();
 
   await page.goto(`/suites/${suiteId}`);
@@ -329,6 +331,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   expect(JSON.parse(reducedBody.expectationsJson)).toEqual([
     { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
   ]);
+  await expect(reductionDialog).toBeHidden();
 
   await page.getByRole('button', { name: 'Run Suite' }).click();
   const runDialog = page.getByRole('dialog', { name: 'Run Test Suite' });

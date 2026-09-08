@@ -62,7 +62,7 @@ export const SuiteDetail: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedTest, setSelectedTest] = useState<TestCase | null>(null);
 
-  const loadSuiteData = useCallback(async () => {
+  const loadSuiteData = useCallback(async (showLoading = true) => {
     const requestId = ++loadRequestRef.current;
     if (!suiteId) {
       setError('Suite ID is required');
@@ -71,7 +71,9 @@ export const SuiteDetail: React.FC = () => {
     }
 
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       const [suiteData, testsData] = await Promise.all([
         suitesApi.getById(suiteId),
         testsApi.getBySuite(suiteId)
@@ -133,7 +135,7 @@ export const SuiteDetail: React.FC = () => {
   };
 
   const handleTestSaved = async () => {
-    await loadSuiteData();
+    await loadSuiteData(false);
   };
 
   const handleDeleteTest = async () => {

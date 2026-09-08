@@ -1,3 +1,5 @@
+import { parseBoundedJson, type StrictJsonIssue } from './strictJson';
+
 export const EXPECTATION_TYPES = [
   'contains_text',
   'banned_text',
@@ -24,6 +26,9 @@ export interface ExpectationDraft {
 
 export type ExpectationSpecIssueCode =
   | 'invalid_json'
+  | 'duplicate_property'
+  | 'too_large'
+  | 'invalid_number'
   | 'invalid_shape'
   | 'invalid_type'
   | 'unknown_type'
@@ -67,6 +72,14 @@ const issue = (
   path: string,
   message: string,
 ): ExpectationSpecIssue => ({ code, path, message });
+
+const mapStrictJsonIssue = (
+  strictIssue: StrictJsonIssue,
+): ExpectationSpecIssue => issue(
+  strictIssue.code,
+  strictIssue.path.replace(/^inputSpecJson/, 'expectationsJson'),
+  strictIssue.message.replaceAll('Input JSON', 'Expectation JSON'),
+);
 
 /** New rows always carry the evaluator's explicit, authoritative defaults. */
 export const createExpectation = (type: ExpectationType): ExpectationDraft => {
@@ -262,21 +275,16 @@ export const validateExpectations = (expectations: readonly unknown[]): Expectat
 };
 
 export const parseExpectationsJson = (originalText: string): ExpectationParseResult => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(originalText) as unknown;
-  } catch {
+  const bounded = parseBoundedJson(originalText);
+  if (bounded.issue) {
     return {
       originalText,
       valid: false,
       expectations: null,
-      errors: [issue(
-        'invalid_json',
-        'expectationsJson',
-        'Expectation JSON is malformed. Repair it before saving this test.',
-      )],
+      errors: [mapStrictJsonIssue(bounded.issue)],
     };
   }
+  const parsed = bounded.value;
 
   if (!Array.isArray(parsed)) {
     return {

@@ -1,9 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import ConfiguredMonacoEditor, { getMonacoWorker } from './configuredMonacoEditor';
+import ConfiguredMonacoEditor from './configuredMonacoEditor';
 
-const { loaderConfig } = vi.hoisted(() => ({
+const { loaderConfig, editorWorker, jsonWorker } = vi.hoisted(() => ({
   loaderConfig: vi.fn(),
+  editorWorker: class LocalEditorWorker {},
+  jsonWorker: class LocalJsonWorker {},
 }));
 
 vi.mock('@monaco-editor/react', () => ({
@@ -28,31 +30,22 @@ vi.mock('@monaco-editor/react', () => ({
   loader: { config: loaderConfig },
 }));
 
-vi.mock('monaco-editor', () => ({}));
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({
-  default: class LocalEditorWorker {},
+  default: editorWorker,
 }));
 vi.mock('monaco-editor/esm/vs/language/json/json.worker?worker', () => ({
-  default: class LocalJsonWorker {},
+  default: jsonWorker,
 }));
 
-type WorkerConstructor = new () => Worker;
-
-class EditorWorker {}
-class JsonWorker {}
-
-const workers = {
-  editor: EditorWorker as unknown as WorkerConstructor,
-  json: JsonWorker as unknown as WorkerConstructor,
-};
-
-describe('configured Monaco worker routing', () => {
-  it.each([
-    ['json', JsonWorker],
-    ['yaml', EditorWorker],
-    ['unknown', EditorWorker],
-  ])('uses the local %s worker', (label, expectedWorker) => {
-    expect(getMonacoWorker(label, workers)).toBeInstanceOf(expectedWorker);
+describe('configured Monaco adapter', () => {
+  it('routes the configured global worker factory to local JSON and editor assets', () => {
+    const environment = (globalThis as typeof globalThis & {
+      MonacoEnvironment?: { getWorker: (_moduleId: string, label: string) => Worker };
+    }).MonacoEnvironment;
+    expect(environment).toBeDefined();
+    expect(environment?.getWorker('', 'json')).toBeInstanceOf(jsonWorker);
+    expect(environment?.getWorker('', 'yaml')).toBeInstanceOf(editorWorker);
+    expect(environment?.getWorker('', 'unknown')).toBeInstanceOf(editorWorker);
   });
 
   it('configures the local loader and forwards YAML editor props', () => {

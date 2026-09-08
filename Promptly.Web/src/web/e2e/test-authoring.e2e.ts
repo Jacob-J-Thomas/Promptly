@@ -139,12 +139,26 @@ const authoringYaml = ({
         - authoring
       nullable: null
       wideInteger: 9007199254740993
+      preciseDecimal: 0.123456789012345678901234567890
+      exponentValue: 6.022140760000000000e+23
       nested:
         count: 2
     messages:
       - role: user
         content: ${JSON.stringify(message)}
 ${expectations}`;
+};
+
+const expectLosslessNumericMetadata = (inputSpecJson: string) => {
+  expect(inputSpecJson).toMatch(
+    /"wideInteger"\s*:\s*9007199254740993(?:[,}])/,
+  );
+  expect(inputSpecJson).toMatch(
+    /"preciseDecimal"\s*:\s*0\.123456789012345678901234567890(?:[,}])/,
+  );
+  expect(inputSpecJson).toMatch(
+    /"exponentValue"\s*:\s*6\.022140760000000000e\+23(?:[,}])/,
+  );
 };
 
 test('test authoring persists through Form and YAML and runs through the real stack', async ({ page }) => {
@@ -232,6 +246,20 @@ test('test authoring persists through Form and YAML and runs through the real st
   await expect(createDialog.getByTestId('test-yaml-editor').locator(
     '.monaco-editor .view-line span[class^="mtk"]',
   ).first()).toBeVisible();
+  await expect.poll(async () => {
+    const classes = await createDialog.getByTestId('test-yaml-editor').locator(
+      '.monaco-editor .view-line span[class^="mtk"]',
+    ).evaluateAll((spans) => [...new Set(
+      spans.flatMap((span) => [...span.classList].filter((name) => /^mtk\d+$/.test(name))),
+    )]);
+    return classes.length;
+  }).toBeGreaterThan(1);
+  await expect.poll(async () => (
+    (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
+  )).toContain('Authored response');
+  await expect.poll(async () => (
+    (await createDialog.getByTestId('test-yaml-editor').locator('.view-line').allTextContents()).join('\n')
+  )).toContain('Created through the browser editor with keyboard editing');
   expect(externalMonacoRequests).toEqual([]);
   await replaceYaml(page, '- id: [broken');
   await createDialog.getByRole('tab', { name: 'Form' }).click();
@@ -280,9 +308,7 @@ test('test authoring persists through Form and YAML and runs through the real st
       nested: { count: 2 },
     },
   });
-  expect(createdBody.inputSpecJson).toMatch(
-    /"wideInteger"\s*:\s*9007199254740993(?:[,}])/,
-  );
+  expectLosslessNumericMetadata(createdBody.inputSpecJson);
   await expect(createDialog).toBeHidden();
   expect(createdBody.inputSpecJson).toContain(correlation);
   expect(JSON.parse(createdBody.expectationsJson)).toEqual(authoredExpectations);
@@ -314,9 +340,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   const loadedTests = await api(page, `/api/suites/${suiteId}/tests`, 'GET');
   expect(loadedTests.status).toBe(200);
   const loadedTest = (loadedTests.body as Array<{ inputSpecJson: string; expectationsJson: string }>)[0];
-  expect(loadedTest.inputSpecJson).toMatch(
-    /"wideInteger"\s*:\s*9007199254740993(?:[,}])/,
-  );
+  expectLosslessNumericMetadata(loadedTest.inputSpecJson);
   expect(JSON.parse(loadedTest.expectationsJson)).toEqual(authoredExpectations);
 
   const editName = editDialog.getByRole('textbox', { name: 'Name', exact: true });
@@ -331,7 +355,27 @@ test('test authoring persists through Form and YAML and runs through the real st
     prompt: 'Edited authoring prompt',
   }));
   await editDialog.getByLabel('Case-insensitive for expectation 1').uncheck();
-  await editDialog.getByRole('tab', { name: 'YAML' }).click();
+
+  const formOnlyUpdateRequest = page.waitForRequest((request) => (
+    request.method() === 'PUT' && new URL(request.url()).pathname.startsWith('/api/tests/')
+  ));
+  await editDialog.getByRole('button', { name: 'Save changes' }).click();
+  const formEditedRequest = await formOnlyUpdateRequest;
+  const formEditedBody = formEditedRequest.postDataJSON() as {
+    name: string;
+    inputSpecJson: string;
+  };
+  expect(formEditedBody.name).toBe('Edited authored response');
+  expect(formEditedBody.inputSpecJson).toContain('Edited authoring prompt');
+  expectLosslessNumericMetadata(formEditedBody.inputSpecJson);
+  await expect(editDialog).toBeHidden();
+
+  await page.reload();
+  await expect(page.getByText('Edited authored response', { exact: true })).toBeVisible();
+  await openTestMenu(page, 'Edited authored response');
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  const yamlEditDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
+  await yamlEditDialog.getByRole('tab', { name: 'YAML' }).click();
   await replaceYaml(page, authoringYaml({
     externalId: `authoring-${unique.slice(0, 8)}`,
     name: 'Edited authored response',
@@ -344,12 +388,12 @@ test('test authoring persists through Form and YAML and runs through the real st
     enabled: false,
     caseInsensitive: false,
   }));
-  await editDialog.getByRole('tab', { name: 'Form' }).click();
+  await yamlEditDialog.getByRole('tab', { name: 'Form' }).click();
 
   const updateRequest = page.waitForRequest((request) => (
     request.method() === 'PUT' && new URL(request.url()).pathname.startsWith('/api/tests/')
   ));
-  await editDialog.getByRole('button', { name: 'Save changes' }).click();
+  await yamlEditDialog.getByRole('button', { name: 'Save changes' }).click();
   const updatedRequest = await updateRequest;
   const updatedBody = updatedRequest.postDataJSON() as {
     name: string;
@@ -367,14 +411,12 @@ test('test authoring persists through Form and YAML and runs through the real st
     },
   });
   expect(updatedBody.inputSpecJson).toContain('Edited authoring prompt');
-  expect(updatedBody.inputSpecJson).toMatch(
-    /"wideInteger"\s*:\s*9007199254740993(?:[,}])/,
-  );
+  expectLosslessNumericMetadata(updatedBody.inputSpecJson);
   expect(JSON.parse(updatedBody.expectationsJson)).toEqual([
     { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
     ...authoredExpectations.slice(1),
   ]);
-  await expect(editDialog).toBeHidden();
+  await expect(yamlEditDialog).toBeHidden();
   await expect(page.getByText('Edited authored response', { exact: true })).toBeVisible();
 
   await page.goto(`/suites/${suiteId}`);
@@ -404,9 +446,7 @@ test('test authoring persists through Form and YAML and runs through the real st
   await reductionDialog.getByRole('button', { name: 'Save changes' }).click();
   const reduced = await reductionRequest;
   const reducedBody = reduced.postDataJSON() as { inputSpecJson: string; expectationsJson: string };
-  expect(reducedBody.inputSpecJson).toMatch(
-    /"wideInteger"\s*:\s*9007199254740993(?:[,}])/,
-  );
+  expectLosslessNumericMetadata(reducedBody.inputSpecJson);
   expect(JSON.parse(reducedBody.expectationsJson)).toEqual([
     { type: 'contains_text', text: 'Deterministically accurate', case_insensitive: false },
   ]);

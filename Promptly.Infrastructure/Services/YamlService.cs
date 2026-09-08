@@ -243,7 +243,7 @@ public class YamlService : IYamlService
             valid = false;
         }
 
-        if (inputNode is not null && expectationsNode is not null)
+        if (inputNode is YamlMappingNode && expectationsNode is YamlSequenceNode)
         {
             try
             {
@@ -365,6 +365,7 @@ public class YamlService : IYamlService
         {
             var parser = new Parser(new StringReader(yaml));
             var eventCount = 0;
+            var depth = 0;
             while (parser.MoveNext())
             {
                 if (++eventCount > MaxYamlNodes)
@@ -388,6 +389,36 @@ public class YamlService : IYamlService
                             "$",
                             "YAML anchors, aliases, and tags are not supported")
                     ];
+                }
+
+                switch (parser.Current)
+                {
+                    case DocumentStart:
+                        depth = 0;
+                        break;
+                    case MappingStart:
+                    case SequenceStart:
+                    case Scalar:
+                        if (depth > TestSpecificationValidator.MaxDepth)
+                        {
+                            return
+                            [
+                                new ExpectationValidationIssue(
+                                    "too_large",
+                                    "$",
+                                    "YAML nesting exceeds the maximum depth")
+                            ];
+                        }
+
+                        if (parser.Current is not Scalar)
+                        {
+                            depth++;
+                        }
+                        break;
+                    case MappingEnd:
+                    case SequenceEnd:
+                        depth = Math.Max(0, depth - 1);
+                        break;
                 }
             }
         }

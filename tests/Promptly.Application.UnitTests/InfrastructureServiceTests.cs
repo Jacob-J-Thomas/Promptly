@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
@@ -157,6 +158,215 @@ public sealed class YamlServiceTests
         Assert.All(
             exception.Issues.Where(issue => issue.Path.StartsWith("rows[0.", StringComparison.Ordinal)),
             issue => Assert.Equal("invalid_type", issue.Code));
+    }
+
+    [Fact]
+    public void Constructor_uses_supplied_validator_and_maps_unclassified_issues()
+    {
+        var service = new YamlService(
+            NullLogger<YamlService>.Instance,
+            new FixedSpecificationValidator(new("custom", "custom.path", "safe issue")));
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            service.SerializeTests(
+            [
+                new TestCase
+                {
+                    ExternalId = "custom-validator",
+                    Name = "Custom validator",
+                    InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                    ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
+                }
+            ]));
+
+        var issue = Assert.Single(exception.Issues);
+        Assert.Equal("rows[0].custom.path", issue.Path);
+        Assert.Equal("safe issue", issue.Message);
+    }
+
+    [Fact]
+    public void DeserializeTests_reports_non_string_row_keys_without_loading_them_as_properties()
+    {
+        const string yaml = """
+            - ? [collection, key]
+              : value
+              "": value
+              42: value
+              id: malformed-keys
+              name: Malformed keys
+              input:
+                messages:
+                  - role: user
+                    content: hello
+              expectations:
+                - type: contains_text
+                  text: hello
+            """;
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Equal(3, exception.Issues.Count(issue => issue.Code == "invalid_type"));
+        Assert.All(
+            exception.Issues.Where(issue => issue.Code == "invalid_type"),
+            issue => Assert.Equal("rows[0]", issue.Path));
+    }
+
+    [Theory]
+    [InlineData("id", "~", "rows[0].id")]
+    [InlineData("name", "Null", "rows[0].name")]
+    [InlineData("id", "NULL", "rows[0].id")]
+    [InlineData("name", "\"\"", "rows[0].name")]
+    [InlineData("id", "   ", "rows[0].id")]
+    public void DeserializeTests_rejects_null_and_blank_required_strings(
+        string field,
+        string value,
+        string expectedPath)
+    {
+        var yaml = ValidYamlRow("required-string");
+        yaml = field == "id"
+            ? yaml.Replace("id: required-string", $"id: {value}", StringComparison.Ordinal)
+            : yaml.Replace("name: Test required-string", $"name: {value}", StringComparison.Ordinal);
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Contains(
+            exception.Issues,
+            issue => issue.Code == "invalid_type" && issue.Path == expectedPath);
+    }
+
+    [Theory]
+    [InlineData("input", "null", "rows[0].input")]
+    [InlineData("input", "~", "rows[0].input")]
+    [InlineData("expectations", "null", "rows[0].expectations")]
+    [InlineData("expectations", "~", "rows[0].expectations")]
+    public void DeserializeTests_rejects_null_input_and_expectations_without_conversion(
+        string field,
+        string scalar,
+        string expectedPath)
+    {
+        var yaml = ValidYamlRow("null-shape");
+        yaml = field == "input"
+            ? yaml.Replace(
+                "  input:\n    messages:\n      - role: user\n        content: hello\n",
+                $"  input: {scalar}\n",
+                StringComparison.Ordinal)
+            : yaml.Replace(
+                "  expectations:\n    - type: contains_text\n      text: hello",
+                $"  expectations: {scalar}\n",
+                StringComparison.Ordinal);
+
+        var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Contains(
+            exception.Issues,
+            issue => issue.Code == "invalid_type" && issue.Path == expectedPath);
+    }
+
+    [Theory]
+    [InlineData("~", true)]
+    [InlineData("Null", true)]
+    [InlineData("NULL", true)]
+    [InlineData("''", false)]
+    public void DeserializeTests_preserves_yaml_null_spellings_and_empty_strings(
+        string scalar,
+        bool expectedNull)
+    {
+        var yaml = ValidYamlRow("null-spelling").Replace(
+            "        content: hello\n",
+            $"        content: hello\n    metadata: {scalar}\n",
+            StringComparison.Ordinal);
+
+        var testCase = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+        var metadata = input.RootElement.GetProperty("metadata");
+        Assert.Equal(
+            expectedNull ? System.Text.Json.JsonValueKind.Null : System.Text.Json.JsonValueKind.String,
+            metadata.ValueKind);
+        if (!expectedNull)
+        {
+            Assert.Equal(string.Empty, metadata.GetString());
+        }
+    }
+
+    [Fact]
+    public void DeserializeTests_preserves_a_null_description()
+    {
+        var yaml = ValidYamlRow("null-description").Replace(
+            "description: description",
+            "description: ~",
+            StringComparison.Ordinal);
+
+        var testCase = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+
+        Assert.Null(testCase.Description);
+    }
+
+    [Theory]
+    [InlineData("-1.5e+2", true)]
+    [InlineData("+1", false)]
+    [InlineData(".5", false)]
+    [InlineData("1e+", false)]
+    public void DeserializeTests_preserves_supported_numeric_scalars_and_rejects_invalid_ones(
+        string scalar,
+        bool expectedValid)
+    {
+        var yaml = ValidYamlRow("numeric-scalar").Replace(
+            "        content: hello\n",
+            $"        content: hello\n    metadata:\n      number: {scalar}\n",
+            StringComparison.Ordinal);
+
+        if (!expectedValid)
+        {
+            var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+                _service.DeserializeTests(yaml, Guid.NewGuid()));
+            Assert.Contains(exception.Issues, issue => issue.Code == "invalid_type");
+            return;
+        }
+
+        var testCase = Assert.Single(_service.DeserializeTests(yaml, Guid.NewGuid()));
+        using var input = System.Text.Json.JsonDocument.Parse(testCase.InputSpecJson);
+        var number = input.RootElement.GetProperty("metadata").GetProperty("number");
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, number.ValueKind);
+        Assert.Equal("-1.5e+2", number.GetRawText());
+    }
+
+    [Fact]
+    public void DeserializeTests_rejects_depth_before_loading_trailing_invalid_content()
+    {
+        var exact = BuildNestedYaml(TestSpecificationValidator.MaxDepth - 3);
+        var firstOverLimit = BuildNestedYaml(TestSpecificationValidator.MaxDepth - 2);
+
+        Assert.Single(_service.DeserializeTests(exact, Guid.NewGuid()));
+
+        var exactException = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(exact + "\n  trailing: [", Guid.NewGuid()));
+        Assert.Contains(exactException.Issues, issue => issue.Code == "invalid_yaml");
+
+        var overLimitException = Assert.Throws<TestSpecificationValidationException>(() =>
+            _service.DeserializeTests(firstOverLimit + "\n  trailing: [", Guid.NewGuid()));
+        Assert.Contains(
+            overLimitException.Issues,
+            issue => issue.Code == "too_large" && issue.Path == "$"
+                && issue.Message.Contains("nesting", StringComparison.Ordinal));
+
+        static string BuildNestedYaml(int nestedObjects)
+        {
+            var nested = "true";
+            for (var index = 0; index < nestedObjects; index++)
+            {
+                nested = "{next: " + nested + "}";
+            }
+
+            return ValidYamlRow("depth")
+                .Replace(
+                    "        content: hello\n",
+                    $"        content: hello\n    metadata: {nested}\n",
+                    StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -654,4 +864,13 @@ public sealed class YamlServiceTests
             - type: contains_text
               text: hello
         """;
+
+    private sealed class FixedSpecificationValidator(ExpectationValidationIssue issue) : ITestSpecificationValidator
+    {
+        public ExpectationValidationResult Validate(string inputSpecJson, string expectationsJson) =>
+            new([issue]);
+
+        public ExpectationValidationResult ValidateInput(string inputSpecJson) =>
+            ExpectationValidationResult.Valid;
+    }
 }

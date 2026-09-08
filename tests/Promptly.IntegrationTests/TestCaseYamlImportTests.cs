@@ -2,6 +2,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Promptly.Application.Data;
 
 namespace Promptly.IntegrationTests;
 
@@ -70,36 +74,65 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
     [Fact]
     public async Task Concurrent_same_external_id_imports_leave_one_row_and_safe_conflict_error()
     {
-        using var user = await PromptlyApiClient.RegisterAsync(fixture.PrimaryHost.Factory);
-        var projectId = await user.CreateProjectAsync();
-        var suiteId = await user.CreateSuiteAsync(projectId);
-        var yaml = ValidRow("concurrent-unique");
-
-        var responses = await Task.WhenAll(
-            ImportAsync(user, suiteId, yaml),
-            ImportAsync(user, suiteId, yaml));
-        try
-        {
-            Assert.Contains(responses, response => response.StatusCode == HttpStatusCode.OK);
-            var failures = responses.Where(response => response.StatusCode != HttpStatusCode.OK).ToArray();
-            Assert.Single(failures);
-            var failureBody = await failures[0].Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.BadRequest, failures[0].StatusCode);
-            Assert.Contains("persistence_error", failureBody, StringComparison.Ordinal);
-            Assert.DoesNotContain("DbUpdateException", failureBody, StringComparison.Ordinal);
-            Assert.DoesNotContain("Npgsql", failureBody, StringComparison.Ordinal);
-        }
-        finally
-        {
-            foreach (var response in responses)
+        var barrier = new ConcurrentBulkWriteBarrier();
+        await fixture.RunWithHostAsync(
+            fixture.DefaultWorkerBaseUrl,
+            async host =>
             {
-                response.Dispose();
-            }
-        }
+                using var user = await PromptlyApiClient.RegisterAsync(host.Factory);
+                var projectId = await user.CreateProjectAsync();
+                var suiteId = await user.CreateSuiteAsync(projectId);
+                var yaml = ValidRow("concurrent-unique");
 
-        using var persistedResponse = await user.GetAsync($"/api/suites/{suiteId}/tests");
-        using var persisted = await ReadJsonAsync(persistedResponse);
-        Assert.Single(persisted.RootElement.EnumerateArray());
+                barrier.Arm();
+                var imports = new[]
+                {
+                    ImportAsync(user, suiteId, yaml),
+                    ImportAsync(user, suiteId, yaml)
+                };
+                bool bothWritesReachedBarrier;
+                try
+                {
+                    bothWritesReachedBarrier = await barrier.WaitForBothAsync(
+                        TimeSpan.FromSeconds(20),
+                        TestContext.Current.CancellationToken);
+                }
+                finally
+                {
+                    barrier.Release();
+                }
+
+                var responses = await Task.WhenAll(imports);
+                try
+                {
+                    Assert.True(bothWritesReachedBarrier, "Both imports must reach the write barrier before release");
+                    Assert.Contains(responses, response => response.StatusCode == HttpStatusCode.OK);
+                    var failures = responses.Where(response => response.StatusCode != HttpStatusCode.OK).ToArray();
+                    Assert.Single(failures);
+                    var failureBody = await failures[0].Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+                    Assert.Equal(HttpStatusCode.BadRequest, failures[0].StatusCode);
+                    Assert.Contains("persistence_error", failureBody, StringComparison.Ordinal);
+                    Assert.DoesNotContain("DbUpdateException", failureBody, StringComparison.Ordinal);
+                    Assert.DoesNotContain("Npgsql", failureBody, StringComparison.Ordinal);
+                }
+                finally
+                {
+                    foreach (var response in responses)
+                    {
+                        response.Dispose();
+                    }
+                }
+
+                using var persistedResponse = await user.GetAsync($"/api/suites/{suiteId}/tests");
+                using var persisted = await ReadJsonAsync(persistedResponse);
+                Assert.Single(persisted.RootElement.EnumerateArray());
+            },
+            configureServices: services =>
+            {
+                services.AddSingleton(barrier);
+                services.AddDbContext<PromptlyDbContext>((serviceProvider, options) =>
+                    options.AddInterceptors(serviceProvider.GetRequiredService<ConcurrentBulkWriteBarrier>()));
+            });
     }
 
     [Fact]
@@ -137,7 +170,7 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
     }
 
     [Fact]
-    public async Task Export_import_round_trip_keeps_metadata_nulls_order_and_wide_numbers()
+    public async Task Export_reimport_round_trip_keeps_semantic_content_and_all_expectation_types()
     {
         using var user = await PromptlyApiClient.RegisterAsync(fixture.PrimaryHost.Factory);
         var projectId = await user.CreateProjectAsync();
@@ -154,10 +187,25 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
                 metadata:
                   enabled: true
                   missing: null
+                  nested:
+                    also_missing: null
                   wide: 1e100
               expectations:
                 - type: contains_text
                   text: hello
+                - type: banned_text
+                  text: forbidden
+                - type: regex_match
+                  pattern: hello
+                - type: link_pattern
+                  pattern: https?://
+                - type: tool_called
+                  tool_name: search
+                - type: tool_sequence
+                  sequence: [search]
+                - type: llm_judge
+                  rubric: Be helpful
+                - type: groundedness
             """;
 
         using (var imported = await ImportAsync(user, suiteId, yaml))
@@ -171,14 +219,40 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
         Assert.Contains("wide: 1e100", exportedYaml, StringComparison.Ordinal);
         Assert.Contains("missing: null", exportedYaml, StringComparison.Ordinal);
 
+        var targetSuiteId = await user.CreateSuiteAsync(projectId);
+        using (var reimported = await ImportAsync(user, targetSuiteId, exportedYaml))
+        {
+            Assert.Equal(HttpStatusCode.OK, reimported.StatusCode);
+        }
+
         using var persistedResponse = await user.GetAsync($"/api/suites/{suiteId}/tests");
         using var persisted = await ReadJsonAsync(persistedResponse);
-        using var input = JsonDocument.Parse(
-            Assert.Single(persisted.RootElement.EnumerateArray()).GetProperty("inputSpecJson").GetString()!);
-        var metadata = input.RootElement.GetProperty("metadata");
+        var original = Assert.Single(persisted.RootElement.EnumerateArray());
+        using var originalInput = JsonDocument.Parse(original.GetProperty("inputSpecJson").GetString()!);
+        using var originalExpectations = JsonDocument.Parse(original.GetProperty("expectationsJson").GetString()!);
+
+        using var reimportedResponse = await user.GetAsync($"/api/suites/{targetSuiteId}/tests");
+        using var reimportedTests = await ReadJsonAsync(reimportedResponse);
+        var roundTripped = Assert.Single(reimportedTests.RootElement.EnumerateArray());
+        using var roundTrippedInput = JsonDocument.Parse(roundTripped.GetProperty("inputSpecJson").GetString()!);
+        using var roundTrippedExpectations = JsonDocument.Parse(roundTripped.GetProperty("expectationsJson").GetString()!);
+
+        Assert.True(JsonElement.DeepEquals(originalInput.RootElement, roundTrippedInput.RootElement));
+        Assert.True(JsonElement.DeepEquals(originalExpectations.RootElement, roundTrippedExpectations.RootElement));
+        Assert.Equal(original.GetProperty("description").GetString(), roundTripped.GetProperty("description").GetString());
+        Assert.Equal(8, roundTrippedExpectations.RootElement.GetArrayLength());
+        Assert.Equal(
+            ["contains_text", "banned_text", "regex_match", "link_pattern", "tool_called", "tool_sequence", "llm_judge", "groundedness"],
+            roundTrippedExpectations.RootElement.EnumerateArray()
+                .Select(expectation => expectation.GetProperty("type").GetString())
+                .ToArray());
+
+        var metadata = roundTrippedInput.RootElement.GetProperty("metadata");
         Assert.Equal(JsonValueKind.Number, metadata.GetProperty("wide").ValueKind);
         Assert.Equal("1e100", metadata.GetProperty("wide").GetRawText());
-        Assert.Equal("first", input.RootElement.GetProperty("ordered")[0].GetString());
+        Assert.Equal(JsonValueKind.Null, metadata.GetProperty("nested").GetProperty("also_missing").ValueKind);
+        Assert.Equal("first", roundTrippedInput.RootElement.GetProperty("ordered")[0].GetString());
+        Assert.Equal("second", roundTrippedInput.RootElement.GetProperty("ordered")[1].GetString());
     }
 
     [Fact]
@@ -275,4 +349,48 @@ public sealed class SpecificationPersistenceIntegrationTests(IntegrationFixture 
             - type: contains_text
               text: hello
         """;
+
+    private sealed class ConcurrentBulkWriteBarrier : SaveChangesInterceptor
+    {
+        private readonly TaskCompletionSource<bool> _bothArrived =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _armed;
+        private int _arrivals;
+
+        public void Arm() => Volatile.Write(ref _armed, 1);
+
+        public async Task<bool> WaitForBothAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            var completed = await Task.WhenAny(
+                _bothArrived.Task,
+                Task.Delay(timeout, cancellationToken));
+            return completed == _bothArrived.Task;
+        }
+
+        public void Release() => _release.TrySetResult(true);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Volatile.Read(ref _armed) != 0)
+            {
+                var arrival = Interlocked.Increment(ref _arrivals);
+                if (arrival <= 2)
+                {
+                    if (arrival == 2)
+                    {
+                        _bothArrived.TrySetResult(true);
+                    }
+
+                    await _release.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                }
+            }
+
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
 }

@@ -20,16 +20,19 @@ vi.mock('../api/mapping', () => ({
   },
 }));
 
-vi.mock('@monaco-editor/react', () => ({
+vi.mock('./configuredMonacoEditor', () => ({
   default: ({
     value,
     onChange,
+    language,
   }: {
     value?: string;
     onChange?: (value: string | undefined) => void;
+    language?: string;
   }) => (
     <textarea
       aria-label="Mapping Specification Editor"
+      data-language={language}
       value={value ?? ''}
       onChange={(event) => onChange?.(event.target.value)}
     />
@@ -199,6 +202,7 @@ describe('MappingWizard', () => {
     const { onClose, onComplete } = renderWizard();
 
     const editor = await reachMappingEditor();
+    expect(editor).toHaveAttribute('data-language', 'json');
     expect(endpointsApi.create).toHaveBeenCalledWith('environment-1', {
       name: 'Chat endpoint',
       path: '/chat',

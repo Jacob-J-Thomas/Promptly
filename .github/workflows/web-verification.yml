@@ -117,6 +117,8 @@ jobs:
             "src/components/ExpectationListEditor.tsx",
             "src/components/expectationSpec.ts",
             "src/components/strictJson.ts",
+            "src/components/configuredMonacoEditor.tsx",
+            "src/components/MappingWizard.tsx",
             "src/components/TestCaseDialog.tsx",
             "src/components/testCaseYaml.ts",
             "src/pages/SuiteDetail.tsx",

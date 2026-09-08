@@ -30,6 +30,7 @@ import {
 } from './expectationSpec';
 import { ExpectationListEditor } from './ExpectationListEditor';
 import { MessageListEditor } from './MessageListEditor';
+import MonacoEditor from './configuredMonacoEditor';
 import {
   formToYaml,
   yamlToForm,
@@ -404,20 +405,36 @@ export const TestCaseDialog: React.FC<TestCaseDialogProps> = ({
                 ))}
               </Alert>
             )}
-            <TextField
-              label="Test YAML"
-              value={yamlText}
-              onChange={(event) => {
-                setYamlText(event.target.value);
-                setYamlErrors([]);
-                setSaveError('');
+            <Box
+              sx={{
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden',
+                minHeight: 420,
               }}
-              multiline
-              minRows={18}
-              fullWidth
-              disabled={saving}
-              inputProps={{ 'aria-label': 'Test YAML' }}
-            />
+              data-testid="test-yaml-editor"
+            >
+              <MonacoEditor
+                height="420px"
+                language="yaml"
+                value={yamlText}
+                onChange={(value) => {
+                  setYamlText(value ?? '');
+                  setYamlErrors([]);
+                  setSaveError('');
+                }}
+                options={{
+                  ariaLabel: 'Test YAML',
+                  readOnly: saving,
+                  minimap: { enabled: false },
+                  lineNumbers: 'on',
+                  wordWrap: 'on',
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                }}
+              />
+            </Box>
           </Box>
         ) : (
           <Box sx={{ pt: 2, display: 'grid', gap: 3 }}>

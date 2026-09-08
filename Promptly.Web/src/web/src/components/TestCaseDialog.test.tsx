@@ -10,6 +10,27 @@ vi.mock('../api/tests', () => ({
   },
 }));
 
+vi.mock('./configuredMonacoEditor', () => ({
+  default: ({
+    value,
+    onChange,
+    options,
+    language,
+  }: {
+    value?: string;
+    onChange?: (value: string | undefined) => void;
+    options?: { ariaLabel?: string };
+    language?: string;
+  }) => (
+    <textarea
+      aria-label={options?.ariaLabel ?? 'Test YAML'}
+      data-language={language}
+      value={value ?? ''}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  ),
+}));
+
 const persistedTest: TestCase = {
   id: 'test-1',
   suiteId: 'suite-1',
@@ -186,6 +207,7 @@ describe('TestCaseDialog', () => {
     vi.mocked(testsApi.update).mockResolvedValue(saved);
     renderDialog(persistedTest);
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    expect(screen.getByLabelText('Test YAML')).toHaveAttribute('data-language', 'yaml');
     fireEvent.change(screen.getByLabelText('Test YAML'), { target: { value: allTypesYaml } });
     fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
 

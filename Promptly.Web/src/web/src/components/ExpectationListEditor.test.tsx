@@ -187,7 +187,7 @@ describe('ExpectationListEditor', () => {
       .toBeInTheDocument();
     expect(screen.getByText(/Stored fields that this editor does not use will be retained/))
       .toBeInTheDocument();
-    expect(screen.getByLabelText('Minimum score for expectation 7')).toHaveValue('');
+    expect(screen.getByLabelText('Minimum score for expectation 7')).toHaveValue(null);
   });
 
   it('shows actionable validation for empty and incomplete drafts without inventing rows', () => {

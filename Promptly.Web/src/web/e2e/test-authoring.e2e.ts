@@ -52,7 +52,10 @@ const openTestMenu = async (page: Page, testName: string) => {
 const replaceYaml = async (page: Page, value: string) => {
   const editor = page.getByRole('textbox', { name: 'Test YAML', exact: true });
   await expect(editor).toBeVisible();
-  await editor.click();
+  const editorSurface = page.getByTestId('test-yaml-editor').locator('.monaco-editor .view-line').first();
+  await expect(editorSurface).toBeVisible();
+  await editorSurface.click();
+  await expect(editor).toBeFocused();
   await editor.press('ControlOrMeta+A');
   await editor.press('Backspace');
   await page.keyboard.insertText(value);

@@ -450,10 +450,10 @@ describe('SuiteDetail', () => {
     expect(within(dialog).getByRole('progressbar')).toBeInTheDocument();
 
     resolveRefresh?.();
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Test Case' }))
-      .not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Run Suite' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Run Suite' }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    const runSuiteButton = await screen.findByRole('button', { name: 'Run Suite' });
+    expect(runSuiteButton).toBeEnabled();
+    fireEvent.click(runSuiteButton);
     expect(screen.getByRole('dialog', { name: 'Run Test Suite' })).toBeInTheDocument();
   });
 

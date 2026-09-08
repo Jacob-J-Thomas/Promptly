@@ -108,7 +108,7 @@ describe('bounded strict JSON preflight', () => {
     expect(result.issue).toBeNull();
     expect((result.value as Record<string, unknown>).tiny).toBeInstanceOf(RawJsonNumber);
     expect((result.value as Record<string, unknown>).zero).toBe(0);
-    expect(stringifyJsonWithRawNumbers(result.value)).toBe('{"tiny":1e-400,"zero":0e-400}');
+    expect(stringifyJsonWithRawNumbers(result.value)).toBe('{"tiny":1e-400,"zero":0}');
   });
 
   it('retains finite subnormal values whose decimal spelling is rounded', () => {
@@ -126,6 +126,8 @@ describe('bounded strict JSON preflight', () => {
     );
     expect(stringifyJsonWithRawNumbers({ omitted: undefined, values: [undefined, () => null, Symbol('x')] }))
       .toBe('{"values":[null,null,null]}');
+    expect(stringifyJsonWithRawNumbers({ values: new Array(2) }))
+      .toBe('{"values":[null,null]}');
     expect(() => stringifyJsonWithRawNumbers(1n)).toThrow();
     expect(() => stringifyJsonWithRawNumbers(undefined)).toThrow();
   });

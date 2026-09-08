@@ -60,7 +60,7 @@ export const shouldPreserveRawJsonNumber = (token: string, value: number): boole
   if (!Number.isFinite(value) || !strictJsonNumber.test(token)) {
     return false;
   }
-  const nonZeroToken = /[1-9]/.test(token.replace(/[.eE+-]/g, ''));
+  const nonZeroToken = /[1-9]/.test(token.split(/[eE]/, 1)[0]);
   if (value === 0 && nonZeroToken) {
     return true;
   }
@@ -172,7 +172,7 @@ const stringifyJsonValue = (
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      return `[${value.map((item) => stringifyJsonValue(item, ancestors, true)).join(',')}]`;
+      return `[${Array.from(value, (item) => stringifyJsonValue(item, ancestors, true)).join(',')}]`;
     }
     const entries = Object.keys(value).flatMap((key) => {
       const serialized = stringifyJsonValue(

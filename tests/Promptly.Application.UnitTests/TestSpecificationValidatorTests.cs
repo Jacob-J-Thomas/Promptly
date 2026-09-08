@@ -121,6 +121,62 @@ public sealed class TestSpecificationValidatorTests
     }
 
     [Fact]
+    public void Expectation_json_applies_structural_limits_before_dsl_validation()
+    {
+        var spy = new SpyExpectationValidator();
+        var validator = new TestSpecificationValidator(spy);
+        var duplicate = validator.Validate(
+            ValidInput,
+            "[{\"type\":\"contains_text\",\"text\":\"x\",\"text\":\"y\"}]");
+
+        Assert.Contains(
+            duplicate.Issues,
+            issue => issue.Code == "duplicate_property" && issue.Path == "expectationsJson[0].text");
+        Assert.Equal(0, spy.JsonCalls);
+
+        var scalar = validator.Validate(
+            ValidInput,
+            "[{\"type\":\"contains_text\",\"text\":\""
+                + new string('x', TestSpecificationValidator.MaxScalarLength + 1)
+                + "\"}]");
+
+        Assert.Contains(
+            scalar.Issues,
+            issue => issue.Code == "too_large" && issue.Path == "expectationsJson[0].text");
+        Assert.Equal(0, spy.JsonCalls);
+
+        var nested = "true";
+        for (var index = 0; index < TestSpecificationValidator.MaxDepth + 1; index++)
+        {
+            nested = "{\"next\":" + nested + "}";
+        }
+
+        var deep = validator.Validate(
+            ValidInput,
+            "[{\"type\":\"contains_text\",\"text\":\"x\",\"metadata\":" + nested + "}]");
+
+        Assert.Contains(deep.Issues, issue => issue.Code == "too_large");
+        Assert.Equal(0, spy.JsonCalls);
+
+        static string RepeatedExpectations(int count) =>
+            "[" + string.Join(",", Enumerable.Repeat("{\"type\":\"contains_text\",\"text\":\"x\"}", count)) + "]";
+
+        var exact = validator.Validate(
+            ValidInput,
+            RepeatedExpectations(TestSpecificationValidator.MaxExpectationCount));
+        var over = validator.Validate(
+            ValidInput,
+            RepeatedExpectations(TestSpecificationValidator.MaxExpectationCount + 1));
+
+        Assert.DoesNotContain(exact.Issues, issue => issue.Code == "too_large");
+        Assert.Equal(1, spy.JsonCalls);
+        Assert.Contains(
+            over.Issues,
+            issue => issue.Code == "too_large" && issue.Path == "expectationsJson");
+        Assert.Equal(1, spy.JsonCalls);
+    }
+
+    [Fact]
     public void Unknown_input_schema_version_is_rejected_without_requiring_a_version_marker()
     {
         var accepted = Validator().ValidateInput(
@@ -173,5 +229,20 @@ public sealed class TestSpecificationValidatorTests
             + string.Concat(Enumerable.Repeat(",\"x\"", additionalItems))
             + new string(' ', remainder)
             + suffix;
+    }
+
+    private sealed class SpyExpectationValidator : IExpectationValidator
+    {
+        public int JsonCalls { get; private set; }
+
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson)
+        {
+            JsonCalls++;
+            return ExpectationValidationResult.Valid;
+        }
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
     }
 }

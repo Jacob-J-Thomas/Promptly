@@ -12,6 +12,7 @@ public sealed class TestSpecificationValidator : ITestSpecificationValidator
     public const int MaxInputJsonBytes = 262_144;
     public const int MaxDepth = 32;
     public const int MaxMessageCount = 100;
+    public const int MaxExpectationCount = 100;
     public const int MaxScalarLength = 16_384;
 
     private readonly IExpectationValidator _expectationValidator;
@@ -36,9 +37,14 @@ public sealed class TestSpecificationValidator : ITestSpecificationValidator
         }
         else
         {
-            var expectationResult = _expectationValidator.ValidateExpectationsJson(expectationsJson);
-            issues.AddRange(expectationResult.Issues.Select(issue =>
-                issue with { Path = PrefixExpectationPath(issue.Path) }));
+            var structuralIssues = ValidateExpectationStructure(expectationsJson);
+            issues.AddRange(structuralIssues);
+            if (structuralIssues.Count == 0)
+            {
+                var expectationResult = _expectationValidator.ValidateExpectationsJson(expectationsJson);
+                issues.AddRange(expectationResult.Issues.Select(issue =>
+                    issue with { Path = PrefixExpectationPath(issue.Path) }));
+            }
         }
 
         return new ExpectationValidationResult(issues);
@@ -207,9 +213,7 @@ public sealed class TestSpecificationValidator : ITestSpecificationValidator
                 var names = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var property in element.EnumerateObject())
                 {
-                    var propertyPath = path == "inputSpecJson"
-                        ? $"{path}.{property.Name}"
-                        : $"{path}.{property.Name}";
+                    var propertyPath = $"{path}.{property.Name}";
                     if (!names.Add(property.Name))
                     {
                         issues.Add(new("duplicate_property", propertyPath, "Duplicate JSON property is not allowed"));
@@ -231,6 +235,49 @@ public sealed class TestSpecificationValidator : ITestSpecificationValidator
 
                 break;
             }
+        }
+    }
+
+    private static List<ExpectationValidationIssue> ValidateExpectationStructure(string expectationsJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(
+                expectationsJson,
+                new JsonDocumentOptions
+                {
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    AllowTrailingCommas = false,
+                    MaxDepth = 64
+                });
+            var issues = new List<ExpectationValidationIssue>();
+            ValidateLimits(document.RootElement, "expectationsJson", 0, issues);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                issues.Add(new(
+                    "invalid_expectations_json",
+                    "expectationsJson",
+                    "Expectations JSON must be an array"));
+                return issues;
+            }
+
+            if (document.RootElement.GetArrayLength() > MaxExpectationCount)
+            {
+                issues.Add(new(
+                    "too_large",
+                    "expectationsJson",
+                    $"Expectations cannot exceed {MaxExpectationCount} items"));
+            }
+
+            return issues;
+        }
+        catch (JsonException)
+        {
+            return [new("invalid_expectations_json", "expectationsJson", "Expectations JSON is invalid")];
+        }
+        catch (ArgumentException)
+        {
+            return [new("invalid_expectations_json", "expectationsJson", "Expectations JSON is invalid")];
         }
     }
 

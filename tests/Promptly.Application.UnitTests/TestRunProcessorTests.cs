@@ -68,6 +68,44 @@ public sealed class TestRunProcessorTests
     }
 
     [Fact]
+    public async Task ProcessRunAsync_persists_unexpected_evaluator_failures_as_errors()
+    {
+        await using var dbContext = CreateDbContext();
+        var suiteId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        dbContext.TestCases.Add(CreateTestCase(
+            suiteId,
+            "[{\"type\":\"regex_match\",\"pattern\":\"a\"}]"));
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var runStore = new StubTestRunWorkerStore(CreateRun(runId, suiteId));
+        var evaluator = new ExpectationEvaluator(
+            NullLogger<ExpectationEvaluator>.Instance,
+            new ThrowingRegexMatcher(),
+            new PermissiveExpectationValidator());
+        var processor = CreateProcessor(dbContext, runStore, evaluator);
+
+        await processor.ProcessRunAsync(runId, TestContext.Current.CancellationToken);
+
+        var storedResult = await dbContext.TestRunResults.SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(TestResultStatus.Error, storedResult.Status);
+        using var metrics = JsonDocument.Parse(Assert.IsType<string>(storedResult.MetricsJson));
+        Assert.Equal(0, metrics.RootElement.GetProperty("passed").GetInt32());
+        Assert.Equal(0, metrics.RootElement.GetProperty("failed").GetInt32());
+        Assert.Equal(1, metrics.RootElement.GetProperty("errors").GetInt32());
+        var expectationResult = metrics.RootElement.GetProperty("expectationResults")[0];
+        Assert.Equal("Error", expectationResult.GetProperty("Status").GetString());
+        Assert.Equal("evaluation_error", expectationResult.GetProperty("ErrorCode").GetString());
+        Assert.Equal("Evaluation failed", expectationResult.GetProperty("Reason").GetString());
+        Assert.DoesNotContain(
+            "sensitive matcher details",
+            storedResult.FailureReasonsJson,
+            StringComparison.Ordinal);
+        Assert.Equal(TestRunStatus.Completed, runStore.StatusUpdates[^1].Status);
+    }
+
+    [Fact]
     public void ExpectationResult_omits_a_null_error_code_from_json()
     {
         var result = new ExpectationResult
@@ -524,6 +562,33 @@ public sealed class TestRunProcessorTests
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class ThrowingRegexMatcher : IBoundedRegexMatcher
+    {
+        public BoundedRegexMatchResult FindMatches(
+            string pattern,
+            string input,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive matcher details");
+
+        public BoundedRegexCandidateResult FindMatchingCandidates(
+            string pattern,
+            IReadOnlyList<string> candidates,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive matcher details");
+    }
+
+    private sealed class PermissiveExpectationValidator : IExpectationValidator
+    {
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson) =>
+            ExpectationValidationResult.Valid;
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
     }
 
     private sealed class StubPythonEvalClient : IPythonEvalClient

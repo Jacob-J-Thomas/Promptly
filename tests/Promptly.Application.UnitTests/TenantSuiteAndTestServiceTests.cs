@@ -323,6 +323,8 @@ public sealed class TenantSuiteAndTestServiceTests
         var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
         var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
         Assert.NotNull(existing);
+        var originalName = existing.Name;
+        var originalExpectations = existing.ExpectationsJson;
 
         var createException = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
             service.CreateTestCaseAsync(
@@ -330,7 +332,7 @@ public sealed class TenantSuiteAndTestServiceTests
                 "supplied-validator-create",
                 "invalid",
                 null,
-                "{}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
                 "[]",
                 scope));
         var updateException = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
@@ -339,7 +341,7 @@ public sealed class TenantSuiteAndTestServiceTests
                 "supplied-validator-update",
                 "updated",
                 null,
-                "{}",
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
                 "[]",
                 scope));
 
@@ -352,8 +354,8 @@ public sealed class TenantSuiteAndTestServiceTests
             testCase => testCase.ExternalId == "supplied-validator-create");
         var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
         Assert.NotNull(persisted);
-        Assert.Equal(existing!.Name, persisted!.Name);
-        Assert.Equal(existing.ExpectationsJson, persisted.ExpectationsJson);
+        Assert.Equal(originalName, persisted.Name);
+        Assert.Equal(originalExpectations, persisted.ExpectationsJson);
     }
 
     private static PromptlyDbContext CreateDbContext()

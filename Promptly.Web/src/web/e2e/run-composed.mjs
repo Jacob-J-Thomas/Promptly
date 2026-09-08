@@ -19,7 +19,11 @@ import {
   createSafeRunMetadata,
   resolveFixedE2EPaths,
 } from './harness-safety.mjs';
-import { assertDirectFixtureBoundary } from './phase-verification.mjs';
+import {
+  assertDirectFixtureBoundary,
+  assertProviderEvidence,
+} from './phase-verification.mjs';
+import { createSignalRegistration } from './signal-registration.mjs';
 
 const {
   artifactsRoot: baseArtifactsRoot,
@@ -91,13 +95,12 @@ const projectImages = [
 const processAbortController = new AbortController();
 let receivedSignal = null;
 let logWriteError = null;
-
-for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => {
+const signalRegistration = createSignalRegistration({
+  onSignal: (signal) => {
     receivedSignal = signal;
     processAbortController.abort(new Error(`Received ${signal}`));
-  });
-}
+  },
+});
 
 const redact = (value) => {
   let redacted = value;
@@ -867,50 +870,11 @@ const verifyProviderEvidence = async () => {
   const lines = (await readFile(evidencePath, 'utf8'))
     .split('\n')
     .filter((line) => line.trim().length > 0);
-  if (lines.length === 0) {
-    throw new Error('Provider evidence is empty');
-  }
   const records = lines.map((line) => JSON.parse(line));
-  const sequences = new Set();
-  for (const record of records) {
-    const keys = Object.keys(record).sort();
-    const expectedKeys = phase === 'direct'
-      ? [
-        'authorized', 'correlation_id', 'kind', 'message_count', 'method',
-        'model', 'path', 'sequence', 'valid_json',
-      ]
-      : ['authorized', 'kind', 'method', 'path', 'sequence'];
-    if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
-      throw new Error(`Provider evidence has an unexpected schema: ${keys.join(',')}`);
-    }
-    const validRecord = phase === 'direct'
-      ? record.authorized === true
-        && record.kind === 'chat_completion'
-        && record.method === 'POST'
-        && record.path === '/v1/chat/completions'
-        && record.valid_json === true
-        && record.model === 'verification-model'
-        && Number.isInteger(record.message_count)
-        && record.message_count > 0
-        && typeof record.correlation_id === 'string'
-        && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.correlation_id)
-      : record.authorized === true
-        && record.kind === 'models'
-        && record.method === 'GET'
-        && record.path === '/v1/models';
-    if (
-      !validRecord
-      || !Number.isInteger(record.sequence)
-      || record.sequence < 1
-      || sequences.has(record.sequence)
-    ) {
-      throw new Error('Provider evidence contains an unexpected request');
-    }
-    sequences.add(record.sequence);
-  }
-  if (phase === 'direct' && records.length !== 1) {
-    throw new Error(`Direct fixture expected exactly one provider POST, received ${records.length}`);
-  }
+  assertProviderEvidence(records, {
+    phase,
+    expectedCorrelation: process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? null,
+  });
 };
 
 const collectDiagnostics = async () => {
@@ -1188,6 +1152,13 @@ try {
       : 'provider-stub',
     PROMPTLY_E2E_WEB_ORIGIN: webOrigin,
   });
+  if (phase === 'direct') {
+    playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION = (
+      process.env.PROMPTLY_E2E_EXPECTED_CORRELATION ?? ''
+    );
+  } else {
+    delete playwrightEnvironment.PROMPTLY_E2E_EXPECTED_CORRELATION;
+  }
 
   browserAttempted = true;
   playwrightCode = -1;
@@ -1436,4 +1407,5 @@ if (errors.length > 0) {
   throw new Error(`Composed E2E verification failed:\n${errors.join('\n')}`);
 }
 
+signalRegistration.dispose();
 console.log(`Composed E2E verification passed; artifacts: ${artifactsRoot}`);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_JSON_BYTES,
+  MAX_JSON_DEPTH,
+  MAX_JSON_SCALAR_LENGTH,
+} from './strictJson';
+import {
   createExpectation,
   EXPECTATION_TYPES,
   parseExpectationsJson,
@@ -124,6 +129,69 @@ describe('expectation spec helpers', () => {
     expect(parsed.expectations).toBeNull();
     expect(parsed.originalText).toBe(text);
     expect(parsed.errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects duplicate expectation properties before normalization and translates safe paths', () => {
+    const text = '[{"type":"contains_text","text":"old","\\u0074ext":"new"}]';
+    const parsed = parseExpectationsJson(text);
+
+    expect(parsed).toEqual({
+      originalText: text,
+      valid: false,
+      expectations: null,
+      errors: [{
+        code: 'duplicate_property',
+        path: 'expectationsJson[0].text',
+        message: 'Duplicate JSON property is not allowed.',
+      }],
+    });
+  });
+
+  it('rejects expectation JSON at the exact byte, depth, scalar, and numeric boundaries', () => {
+    const validBase = '[{"type":"contains_text","text":"x"}]';
+    const padding = ' '.repeat(MAX_JSON_BYTES - new TextEncoder().encode(validBase).length);
+    expect(parseExpectationsJson(validBase + padding).valid).toBe(true);
+
+    const oversized = parseExpectationsJson(`${validBase}${padding} `);
+    expect(oversized.valid).toBe(false);
+    expect(oversized.expectations).toBeNull();
+    expect(oversized.errors[0]).toEqual({
+      code: 'too_large',
+      path: 'expectationsJson',
+      message: 'Expectation JSON exceeds the 262144-byte limit.',
+    });
+
+    let exactDepth = 'null';
+    for (let index = 0; index < MAX_JSON_DEPTH - 1; index += 1) {
+      exactDepth = `{"nested":${exactDepth}}`;
+    }
+    expect(parseExpectationsJson(`[${exactDepth}]`).errors[0]?.code).not.toBe('too_large');
+
+    const tooDeep = parseExpectationsJson(`[${JSON.stringify({ nested: JSON.parse(exactDepth) })}]`);
+    expect(tooDeep.valid).toBe(false);
+    expect(tooDeep.expectations).toBeNull();
+    expect(tooDeep.errors[0]?.code).toBe('too_large');
+    expect(tooDeep.errors[0]?.path).toBe(`expectationsJson[0]${'.nested'.repeat(MAX_JSON_DEPTH)}`);
+
+    const exactScalar = `[${JSON.stringify({
+      type: 'contains_text',
+      text: 'x'.repeat(MAX_JSON_SCALAR_LENGTH),
+    })}]`;
+    expect(parseExpectationsJson(exactScalar).valid).toBe(true);
+
+    const tooLong = parseExpectationsJson(`[${JSON.stringify({
+      type: 'contains_text',
+      text: `${'x'.repeat(MAX_JSON_SCALAR_LENGTH)}x`,
+    })}]`);
+    expect(tooLong.errors[0]?.code).toBe('too_large');
+    expect(tooLong.errors[0]?.path).toBe('expectationsJson[0].text');
+
+    const invalidNumber = parseExpectationsJson('[{"type":"groundedness","min_score":1e400}]');
+    expect(invalidNumber.errors[0]).toEqual({
+      code: 'invalid_number',
+      path: 'expectationsJson[0].min_score',
+      message: 'JSON numbers must be finite.',
+    });
   });
 
   it('serializes only valid non-empty lists and does not mutate inputs', () => {

@@ -34,7 +34,12 @@ public sealed class TestSpecificationValidatorTests
     [InlineData("[]", "invalid_shape", "inputSpecJson")]
     [InlineData("{}", "required", "inputSpecJson.messages")]
     [InlineData("{\"messages\":[]}", "required", "inputSpecJson.messages")]
+    [InlineData("{\"messages\":{}}", "invalid_type", "inputSpecJson.messages")]
+    [InlineData("{\"messages\":[null]}", "invalid_type", "inputSpecJson.messages[0]")]
+    [InlineData("{\"messages\":[{\"content\":\"x\"}]}", "required", "inputSpecJson.messages[0].role")]
+    [InlineData("{\"messages\":[{\"role\":1,\"content\":\"x\"}]}", "invalid_type", "inputSpecJson.messages[0].role")]
     [InlineData("{\"messages\":[{\"role\":\"root\",\"content\":\"x\"}]}", "unsupported_value", "inputSpecJson.messages[0].role")]
+    [InlineData("{\"messages\":[{\"role\":\"user\"}]}", "required", "inputSpecJson.messages[0].content")]
     [InlineData("{\"messages\":[{\"role\":\"user\",\"content\":1}]}", "invalid_type", "inputSpecJson.messages[0].content")]
     [InlineData("{\"messages\":[{\"role\":\"user\",\"content\":\"x\",\"extra\":true}]}", "unsupported_value", "inputSpecJson.messages[0].extra")]
     public void Invalid_input_reports_stable_issue(string input, string code, string path)
@@ -118,6 +123,29 @@ public sealed class TestSpecificationValidatorTests
         var result = Validator().Validate(ValidInput, "[]");
 
         Assert.Contains(result.Issues, issue => issue.Code == "no_expectations" && issue.Path == "expectationsJson");
+    }
+
+    [Fact]
+    public void Missing_oversized_and_wrong_shape_expectations_are_rejected_before_dsl_validation()
+    {
+        Assert.Contains(
+            Validator().Validate(ValidInput, "").Issues,
+            issue => issue.Code == "invalid_json" && issue.Path == "expectationsJson");
+
+        var oversized = "[\"" + new string('x', TestSpecificationValidator.MaxInputJsonBytes) + "\"]";
+        Assert.Contains(
+            Validator().Validate(ValidInput, oversized).Issues,
+            issue => issue.Code == "too_large" && issue.Path == "expectationsJson");
+
+        Assert.Contains(
+            Validator().Validate(ValidInput, "{}").Issues,
+            issue => issue.Code == "invalid_expectations_json" && issue.Path == "expectationsJson");
+    }
+
+    [Fact]
+    public void Constructor_rejects_a_missing_expectation_validator()
+    {
+        Assert.Throws<ArgumentNullException>(() => new TestSpecificationValidator(null!));
     }
 
     [Fact]

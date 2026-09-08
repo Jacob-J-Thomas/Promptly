@@ -298,6 +298,192 @@ public sealed class YamlServiceTests
     }
 
     [Fact]
+    public void DeserializeTests_reports_bounded_document_shape_and_row_issues()
+    {
+        AssertIssue(null, "invalid_yaml", "$");
+        AssertIssue("  \n", "invalid_yaml", "$");
+        AssertIssue(new string('x', YamlService.MaxYamlBytes + 1), "too_large", "$");
+        AssertIssue(ValidYamlRow("first") + "\n---\n" + ValidYamlRow("second"), "invalid_yaml", "$");
+        AssertIssue("version: 1\n", "invalid_shape", "$");
+        AssertIssue("version: 2\n", "unsupported_value", "$.version");
+        AssertIssue("version: true\n", "unsupported_value", "$.version");
+        AssertIssue("version: \"1\"\n", "unsupported_value", "$.version");
+        AssertIssue("version:\n  - 1\n", "unsupported_value", "$.version");
+        AssertIssue("- true\n", "invalid_type", "rows[0]");
+        AssertIssue("- name: only-name\n", "required", "rows[0].id");
+        AssertIssue("- id: only-id\n", "required", "rows[0].name");
+        AssertIssue(
+            "- id: missing-input\n"
+            + "  name: Missing input\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n",
+            "required",
+            "rows[0].input");
+        AssertIssue(
+            "- id: missing-expectations\n"
+            + "  name: Missing expectations\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n",
+            "required",
+            "rows[0].expectations");
+        AssertIssue(
+            "- id: shape\n"
+            + "  name: Shape\n"
+            + "  description:\n"
+            + "    nested: true\n"
+            + "  input: text\n"
+            + "  expectations: text\n",
+            "invalid_type",
+            "rows[0].description");
+        AssertIssue(
+            "- id: input-shape\n"
+            + "  name: Input shape\n"
+            + "  input: text\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n",
+            "invalid_type",
+            "rows[0].input");
+        AssertIssue(
+            "- id: expectations-shape\n"
+            + "  name: Expectations shape\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "  expectations: text\n",
+            "invalid_type",
+            "rows[0].expectations");
+        AssertIssue(
+            "- id: invalid-input\n"
+            + "  name: Invalid input\n"
+            + "  input:\n"
+            + "    messages: []\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n",
+            "required",
+            "rows[0].input.messages");
+        AssertIssue(
+            "- id: invalid-expectations\n"
+            + "  name: Invalid expectations\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "  expectations: []\n",
+            "no_expectations",
+            "rows[0].expectations");
+        AssertIssue(
+            "- id: duplicate\n"
+            + "  id: duplicate-again\n"
+            + "  name: Duplicate\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n",
+            "invalid_yaml",
+            "$");
+        AssertIssue(
+            "- id: [typed]\n"
+            + "  name: {typed: true}\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n",
+            "invalid_type",
+            "rows[0].id");
+
+        static void AssertIssue(string? yaml, string code, string path)
+        {
+            var service = new YamlService(NullLogger<YamlService>.Instance);
+            var exception = Assert.Throws<TestSpecificationValidationException>(() =>
+            {
+                service.DeserializeTests(yaml!, Guid.NewGuid());
+            });
+            Assert.Contains(exception.Issues, issue => issue.Code == code && issue.Path == path);
+        }
+    }
+
+    [Fact]
+    public void DeserializeTests_enforces_row_and_scalar_limits_at_the_boundary()
+    {
+        var exactRows = string.Join(
+            "\n",
+            Enumerable.Range(0, TestSpecificationValidator.MaxMessageCount)
+                .Select(index => ValidYamlRow($"row-{index}")));
+        var overRows = exactRows + "\n" + ValidYamlRow("row-over");
+        var exactTests = new YamlService(NullLogger<YamlService>.Instance)
+            .DeserializeTests(exactRows, Guid.NewGuid());
+        Assert.Equal(TestSpecificationValidator.MaxMessageCount, exactTests.Count);
+        Assert.Throws<TestSpecificationValidationException>(() =>
+        {
+            new YamlService(NullLogger<YamlService>.Instance)
+                .DeserializeTests(overRows, Guid.NewGuid());
+        });
+
+        var longId = "- id: " + new string('x', TestSpecificationValidator.MaxScalarLength + 1) + "\n"
+            + "  name: Name\n"
+            + "  input:\n"
+            + "    messages:\n"
+            + "      - role: user\n"
+            + "        content: hello\n"
+            + "  expectations:\n"
+            + "    - type: contains_text\n"
+            + "      text: hello\n";
+        var longIdException = Assert.Throws<TestSpecificationValidationException>(() =>
+        {
+            new YamlService(NullLogger<YamlService>.Instance)
+                .DeserializeTests(longId, Guid.NewGuid());
+        });
+        Assert.Contains(longIdException.Issues, issue => issue.Code == "too_large" && issue.Path == "rows[0].id");
+
+        var longName = ValidYamlRow("long-name").Replace(
+            "name: Test long-name",
+            "name: " + new string('x', TestSpecificationValidator.MaxScalarLength + 1),
+            StringComparison.Ordinal);
+        var longNameException = Assert.Throws<TestSpecificationValidationException>(() =>
+        {
+            new YamlService(NullLogger<YamlService>.Instance)
+                .DeserializeTests(longName, Guid.NewGuid());
+        });
+        Assert.Contains(longNameException.Issues, issue => issue.Code == "too_large" && issue.Path == "rows[0].name");
+
+        var invalidNumber = ValidYamlRow("invalid-number").Replace(
+            "content: hello",
+            "content: 1e+",
+            StringComparison.Ordinal);
+        var invalidNumberException = Assert.Throws<TestSpecificationValidationException>(() =>
+        {
+            new YamlService(NullLogger<YamlService>.Instance)
+                .DeserializeTests(invalidNumber, Guid.NewGuid());
+        });
+        Assert.Contains(invalidNumberException.Issues, issue => issue.Code == "invalid_type");
+
+        var longDescription = ValidYamlRow("long-description").Replace(
+            "description: description",
+            "description: " + new string('x', TestSpecificationValidator.MaxScalarLength + 1),
+            StringComparison.Ordinal);
+        var longDescriptionException = Assert.Throws<TestSpecificationValidationException>(() =>
+        {
+            new YamlService(NullLogger<YamlService>.Instance)
+                .DeserializeTests(longDescription, Guid.NewGuid());
+        });
+        Assert.Contains(
+            longDescriptionException.Issues,
+            issue => issue.Code == "too_large" && issue.Path == "rows[0].description");
+    }
+
+    [Fact]
     public void DeserializeTests_rejects_deep_yaml_before_json_conversion()
     {
         var nested = new StringBuilder("{");
@@ -375,4 +561,17 @@ public sealed class YamlServiceTests
         Assert.Contains(exception.Issues, issue => issue.Code is "invalid_json" or "invalid_expectations_json");
         Assert.DoesNotContain("not-json", exception.Message, StringComparison.Ordinal);
     }
+
+    private static string ValidYamlRow(string externalId) => $$"""
+        - id: {{externalId}}
+          name: Test {{externalId}}
+          description: description
+          input:
+            messages:
+              - role: user
+                content: hello
+          expectations:
+            - type: contains_text
+              text: hello
+        """;
 }

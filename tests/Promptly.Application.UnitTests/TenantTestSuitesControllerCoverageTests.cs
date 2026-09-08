@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
 using Promptly.Domain.Entities;
+using Promptly.Infrastructure.Services;
 using Promptly.Server.Controllers;
 using Promptly.Server.Security;
 
@@ -180,6 +181,27 @@ public sealed class TenantTestSuitesControllerCoverageTests
         Assert.Empty(Assert.IsType<List<TestCase>>(yaml.LastSerializedTests));
     }
 
+    [Fact]
+    public async Task Import_rejects_declared_and_streamed_yaml_over_the_size_limit()
+    {
+        var suite = CreateSuite();
+        var controller = CreateController(
+            new StubTestSuiteService { Loaded = suite },
+            new StubTestCaseService(),
+            new StubYamlService());
+        var oversized = new string('x', YamlService.MaxYamlBytes + 1);
+
+        var declaredOversized = Assert.IsType<BadRequestObjectResult>(
+            await ImportAsync(controller, suite.Id, oversized));
+        Assert.Contains("too_large", JsonSerializer.Serialize(declaredOversized.Value), StringComparison.Ordinal);
+
+        var streamedOversized = Assert.IsType<BadRequestObjectResult>(
+            await controller.ImportTests(
+                suite.Id,
+                new DeclaredLengthFormFile(oversized, YamlService.MaxYamlBytes)));
+        Assert.Contains("too_large", JsonSerializer.Serialize(streamedOversized.Value), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(SuiteAction.Create)]
     [InlineData(SuiteAction.List)]
@@ -276,6 +298,32 @@ public sealed class TenantTestSuitesControllerCoverageTests
         using var stream = new MemoryStream(bytes);
         var file = new FormFile(stream, 0, bytes.Length, "file", "tests.yaml");
         return await controller.ImportTests(suiteId, file);
+    }
+
+    private sealed class DeclaredLengthFormFile(string content, long declaredLength) : IFormFile
+    {
+        private readonly byte[] _bytes = Encoding.UTF8.GetBytes(content);
+
+        public string ContentType => "application/x-yaml";
+        public string ContentDisposition => "form-data; name=\"file\"; filename=\"tests.yaml\"";
+        public IHeaderDictionary Headers { get; } = new HeaderDictionary();
+        public long Length => declaredLength;
+        public string Name => "file";
+        public string FileName => "tests.yaml";
+
+        public Stream OpenReadStream() => new MemoryStream(_bytes, writable: false);
+
+        public void CopyTo(Stream target)
+        {
+            using var source = OpenReadStream();
+            source.CopyTo(target);
+        }
+
+        public async Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
+        {
+            await using var source = OpenReadStream();
+            await source.CopyToAsync(target, cancellationToken);
+        }
     }
 
     public enum SuiteAction

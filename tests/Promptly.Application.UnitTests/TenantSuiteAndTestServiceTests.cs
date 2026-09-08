@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Promptly.Application.Data;
+using Promptly.Application.Interfaces;
 using Promptly.Application.Models;
 using Promptly.Application.Services;
 using Promptly.Domain.Entities;
@@ -355,6 +356,54 @@ public sealed class TenantSuiteAndTestServiceTests
         Assert.Equal(originalExpectations, persisted.ExpectationsJson);
     }
 
+    [Fact]
+    public async Task Owned_test_case_create_and_update_use_the_supplied_validator()
+    {
+        await using var dbContext = CreateDbContext();
+        var graph = await SeedAsync(dbContext);
+        var validator = new RecordingRejectingValidator();
+        var service = new TestCaseService(
+            dbContext,
+            NullLogger<TestCaseService>.Instance,
+            validator);
+        var scope = new TenantAccessScope(graph.OwnerId, graph.AllowedProjectId);
+        var existing = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(existing);
+        var originalName = existing.Name;
+        var originalExpectations = existing.ExpectationsJson;
+
+        var createException = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.CreateTestCaseAsync(
+                graph.AllowedSuiteId,
+                "supplied-validator-create",
+                "invalid",
+                null,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                "[]",
+                scope));
+        var updateException = await Assert.ThrowsAsync<ExpectationValidationException>(() =>
+            service.UpdateTestCaseAsync(
+                graph.AllowedTestCaseId,
+                "supplied-validator-update",
+                "updated",
+                null,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+                "[]",
+                scope));
+
+        Assert.Equal(2, validator.Documents.Count);
+        Assert.All(validator.Documents, document => Assert.Equal("[]", document));
+        Assert.Equal("supplied_validator_rejected", createException.Issues[0].Code);
+        Assert.Equal("supplied_validator_rejected", updateException.Issues[0].Code);
+        Assert.DoesNotContain(
+            dbContext.TestCases,
+            testCase => testCase.ExternalId == "supplied-validator-create");
+        var persisted = await service.GetTestCaseByIdAsync(graph.AllowedTestCaseId, scope);
+        Assert.NotNull(persisted);
+        Assert.Equal(originalName, persisted.Name);
+        Assert.Equal(originalExpectations, persisted.ExpectationsJson);
+    }
+
     private static PromptlyDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<PromptlyDbContext>()
@@ -434,6 +483,25 @@ public sealed class TenantSuiteAndTestServiceTests
         InputSpecJson = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
         ExpectationsJson = "[{\"type\":\"contains_text\",\"text\":\"hello\"}]"
     };
+
+    private sealed class RecordingRejectingValidator : IExpectationValidator
+    {
+        public List<string> Documents { get; } = [];
+
+        public ExpectationValidationResult ValidateExpectationsJson(string expectationsJson)
+        {
+            Documents.Add(expectationsJson);
+            return new ExpectationValidationResult(
+            [new ExpectationValidationIssue(
+                "supplied_validator_rejected",
+                "$",
+                "The supplied validator rejected this document")]);
+        }
+
+        public ExpectationValidationResult ValidateExpectation(
+            IReadOnlyDictionary<string, object> expectation) =>
+            ExpectationValidationResult.Valid;
+    }
 
     private sealed record TenantTestGraph(
         string OwnerId,

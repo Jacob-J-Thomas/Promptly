@@ -198,7 +198,13 @@ public sealed class ExpectationDslValidator : IExpectationValidator
             issues.Add(new(
                 RegexErrorCode(result.Status),
                 field,
-                result.ErrorMessage ?? "Regex pattern is invalid"));
+                result.ErrorMessage ?? (result.Status is
+                    BoundedRegexStatus.InvalidPattern or
+                    BoundedRegexStatus.UnsupportedPattern or
+                    BoundedRegexStatus.PatternTooLong or
+                    BoundedRegexStatus.InputTooLong
+                    ? "Regex pattern is invalid"
+                    : "Regex evaluation failed")));
         }
     }
 
@@ -395,7 +401,7 @@ public sealed class ExpectationDslValidator : IExpectationValidator
         BoundedRegexStatus.PatternTooLong => "regex_pattern_too_long",
         BoundedRegexStatus.InputTooLong => "regex_input_too_long",
         BoundedRegexStatus.TimedOut => "regex_timeout",
-        _ => "invalid_regex_pattern"
+        _ => "regex_evaluation_error"
     };
 
     private static ExpectationValidationResult Invalid(string code, string path, string message) =>

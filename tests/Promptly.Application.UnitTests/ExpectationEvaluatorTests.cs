@@ -76,7 +76,7 @@ public sealed class ExpectationEvaluatorTests
     {
         using var document = JsonDocument.Parse(
             """
-            { "type": "contains_text", "text": 42, "case_insensitive": "true" }
+            { "type": "contains_text", "text": "42", "case_insensitive": "true" }
             """);
 
         var result = await _evaluator.EvaluateAsync(document.RootElement, Trace("Value 42"));
@@ -208,7 +208,7 @@ public sealed class ExpectationEvaluatorTests
             Expectation(expectationType),
             Trace("https://example.com"));
 
-        Assert.Equal("invalid_regex_pattern", result.ErrorCode);
+        Assert.Equal("required_expectation_field", result.ErrorCode);
         Assert.Contains("required", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -274,7 +274,7 @@ public sealed class ExpectationEvaluatorTests
 
         Assert.False(result.Passed);
         Assert.Equal("regex_timeout", result.ErrorCode);
-        Assert.Equal("Regex evaluation timed out", result.Reason);
+        Assert.Equal("pattern: Regex evaluation timed out", result.Reason);
         Assert.Equal(1, matcher.CallCount);
     }
 
@@ -293,7 +293,7 @@ public sealed class ExpectationEvaluatorTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal("regex_evaluation_error", result.ErrorCode);
-        Assert.Equal("Regex evaluation failed", result.Reason);
+        Assert.Equal("pattern: Regex evaluation failed", result.Reason);
     }
 
     [Fact]
@@ -341,7 +341,7 @@ public sealed class ExpectationEvaluatorTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal("regex_timeout", result.ErrorCode);
-        Assert.Equal("URL extraction timed out", result.Reason);
+        Assert.Equal("pattern: URL extraction timed out", result.Reason);
         Assert.Equal(1, matcher.CallCount);
     }
 

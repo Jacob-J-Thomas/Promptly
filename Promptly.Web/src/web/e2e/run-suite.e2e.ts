@@ -136,7 +136,8 @@ test('persisted Run Suite configuration queues a run and loads its result', asyn
     return (current.body as { status?: number | string }).status;
   }, { timeout: 20_000, intervals: [1_000, 2_000] }).toBe(2);
   await page.reload();
-  await expect(page.getByText('Completed', { exact: true })).toBeVisible();
+  const runStatus = page.getByRole('heading', { name: 'Run Status' }).locator('xpath=..');
+  await expect(runStatus.getByText('Completed', { exact: true })).toBeVisible();
   await expect(page.getByText('Test Results (1)', { exact: true })).toBeVisible();
   await expect(page.getByText('Provider fixture response', { exact: true })).toBeVisible();
   await expect(page.getByText('Pass', { exact: true })).toBeVisible();

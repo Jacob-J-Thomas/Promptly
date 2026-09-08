@@ -230,6 +230,7 @@ jobs:
           $expectedAssemblies = @(
             "Promptly.Application"
             "Promptly.Cli"
+            "Promptly.Domain"
             "Promptly.Infrastructure"
             "Promptly.Sdk.DotNet"
             "Promptly.Server"
@@ -309,6 +310,28 @@ jobs:
             throw "Unexpected scoped Application coverage cohort: $($applicationDifference | Out-String)"
           }
 
+          $domainPackage = $packages |
+            Where-Object { $_.name -eq "Promptly.Domain" } |
+            Select-Object -First 1
+          $actualDomainSources = @(
+            $domainPackage.classes.class |
+              ForEach-Object { Get-RepositoryRelativePath ([string]$_.filename) }
+          ) | Sort-Object -Unique
+          $domainSourceDifference = Compare-Object `
+            @("Promptly.Domain/ValueObjects/Expectations.cs") `
+            $actualDomainSources
+          $actualDomainClasses = @(
+            $domainPackage.classes.class |
+              Where-Object { ([string]$_.name) -notmatch '/' } |
+              ForEach-Object { [string]$_.name }
+          ) | Sort-Object -Unique
+          $domainClassDifference = Compare-Object `
+            @("Promptly.Domain.ValueObjects.ExpectationResult") `
+            $actualDomainClasses
+          if ($domainSourceDifference -or $domainClassDifference) {
+            throw "Unexpected scoped Domain outcome coverage cohort"
+          }
+
           $expectedCliSources = @(
             "Promptly.Cli/RunExitCodePolicy.cs"
           ) | Sort-Object
@@ -379,7 +402,7 @@ jobs:
             throw "Unexpected scoped Server coverage cohort: $($serverDifference | Out-String)"
           }
 
-          foreach ($package in @($applicationPackage, $cliPackage, $infrastructurePackage, $sdkPackage, $serverPackage)) {
+          foreach ($package in @($applicationPackage, $cliPackage, $domainPackage, $infrastructurePackage, $sdkPackage, $serverPackage)) {
             $lineRate = [double]::Parse(
               [string]$package.'line-rate',
               [Globalization.CultureInfo]::InvariantCulture)
@@ -410,6 +433,7 @@ jobs:
             "Promptly.Application.Services.EndpointService"
             "Promptly.Application.Services.EnvironmentService"
             "Promptly.Application.Services.ExpectationDslValidator"
+            "Promptly.Application.Services.ExpectationValidationException"
             "Promptly.Application.Services.ExpectationEvaluator"
             "Promptly.Application.Interfaces.ExpectationValidationIssue"
             "Promptly.Application.Interfaces.ExpectationValidationResult"

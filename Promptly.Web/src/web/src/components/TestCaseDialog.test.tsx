@@ -34,6 +34,27 @@ const persistedTest: TestCase = {
   createdAt: '2026-08-12T00:00:00Z',
 };
 
+const makeInputAtByteLimit = () => {
+  const emptyMessages = Array.from({ length: 16 }, (_, index) => ({
+    role: index === 0 ? 'user' : 'assistant',
+    content: '',
+  }));
+  const emptyJson = JSON.stringify({ messages: emptyMessages });
+  const targetBytes = 262_144 - 1;
+  const emptyBytes = new TextEncoder().encode(emptyJson).byteLength;
+  const contentBytes = targetBytes - emptyBytes;
+  const baseLength = Math.floor(contentBytes / emptyMessages.length);
+  const remainder = contentBytes % emptyMessages.length;
+  const messages = emptyMessages.map((message, index) => ({
+    ...message,
+    content: 'x'.repeat(baseLength + (index < remainder ? 1 : 0)),
+  }));
+  const inputSpecJson = JSON.stringify({ messages });
+
+  expect(new TextEncoder().encode(inputSpecJson).byteLength).toBe(targetBytes);
+  return { inputSpecJson, messages };
+};
+
 const renderDialog = (
   testCase: TestCase | null = null,
   onClose = vi.fn(),
@@ -93,26 +114,23 @@ describe('TestCaseDialog', () => {
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
 
-  it('rejects an oversized serialized input aggregate before calling the API', async () => {
-    renderDialog();
-    fillMinimumDraft();
-    const oversizedMessage = 'x'.repeat(16_384);
-    for (let index = 2; index <= 17; index += 1) {
-      fireEvent.click(screen.getByRole('button', { name: 'Add message' }));
-      fireEvent.change(screen.getByLabelText(`Content for message ${index}`), {
-        target: { value: oversizedMessage },
-      });
-    }
+  it('rejects a serialized input aggregate that crosses the byte cap on edit', async () => {
+    const boundaryInput = makeInputAtByteLimit();
+    renderDialog({ ...persistedTest, inputSpecJson: boundaryInput.inputSpecJson });
+    const editedContent = `${boundaryInput.messages[15]?.content ?? ''}xx`;
+    fireEvent.change(screen.getByLabelText('Content for message 16'), {
+      target: { value: editedContent },
+    });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    expect(testsApi.create).not.toHaveBeenCalled();
+    expect(testsApi.update).not.toHaveBeenCalled();
     expect(await screen.findByText('Fix the highlighted input fields before saving this test.'))
       .toBeInTheDocument();
     expect(screen.getByText(
       'input: Input JSON exceeds the 262144-byte limit.',
     )).toBeInTheDocument();
-    expect(screen.getByLabelText('Content for message 17')).toHaveValue(oversizedMessage);
+    expect(screen.getByLabelText('Content for message 16')).toHaveValue(editedContent);
   });
 
   it('authors all eight expectation types and preserves ordered message edits', async () => {
@@ -134,7 +152,7 @@ describe('TestCaseDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move message 2 up' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move message 1 down' }));
     fireEvent.click(within(screen.getByRole('group', { name: 'Message 1' }))
-      .getByRole('button', { name: 'Delete message' }));
+      .getByRole('button', { name: 'Delete message 1' }));
 
     const addExpectation = (label: string) => {
       fireEvent.click(screen.getByRole('button', { name: 'Add expectation' }));

@@ -23,6 +23,7 @@ import {
   assertDirectFixtureBoundary,
   assertProviderEvidence,
 } from './phase-verification.mjs';
+import { createSignalRegistration } from './signal-registration.mjs';
 
 const {
   artifactsRoot: baseArtifactsRoot,
@@ -94,13 +95,12 @@ const projectImages = [
 const processAbortController = new AbortController();
 let receivedSignal = null;
 let logWriteError = null;
-
-for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => {
+const signalRegistration = createSignalRegistration({
+  onSignal: (signal) => {
     receivedSignal = signal;
     processAbortController.abort(new Error(`Received ${signal}`));
-  });
-}
+  },
+});
 
 const redact = (value) => {
   let redacted = value;
@@ -1407,4 +1407,5 @@ if (errors.length > 0) {
   throw new Error(`Composed E2E verification failed:\n${errors.join('\n')}`);
 }
 
+signalRegistration.dispose();
 console.log(`Composed E2E verification passed; artifacts: ${artifactsRoot}`);

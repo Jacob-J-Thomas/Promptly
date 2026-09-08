@@ -278,28 +278,28 @@ for (const [signal, exitCode, otherSignal] of [
     const finishedFile = path.join(directory, 'finished');
     const childPidFile = path.join(directory, 'child-pid');
     const resultFile = path.join(directory, 'result.json');
+    const aggregateMarker = path.join(directory, 'upload-safe.json');
     const childScript = path.join(directory, 'child.mjs');
     const lifecycleModule = new URL('./orchestrator-lifecycle.mjs', import.meta.url).href;
+    const signalModule = new URL('./signal-registration.mjs', import.meta.url).href;
+    const phaseVerificationModule = new URL('./phase-verification.mjs', import.meta.url).href;
     await writeFile(childScript, [
       "import { existsSync, writeFileSync } from 'node:fs';",
+      "import { createSignalRegistration } from '" + signalModule + "';",
       '',
-      'let handled = false;',
-      'const stop = (code) => {',
-      '  if (handled) return;',
-      '  handled = true;',
+      'const stop = (signal) => {',
       "  writeFileSync(process.env.PROMPTLY_TEST_CLEANUP_FILE, 'started');",
       '  const finishWhenReleased = () => {',
       '    if (existsSync(process.env.PROMPTLY_TEST_RELEASE_FILE)) {',
       "      writeFileSync(process.env.PROMPTLY_TEST_FINISHED_FILE, 'finished');",
-      '      process.exit(code);',
+      "      process.exit(signal === 'SIGINT' ? 130 : 143);",
       '      return;',
       '    }',
       '    setTimeout(finishWhenReleased, 10);',
       '  };',
       '  finishWhenReleased();',
       '};',
-      "process.on('SIGINT', () => stop(130));",
-      "process.on('SIGTERM', () => stop(143));",
+      'createSignalRegistration({ onSignal: stop });',
       'writeFileSync(process.env.PROMPTLY_TEST_CHILD_PID_FILE, String(process.pid));',
       "writeFileSync(process.env.PROMPTLY_TEST_READY_FILE, 'ready');",
       'setInterval(() => {}, 1_000);',
@@ -307,12 +307,16 @@ for (const [signal, exitCode, otherSignal] of [
     const parentSource = [
       "import { writeFileSync } from 'node:fs';",
       "const { createPhaseProcessRunner } = await import(process.env.PROMPTLY_TEST_LIFECYCLE_MODULE);",
+      "const { evaluatePhaseReceipts } = await import(process.env.PROMPTLY_TEST_PHASE_VERIFICATION_MODULE);",
       'const runner = createPhaseProcessRunner({',
       '  phaseRunner: process.env.PROMPTLY_TEST_CHILD_SCRIPT,',
       '  repositoryRoot: process.env.PROMPTLY_TEST_ROOT,',
       '});',
       "const result = await runner.runPhase('proxy');",
-      'writeFileSync(process.env.PROMPTLY_TEST_RESULT_FILE, JSON.stringify(result));',
+      "const next = await runner.runPhase('direct');",
+      "const aggregate = evaluatePhaseReceipts([{ phase: 'proxy', exitCode: result.code, receipt: { schema: 1, phase: 'proxy', status: 'failed', uploadIsSafe: false, cleanupCommandPassed: false, cleanupVerificationPassed: false } }], ['proxy', 'direct'], runner.cancellationSignal);",
+      "if (aggregate.passed) writeFileSync(process.env.PROMPTLY_TEST_AGGREGATE_MARKER, '{\"schema\":1,\"safe\":true}');",
+      'writeFileSync(process.env.PROMPTLY_TEST_RESULT_FILE, JSON.stringify({ result, next, aggregate }));',
       'runner.dispose();',
     ].join('\n');
 
@@ -327,8 +331,10 @@ for (const [signal, exitCode, otherSignal] of [
       PROMPTLY_TEST_FINISHED_FILE: finishedFile,
       PROMPTLY_TEST_CHILD_PID_FILE: childPidFile,
       PROMPTLY_TEST_RESULT_FILE: resultFile,
+      PROMPTLY_TEST_AGGREGATE_MARKER: aggregateMarker,
       PROMPTLY_TEST_CHILD_SCRIPT: childScript,
       PROMPTLY_TEST_LIFECYCLE_MODULE: lifecycleModule,
+      PROMPTLY_TEST_PHASE_VERIFICATION_MODULE: phaseVerificationModule,
       PROMPTLY_TEST_ROOT: directory,
     };
 
@@ -337,6 +343,7 @@ for (const [signal, exitCode, otherSignal] of [
         cwd: directory,
         env: parentEnvironment,
         stdio: ['ignore', 'ignore', 'pipe'],
+        detached: true,
       });
       parent.stderr.setEncoding('utf8');
       parent.stderr.on('data', (chunk) => { parentStderr += chunk; });
@@ -346,10 +353,10 @@ for (const [signal, exitCode, otherSignal] of [
       assert.equal(processIsAlive(parent.pid), true);
       assert.equal(processIsAlive(childPid), true);
 
-      process.kill(parent.pid, signal);
+      process.kill(-parent.pid, signal);
       await waitForFile(cleanupFile);
-      process.kill(parent.pid, signal);
-      process.kill(parent.pid, otherSignal);
+      process.kill(-parent.pid, signal);
+      process.kill(-parent.pid, otherSignal);
       await delay(30);
       assert.equal(processIsAlive(parent.pid), true, 'repeated OS signals must not kill the orchestrator');
       assert.equal(await readFile(finishedFile, 'utf8').catch(() => null), null);
@@ -358,10 +365,14 @@ for (const [signal, exitCode, otherSignal] of [
       const [parentExit, parentSignal] = await parentClosed;
       assert.equal(parentExit, 0, parentStderr);
       assert.equal(parentSignal, null, parentStderr);
-      const result = JSON.parse(await readFile(resultFile, 'utf8'));
+      const { result, next, aggregate } = JSON.parse(await readFile(resultFile, 'utf8'));
       assert.equal(result.cancelled, true);
       assert.equal(result.signal, signal);
       assert.equal(result.code, exitCode);
+      assert.equal(next.started, false);
+      assert.equal(next.cancelled, true);
+      assert.equal(aggregate.passed, false);
+      assert.equal(await readFile(aggregateMarker, 'utf8').catch(() => null), null);
       assert.equal(await readFile(finishedFile, 'utf8'), 'finished');
       assert.equal(processIsAlive(childPid), false, 'the child must be reaped after cleanup');
     } finally {

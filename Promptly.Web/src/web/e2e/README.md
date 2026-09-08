@@ -45,6 +45,9 @@ value. SIGINT and SIGTERM are forwarded once to the active phase child; the
 orchestrator waits for the child's cleanup and receipt before aggregating, does
 not start another phase after cancellation, and never writes an upload marker
 for a cancelled aggregate.
+The phase runner uses persistent idempotent signal handlers, so a process-group
+delivery received by both the parent and child cannot interrupt the child's
+cleanup path.
 
 Artifacts are written under `artifacts/test-results/e2e`:
 

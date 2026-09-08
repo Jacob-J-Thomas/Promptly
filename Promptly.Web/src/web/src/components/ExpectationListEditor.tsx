@@ -196,7 +196,9 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
       <FormControlLabel
         control={(
           <Checkbox
-            checked={expectation[field] === true}
+            // Omitted optional flags use the evaluator's defaults while the
+            // caller's object remains untouched until the control is edited.
+            checked={expectation[field] === undefined || expectation[field] === true}
             onChange={(event) => updateExpectation(index, { [field]: event.target.checked })}
             inputProps={{ 'aria-label': label }}
           />
@@ -212,7 +214,9 @@ export const ExpectationListEditor: React.FC<ExpectationListEditorProps> = ({
   const renderScoreField = (expectation: ExpectationDraft, index: number) => {
     const error = fieldIssue(issues, index, 'min_score');
     const rawValue = expectation.min_score;
-    const value = typeof rawValue === 'number' ? rawValue : typeof rawValue === 'string' ? rawValue : '';
+    const value = rawValue === undefined
+      ? 0.8
+      : typeof rawValue === 'number' ? rawValue : typeof rawValue === 'string' ? rawValue : '';
     return (
       <TextField
         fullWidth

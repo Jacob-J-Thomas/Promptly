@@ -473,15 +473,20 @@ public sealed class ExpectationEvaluatorTests
     }
 
     [Fact]
-    public async Task EvaluateAsync_converts_unexpected_failures_to_an_error_result()
+    public async Task EvaluateAsync_converts_post_validation_failures_to_safe_error_results()
     {
-        var result = await _evaluator.EvaluateAsync(
-            new Dictionary<string, object> { ["type"] = new ThrowingValue() },
-            Trace("hello"));
+        var evaluator = PermissiveEvaluator(new ThrowingRegexMatcher());
+        var result = await evaluator.EvaluateAsync(
+            Expectation("regex_match", ("pattern", "a")),
+            Trace("hello"),
+            TestContext.Current.CancellationToken);
 
         Assert.False(result.Passed);
         Assert.Equal("error", result.ExpectationType);
-        Assert.Contains("Evaluation error", result.Reason, StringComparison.Ordinal);
+        Assert.Equal("evaluation_error", result.ErrorCode);
+        Assert.Equal("Error", result.Status);
+        Assert.Equal("Evaluation failed", result.Reason);
+        Assert.DoesNotContain("sensitive matcher details", result.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -764,9 +769,21 @@ public sealed class ExpectationEvaluatorTests
         };
     }
 
-    private sealed class ThrowingValue
+    private sealed class ThrowingRegexMatcher : IBoundedRegexMatcher
     {
-        public override string ToString() => throw new InvalidOperationException("boom");
+        public BoundedRegexMatchResult FindMatches(
+            string pattern,
+            string input,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive matcher details");
+
+        public BoundedRegexCandidateResult FindMatchingCandidates(
+            string pattern,
+            IReadOnlyList<string> candidates,
+            bool caseInsensitive = false,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive matcher details");
     }
 
     private sealed class StubRegexMatcher : IBoundedRegexMatcher

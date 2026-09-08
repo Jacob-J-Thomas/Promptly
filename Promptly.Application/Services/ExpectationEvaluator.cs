@@ -108,7 +108,8 @@ public class ExpectationEvaluator : IExpectationEvaluator
                 ExpectationType = "error",
                 Passed = false,
                 Score = 0.0,
-                Reason = $"Evaluation error: {ex.Message}"
+                ErrorCode = "evaluation_error",
+                Reason = "Evaluation failed"
             };
         }
     }

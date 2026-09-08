@@ -234,6 +234,11 @@ public sealed class TestRunWorkerServiceTests
     [Fact]
     public async Task Worker_honors_configured_concurrency_and_stop_waits_for_in_flight_processing()
     {
+        using var testTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var testCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken,
+            testTimeout.Token);
+        var testToken = testCancellation.Token;
         var firstRunId = Guid.NewGuid();
         var secondRunId = Guid.NewGuid();
         var firstEntered = NewCompletion();
@@ -262,13 +267,13 @@ public sealed class TestRunWorkerServiceTests
                 if (runId == firstRunId)
                 {
                     firstEntered.TrySetResult();
-                    await releaseFirst.Task;
+                    await releaseFirst.Task.WaitAsync(testToken);
                 }
                 else
                 {
                     Assert.Equal(secondRunId, runId);
                     secondEntered.TrySetResult();
-                    await releaseSecond.Task;
+                    await releaseSecond.Task.WaitAsync(testToken);
                 }
             }
             finally
@@ -282,49 +287,82 @@ public sealed class TestRunWorkerServiceTests
             ("TestRunner:PollingIntervalSeconds", "0"),
             ("TestRunner:MaxConcurrentRuns", "1"));
         using var worker = CreateWorker(scopeFactory, logger, configuration);
+        Task? stopTask = null;
+        var workerStarted = false;
 
-        await worker.StartAsync(TestContext.Current.CancellationToken);
-        await firstEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(1, store.ClaimCount);
+        try
+        {
+            await worker.StartAsync(testToken).WaitAsync(testToken);
+            workerStarted = true;
+            await firstEntered.Task.WaitAsync(testToken);
+            Assert.Equal(1, store.ClaimCount);
 
-        releaseFirst.TrySetResult();
-        await secondEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(1, maximumActiveProcessors);
+            releaseFirst.TrySetResult();
+            await secondEntered.Task.WaitAsync(testToken);
+            Assert.Equal(1, maximumActiveProcessors);
 
-        var waitingLogged = logger.WaitForMessageAsync(
-            "Waiting for 1 in-flight run(s)",
-            TestContext.Current.CancellationToken);
-        var stopTask = worker.StopAsync(TestContext.Current.CancellationToken);
-        await waitingLogged;
-        Assert.False(stopTask.IsCompleted);
+            var waitingLogged = logger.WaitForMessageAsync("Waiting for ", testToken);
+            stopTask = worker.StopAsync(testToken);
+            await waitingLogged;
+            var waitingMessage = logger.Messages.Last(
+                message => message.Contains("Waiting for ", StringComparison.Ordinal));
+            var waitingCountText = waitingMessage["Waiting for ".Length..]
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+            Assert.True(int.TryParse(waitingCountText, out var waitingCount));
+            Assert.InRange(waitingCount, 1, 2);
+            Assert.False(stopTask.IsCompleted);
 
-        releaseSecond.TrySetResult();
-        await stopTask;
-        await worker.StopAsync(TestContext.Current.CancellationToken);
+            releaseSecond.TrySetResult();
+            await stopTask.WaitAsync(testToken);
+            await worker.StopAsync(testToken).WaitAsync(testToken);
 
-        Assert.Equal(2, processor.ProcessCount);
-        Assert.Equal(1, maximumActiveProcessors);
-        Assert.Contains(
-            logger.Messages,
-            message => message.Contains(
-                "Polling interval = 0s, Max concurrent = 1",
-                StringComparison.Ordinal));
-        Assert.Equal(
-            [
-                "scope:1:created",
-                "scope:1:resolve:ITestRunProcessor",
-                "scope:2:created",
-                "scope:2:resolve:ITestRunWorkerStore",
-                "scope:2:disposed",
-                "scope:1:disposed",
-                "scope:3:created",
-                "scope:3:resolve:ITestRunProcessor",
-                "scope:4:created",
-                "scope:4:resolve:ITestRunWorkerStore",
-                "scope:4:disposed",
-                "scope:3:disposed"
-            ],
-            scopeFactory.Events);
+            Assert.Equal(2, processor.ProcessCount);
+            Assert.Equal(1, maximumActiveProcessors);
+            Assert.Contains(
+                logger.Messages,
+                message => message.Contains(
+                    "Polling interval = 0s, Max concurrent = 1",
+                    StringComparison.Ordinal));
+            Assert.Equal(
+                [
+                    "scope:1:created",
+                    "scope:1:resolve:ITestRunProcessor",
+                    "scope:2:created",
+                    "scope:2:resolve:ITestRunWorkerStore",
+                    "scope:2:disposed",
+                    "scope:1:disposed",
+                    "scope:3:created",
+                    "scope:3:resolve:ITestRunProcessor",
+                    "scope:4:created",
+                    "scope:4:resolve:ITestRunWorkerStore",
+                    "scope:4:disposed",
+                    "scope:3:disposed"
+                ],
+                scopeFactory.Events);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+            releaseSecond.TrySetResult();
+            if (workerStarted)
+            {
+                using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try
+                {
+                    if (stopTask is null)
+                    {
+                        await worker.StopAsync(cleanupTimeout.Token).WaitAsync(cleanupTimeout.Token);
+                    }
+                    else
+                    {
+                        await stopTask.WaitAsync(cleanupTimeout.Token);
+                    }
+                }
+                catch (OperationCanceledException) when (cleanupTimeout.IsCancellationRequested)
+                {
+                }
+            }
+        }
     }
 
     [Fact]

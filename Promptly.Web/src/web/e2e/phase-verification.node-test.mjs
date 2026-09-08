@@ -117,6 +117,20 @@ test('requires one distinct provider POST for each direct authoring scenario', (
   ), /exactly 2 provider POSTs/);
 });
 
+test('rejects a different valid UUID from the expected direct scenarios', () => {
+  const expectedCorrelations = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  assert.throws(() => assertProviderEvidence(
+    [
+      providerRecord(1, expectedCorrelations[0]),
+      providerRecord(2, '33333333-3333-4333-8333-333333333333'),
+    ],
+    { phase: 'direct', expectedCorrelations },
+  ), /unexpected request/);
+});
+
 test('rejects a malformed UUID in the expected direct correlation inventory', () => {
   const expectedCorrelations = [
     '11111111-1111-4111-8111-111111111111',

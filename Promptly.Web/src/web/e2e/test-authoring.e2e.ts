@@ -235,6 +235,9 @@ test('test authoring persists through Form and YAML and runs through the real st
   await openTestMenu(page);
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const editDialog = page.getByRole('dialog', { name: 'Edit Test Case' });
+  await expect.poll(() => editDialog.evaluate((dialog) => (
+    dialog.scrollWidth <= dialog.clientWidth
+  ))).toBe(true);
   await expect(editDialog.getByLabel('Text for expectation 1')).toHaveValue('Deterministically accurate');
   await expect(editDialog.getByLabel('Text for expectation 2')).toHaveValue('forbidden');
   await expect(editDialog.getByLabel('Pattern for expectation 3')).toHaveValue('Deterministically');
